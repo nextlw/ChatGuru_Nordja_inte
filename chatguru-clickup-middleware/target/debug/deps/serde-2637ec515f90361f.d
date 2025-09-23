@@ -1,0 +1,12 @@
+/Users/williamduarte/NCMproduto/integrações/ChatGuru_Nordja_inte/chatguru-clickup-middleware/target/debug/deps/serde-2637ec515f90361f.d: /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.226/src/lib.rs /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.226/src/integer128.rs /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.226/src/private/mod.rs /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.226/src/private/de.rs /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.226/src/private/ser.rs /Users/williamduarte/NCMproduto/integrações/ChatGuru_Nordja_inte/chatguru-clickup-middleware/target/debug/build/serde-6bdaaa8053adeb6c/out/private.rs
+
+/Users/williamduarte/NCMproduto/integrações/ChatGuru_Nordja_inte/chatguru-clickup-middleware/target/debug/deps/libserde-2637ec515f90361f.rmeta: /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.226/src/lib.rs /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.226/src/integer128.rs /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.226/src/private/mod.rs /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.226/src/private/de.rs /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.226/src/private/ser.rs /Users/williamduarte/NCMproduto/integrações/ChatGuru_Nordja_inte/chatguru-clickup-middleware/target/debug/build/serde-6bdaaa8053adeb6c/out/private.rs
+
+/Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.226/src/lib.rs:
+/Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.226/src/integer128.rs:
+/Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.226/src/private/mod.rs:
+/Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.226/src/private/de.rs:
+/Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.226/src/private/ser.rs:
+/Users/williamduarte/NCMproduto/integrações/ChatGuru_Nordja_inte/chatguru-clickup-middleware/target/debug/build/serde-6bdaaa8053adeb6c/out/private.rs:
+
+# env-dep:OUT_DIR=/Users/williamduarte/NCMproduto/integrações/ChatGuru_Nordja_inte/chatguru-clickup-middleware/target/debug/build/serde-6bdaaa8053adeb6c/out

@@ -1,0 +1,16 @@
+[server]
+host = "0.0.0.0"
+port = 8080
+
+[clickup]
+base_url = "https://api.clickup.com/api/v2"
+token = ""
+list_id = ""
+
+[gcp]
+project_id = "buzzlightear"
+topic_name = "chatguru-events"
+subscription_name = "chatguru-events-subscription"
+
+[chatguru]
+validate_signature = false

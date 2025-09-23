@@ -1,0 +1,10 @@
+/Users/williamduarte/NCMproduto/integrações/ChatGuru_Nordja_inte/chatguru-clickup-middleware/target/release/deps/time_core-6ab862729007930c.d: /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.6/src/lib.rs /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.6/src/convert.rs /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.6/src/hint.rs /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.6/src/util.rs
+
+/Users/williamduarte/NCMproduto/integrações/ChatGuru_Nordja_inte/chatguru-clickup-middleware/target/release/deps/libtime_core-6ab862729007930c.rlib: /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.6/src/lib.rs /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.6/src/convert.rs /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.6/src/hint.rs /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.6/src/util.rs
+
+/Users/williamduarte/NCMproduto/integrações/ChatGuru_Nordja_inte/chatguru-clickup-middleware/target/release/deps/libtime_core-6ab862729007930c.rmeta: /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.6/src/lib.rs /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.6/src/convert.rs /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.6/src/hint.rs /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.6/src/util.rs
+
+/Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.6/src/lib.rs:
+/Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.6/src/convert.rs:
+/Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.6/src/hint.rs:
+/Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/time-core-0.1.6/src/util.rs:

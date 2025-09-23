@@ -1,0 +1,8 @@
+/Users/williamduarte/NCMproduto/integrações/ChatGuru_Nordja_inte/chatguru-clickup-middleware/target/debug/deps/google_cloud_gax-22bc30b623212457.d: /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/google-cloud-gax-0.17.0/src/lib.rs /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/google-cloud-gax-0.17.0/src/conn.rs /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/google-cloud-gax-0.17.0/src/grpc.rs /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/google-cloud-gax-0.17.0/src/retry.rs
+
+/Users/williamduarte/NCMproduto/integrações/ChatGuru_Nordja_inte/chatguru-clickup-middleware/target/debug/deps/libgoogle_cloud_gax-22bc30b623212457.rmeta: /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/google-cloud-gax-0.17.0/src/lib.rs /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/google-cloud-gax-0.17.0/src/conn.rs /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/google-cloud-gax-0.17.0/src/grpc.rs /Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/google-cloud-gax-0.17.0/src/retry.rs
+
+/Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/google-cloud-gax-0.17.0/src/lib.rs:
+/Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/google-cloud-gax-0.17.0/src/conn.rs:
+/Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/google-cloud-gax-0.17.0/src/grpc.rs:
+/Users/williamduarte/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/google-cloud-gax-0.17.0/src/retry.rs:
