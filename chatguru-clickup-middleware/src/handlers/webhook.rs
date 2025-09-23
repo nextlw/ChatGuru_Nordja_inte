@@ -62,8 +62,9 @@ pub async fn handle_chatguru_webhook(
 async fn process_chatguru_event(state: &AppState, event: &ChatGuruEvent) -> AppResult<Value> {
     let mut response = json!({
         "success": true,
-        "event_id": event.id.clone().unwrap_or_else(|| format!("generated_{}", chrono::Utc::now().timestamp_millis())),
-        "event_type": event.event_type,
+        "campanha_id": event.campanha_id.clone(),
+        "campanha_nome": event.campanha_nome.clone(),
+        "nome_contato": event.nome.clone(),
         "processed_at": chrono::Utc::now().to_rfc3339()
     });
 
@@ -159,45 +160,20 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 }
 
 fn validate_chatguru_event(event: &ChatGuruEvent) -> AppResult<()> {
-    if event.event_type.is_empty() {
-        log_validation_error("event_type", "Event type cannot be empty");
-        return Err(AppError::ValidationError("Event type cannot be empty".to_string()));
+    // Validar campos obrigatórios do ChatGuru
+    if event.campanha_id.is_empty() {
+        log_validation_error("campanha_id", "Campaign ID cannot be empty");
+        return Err(AppError::ValidationError("Campaign ID cannot be empty".to_string()));
     }
 
-    // Event ID agora é opcional - não validamos mais
-    // Se não foi fornecido, será gerado automaticamente
-
-    if event.timestamp.is_empty() {
-        log_validation_error("timestamp", "Timestamp cannot be empty");
-        return Err(AppError::ValidationError("Timestamp cannot be empty".to_string()));
+    if event.nome.is_empty() {
+        log_validation_error("nome", "Contact name cannot be empty");
+        return Err(AppError::ValidationError("Contact name cannot be empty".to_string()));
     }
 
-    // Validar formato do timestamp
-    if chrono::DateTime::parse_from_rfc3339(&event.timestamp).is_err() {
-        log_validation_error("timestamp", "Invalid timestamp format");
-        return Err(AppError::ValidationError("Invalid timestamp format (expected RFC3339)".to_string()));
-    }
-
-    // Validar se o evento não é muito antigo (mais de 5 minutos)
-    if let Ok(event_time) = chrono::DateTime::parse_from_rfc3339(&event.timestamp) {
-        let now = chrono::Utc::now();
-        let age = now.signed_duration_since(event_time.with_timezone(&chrono::Utc));
-        
-        if age.num_minutes() > 5 {
-            log_validation_error("timestamp", &format!("Event is too old: {} minutes", age.num_minutes()));
-            return Err(AppError::ValidationError(format!("Event is too old: {} minutes", age.num_minutes())));
-        }
-    }
-
-    // Validar que temos dados no evento (seja no campo data, annotation ou contact)
-    let has_data = !event.data.is_null() &&
-                   !(event.data.is_object() && event.data.as_object().unwrap().is_empty());
-    let has_annotation = event.annotation.is_some();
-    let has_contact = event.contact.is_some();
-    
-    if !has_data && !has_annotation && !has_contact {
-        log_validation_error("data", "Event must contain data, annotation, or contact information");
-        return Err(AppError::ValidationError("Event must contain data, annotation, or contact information".to_string()));
+    if event.celular.is_empty() {
+        log_validation_error("celular", "Phone number cannot be empty");
+        return Err(AppError::ValidationError("Phone number cannot be empty".to_string()));
     }
 
     Ok(())

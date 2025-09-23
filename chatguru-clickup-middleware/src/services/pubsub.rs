@@ -51,12 +51,11 @@ impl PubSubService {
         let message_json = serde_json::to_string(&message_data)?;
         
         let mut attributes = HashMap::new();
-        attributes.insert("event_type".to_string(), event.event_type.clone());
-        attributes.insert("timestamp".to_string(), event.timestamp.clone());
-        
-        if let Some(ref source) = event.source {
-            attributes.insert("source".to_string(), source.clone());
-        }
+        attributes.insert("campanha_id".to_string(), event.campanha_id.clone());
+        attributes.insert("campanha_nome".to_string(), event.campanha_nome.clone());
+        attributes.insert("origem".to_string(), event.origem.clone());
+        attributes.insert("nome_contato".to_string(), event.nome.clone());
+        attributes.insert("timestamp".to_string(), chrono::Utc::now().to_rfc3339());
 
         if clickup_task.is_some() {
             attributes.insert("has_clickup_task".to_string(), "true".to_string());
@@ -176,8 +175,9 @@ impl PubSubService {
         // Adicionar informações de processamento
         message["processing_info"] = json!({
             "event_size_bytes": serde_json::to_string(event)?.len(),
-            "has_metadata": event.metadata.is_some(),
-            "data_fields_count": event.data.as_object().map(|o| o.len()).unwrap_or(0)
+            "has_custom_fields": !event.campos_personalizados.is_empty(),
+            "custom_fields_count": event.campos_personalizados.len(),
+            "tags_count": event.tags.len()
         });
 
         Ok(message)
