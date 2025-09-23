@@ -14,7 +14,7 @@ pub async fn health_check() -> Json<Value> {
     
     Json(json!({
         "status": "healthy",
-        "service": "suri-clickup-middleware",
+        "service": "chatguru-clickup-middleware",
         "version": env!("CARGO_PKG_VERSION"),
         "timestamp": chrono::Utc::now().to_rfc3339()
     }))
@@ -36,7 +36,7 @@ pub async fn ready_check(State(state): State<Arc<AppState>>) -> Result<Json<Valu
     
     let response = json!({
         "ready": overall_ready,
-        "service": "suri-clickup-middleware",
+        "service": "chatguru-clickup-middleware",
         "version": env!("CARGO_PKG_VERSION"),
         "timestamp": chrono::Utc::now().to_rfc3339(),
         "dependencies": {
@@ -92,7 +92,7 @@ pub async fn status_check(State(state): State<Arc<AppState>>) -> Json<Value> {
     pubsub_info["note"] = json!("PubSub will be configured later");
     
     Json(json!({
-        "service": "suri-clickup-middleware",
+        "service": "chatguru-clickup-middleware",
         "version": env!("CARGO_PKG_VERSION"),
         "timestamp": chrono::Utc::now().to_rfc3339(),
         "uptime": "N/A", // TODO: Implementar tracking de uptime
@@ -102,7 +102,7 @@ pub async fn status_check(State(state): State<Arc<AppState>>) -> Json<Value> {
             "pubsub": pubsub_info
         },
         "configuration": {
-            "suri": {
+            "chatguru": {
                 "webhook_secret_configured": state.settings.chatguru.webhook_secret.is_some()
             }
         }

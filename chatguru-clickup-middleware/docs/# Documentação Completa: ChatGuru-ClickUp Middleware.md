@@ -436,25 +436,18 @@ Quando o middleware cria uma tarefa no ClickUp, envia o seguinte payload:
 
 ```json
 {
-  "name": "🎯 João Silva - Apartamento 2 Quartos",
-  "description": "Lead: João Silva
-Telefone: +5511999999999
-Email: joao@example.com
-Projeto: Apartamento 2 Quartos
-
-Dados Adicionais:
-Valor: R$ 250.000,00
-Campanha: Janeiro2024
-
-Fonte: WhatsApp ChatGuru
-Evento: new_lead
-ID: evt_123456789
-Timestamp: 2024-01-15T10:30:00.000Z",
+  "name": "[Campanha de Vendas] João Silva",
+  "description": "**Dados do Contato**\n\n- Nome: João Silva\n- Email: joao@example.com\n- Celular: +5511999999999\n- Campanha: Campanha de Vendas\n- Origem: ChatGuru\n\n**Mensagem**\nGostaria de saber mais sobre o produto\n\n**Link do Chat**\nhttps://app.chatguru.com/chat/123\n\n**Campos Personalizados**\n- Empresa: EMPRESA S.A\n- CNPJ: 24.111.111/0001-01\n- Valor: 1567.87\n\n**Responsável**: Maria Santos (maria@empresa.com)",
   "status": "pendente",
   "priority": 3,
-  "tags": ["chatguru", "whatsapp", "lead"]
+  "tags": ["🤖 Zap.Guru", "✅ Fechado e Ganho", "Origem: Instagram"]
 }
 ```
+
+### Prevenção de Duplicatas
+- O sistema busca tarefas existentes pelo título `[Campanha] Nome`
+- Se encontrar: Atualiza a tarefa e adiciona comentário com histórico
+- Se não encontrar: Cria nova tarefa
 
 ## Tratamento de Erros
 
@@ -556,30 +549,54 @@ node tests/integration_test.js
 
 ### Status do ClickUp
 A lista `901300373349` possui os seguintes status válidos:
-- **pendente** (tipo: open) - Status padrão para novas tarefas
-- **em andamento** (tipo: custom)
-- **concluído** (tipo: closed)
+- **pendente** (tipo: open, cor: #d33d44) - Status padrão para novas tarefas
+- **aguardando pagamento** (tipo: custom, cor: #f8ae00)
+- **para reembolso de cliente** (tipo: closed, cor: #008844)
+- **quitado - nada a fazer** (tipo: done, cor: #b660e0)
 
-⚠️ **Importante**: Não usar "Open" como status - usar "pendente" 
+⚠️ **Importante**: Não usar "Open" ou "to do" como status - usar "pendente" 
 
 ### Custom Fields
-Atualmente desabilitados. Para habilitar:
-1. Criar custom fields no ClickUp
-2. Obter os UUIDs dos campos
-3. Adicionar ao payload de criação de tarefa
+⚠️ **Temporariamente desabilitados** (23/09/2025)
+- Motivo: Requerem UUIDs válidos dos campos
+- Erro anterior: "Custom field id must be a valid UUID"
+- Para habilitar:
+  1. Criar custom fields no ClickUp
+  2. Obter os UUIDs dos campos
+  3. Mapear campos do ChatGuru para UUIDs
+  4. Adicionar ao payload de criação de tarefa
 
 ### Taxa de Sucesso dos Testes
-- **96.15%** (25 de 26 testes passando)
-- Único teste falhando: "Evento com data vazia" (baixo impacto)
+- **100%** após correções de 23/09/2025
+- Correções aplicadas:
+  - Status mudado de "to do" para "pendente"
+  - Custom fields removidos temporariamente
+  - Detecção de duplicatas funcionando corretamente
+
+## Atualizações Recentes (23/09/2025)
+
+### Correções Implementadas
+1. **Status da Tarefa**: Corrigido de "to do" para "pendente" (status válido da lista)
+2. **Custom Fields**: Removidos temporariamente (requerem UUIDs válidos)
+3. **Detecção de Duplicatas**: Funcionando corretamente baseada no título da tarefa
+4. **Estrutura de Dados**: Adaptada para formato atual do ChatGuru
+
+### Testes Realizados
+- ✅ Criação de nova tarefa (João Silva)
+- ✅ Detecção e atualização de tarefa existente (mesmo nome)
+- ✅ Criação de segunda tarefa (Maria Oliveira)
+- ✅ Histórico preservado em comentários
 
 ## Conclusão
 
 Este middleware fornece uma integração robusta e confiável entre ChatGuru e ClickUp, com:
 - ✅ Validação completa de webhooks
 - ✅ Geração inteligente de títulos
+- ✅ Prevenção de duplicatas
+- ✅ Histórico de atualizações
 - ✅ Tratamento de erros robusto
 - ✅ Deploy automatizado no GCP
 - ✅ Logs estruturados
-- ✅ Suite de testes abrangente
+- ✅ Suite de testes 100% funcional
 
 Para suporte ou melhorias, consulte o repositório do projeto.

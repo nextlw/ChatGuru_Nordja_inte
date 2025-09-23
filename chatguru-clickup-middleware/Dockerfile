@@ -55,7 +55,7 @@ EXPOSE 8080
 
 # Set environment variables
 ENV RUST_LOG=info
-ENV PORT=8080
+# PORT é automaticamente definido pelo Cloud Run (não definir aqui)
 
 # Health check removed for Cloud Run (uses its own health checking)
 
