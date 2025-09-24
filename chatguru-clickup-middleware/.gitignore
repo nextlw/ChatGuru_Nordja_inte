@@ -45,3 +45,6 @@ verify-*.sh
 # Node modules
 node_modules/
 scripts/node_modules/
+
+# Temporary HTML files with potential secrets
+api_webclinic.html
