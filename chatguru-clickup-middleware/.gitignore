@@ -1,0 +1,43 @@
+# Build artifacts
+/target/
+**/*.rs.bk
+*.pdb
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+server.log
+app.log
+downloaded-logs*.json
+logs/
+*.log.*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Test files
+test-*.js
+verify-*.sh
+
+# Temporary files
+*.tmp
+*.temp
+/tmp/
+/temp/

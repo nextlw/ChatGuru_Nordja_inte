@@ -82,6 +82,77 @@ impl ChatGuruApiService {
         states.get(chat_id).map(|s| (s.annotation.clone(), s.timestamp))
     }
     
+    /// Adicionar anotação ao chat no ChatGuru
+    /// Usa a API do ChatGuru para adicionar uma nota/anotação visível no chat
+    pub async fn add_annotation(
+        &self,
+        chat_id: &str,
+        phone_number: &str, 
+        annotation_text: &str
+    ) -> AppResult<()> {
+        // Construir URL com parâmetros
+        let phone_id_value = "62558780e2923cc4705beee1"; // Phone ID padrão do sistema
+        
+        // Limpar número de telefone (remover caracteres especiais)
+        let clean_phone = phone_number.chars()
+            .filter(|c| c.is_numeric())
+            .collect::<String>();
+        
+        // Construir URL com query params para adicionar anotação
+        let base_url = if self.api_endpoint.ends_with("/api/v1") {
+            self.api_endpoint.clone()
+        } else if self.api_endpoint.ends_with("/") {
+            format!("{}api/v1", self.api_endpoint)
+        } else {
+            format!("{}/api/v1", self.api_endpoint)
+        };
+        
+        let url = format!(
+            "{}?key={}&account_id={}&phone_id={}&action=note_add&note_text={}&chat_number={}",
+            base_url,
+            self.api_token,
+            self.account_id,
+            phone_id_value,
+            urlencoding::encode(annotation_text),
+            clean_phone
+        );
+        
+        log_info(&format!(
+            "Adding annotation to chat {}: {}",
+            chat_id, annotation_text
+        ));
+        
+        // Fazer a requisição POST
+        let response = self.client
+            .post(&url)
+            .send()
+            .await
+            .map_err(|e| AppError::InternalError(format!("Failed to add annotation: {}", e)))?;
+        
+        let status = response.status();
+        let response_text = response.text().await.unwrap_or_default();
+        
+        if status.is_success() || status.as_u16() == 201 {
+            log_info(&format!(
+                "Annotation added successfully to chat {}: {}",
+                chat_id, response_text
+            ));
+            
+            // Logar como o legado
+            log_info(&format!("Mensagem enviada com sucesso: {}", annotation_text));
+            
+            Ok(())
+        } else {
+            log_error(&format!(
+                "Failed to add annotation. Status: {}, Response: {}",
+                status, response_text
+            ));
+            
+            // Não falhar o processo se a anotação falhar
+            Ok(())
+        }
+    }
+    
     /// Enviar mensagem de confirmação "Ok" via WhatsApp
     /// Usa a API do ChatGuru para enviar mensagem direta ao usuário
     pub async fn send_confirmation_message(

@@ -357,9 +357,33 @@ impl MessageScheduler {
                 }
             }
             
-            // 3. Log como o legado
-            log_info(&format!("Mensagem enviada com sucesso: {}", annotation));
-            log_info(&format!("Resposta enviada e estado atualizado para {}", conversation.nome));
+            // 3. Enviar anotação de volta ao ChatGuru (COMO O LEGADO FAZ!)
+            if let Some(chatguru_token) = &settings.chatguru.api_token {
+                let api_endpoint = settings.chatguru.api_endpoint.as_ref()
+                    .map(|s| s.clone())
+                    .unwrap_or_else(|| "https://s15.chatguru.app".to_string());
+                let account_id = settings.chatguru.account_id.as_ref()
+                    .map(|s| s.clone())
+                    .unwrap_or_else(|| "625584ce6fdcb7bda7d94aa8".to_string());
+                
+                let chatguru_service = ChatGuruApiService::new(
+                    chatguru_token.clone(),
+                    api_endpoint,
+                    account_id
+                );
+                
+                // Adicionar anotação ao chat
+                if let Err(e) = chatguru_service.add_annotation(
+                    &conversation.chat_id,
+                    &conversation.phone,
+                    &annotation
+                ).await {
+                    log_error(&format!("Failed to add annotation: {}", e));
+                } else {
+                    log_info(&format!("Mensagem enviada com sucesso: {}", annotation));
+                    log_info(&format!("Resposta enviada e estado atualizado para {}", conversation.nome));
+                }
+            }
         }
     }
     
