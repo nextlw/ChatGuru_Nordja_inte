@@ -1,5 +1,4 @@
 use tracing::{info, warn, error, debug};
-use serde_json::Value;
 
 pub fn log_request_received(endpoint: &str, method: &str) {
     info!("Request received: {} {}", method, endpoint);
@@ -10,11 +9,6 @@ pub fn log_request_processed(endpoint: &str, status: u16, duration_ms: u64) {
           endpoint, status, duration_ms);
 }
 
-pub fn log_chatguru_event(event_type: &str, payload: &Value) {
-    info!("ChatGuru event received: {} - Payload size: {} bytes", 
-          event_type, serde_json::to_string(payload).unwrap_or_default().len());
-    debug!("ChatGuru event payload: {}", serde_json::to_string_pretty(payload).unwrap_or_default());
-}
 
 pub fn log_clickup_task_created(task_id: &str, title: &str) {
     info!("ClickUp task created successfully: {} - Title: {}", task_id, title);

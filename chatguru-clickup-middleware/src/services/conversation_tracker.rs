@@ -1,3 +1,5 @@
+#[allow(dead_code)]
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -13,6 +15,7 @@ pub struct ConversationTracker {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ConversationHistory {
     pub phone: String,
     pub last_task_id: Option<String>,
@@ -23,6 +26,7 @@ pub struct ConversationHistory {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct MessageRecord {
     pub timestamp: DateTime<Utc>,
     pub content: String,
@@ -209,6 +213,7 @@ impl ConversationTracker {
     }
     
     /// Limpa conversas antigas
+    #[allow(dead_code)]
     pub async fn cleanup_old_conversations(&self) {
         let mut conversations = self.conversations.write().await;
         let now = Utc::now();

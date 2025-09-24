@@ -1,0 +1,782 @@
+last_updated: '2025-09-24T16:58:16.940Z'
+clickup_list_id: '901300373349'
+fields:
+  Caso fornecedor seja outro, descreva aqui:
+    id: 095f5de1-e920-4cd0-99df-7158bf9264bb
+    type: text
+    name: Caso fornecedor seja outro, descreva aqui
+  'Qual a forma de pagamento? ':
+    id: 0be83b7d-d65d-4a56-8b72-77755e9ca1dc
+    type: drop_down
+    name: 'Qual a forma de pagamento? '
+  Outro cliente:
+    id: 0cd1d510-1906-4484-ba66-06ccdd659768
+    type: short_text
+    name: Outro cliente
+  Cliente Solicitante:
+    id: 0ed63eec-1c50-4190-91c1-59b4b17557f6
+    type: drop_down
+    name: Cliente Solicitante
+  CNPJ / CPF DO FORNECEDOR:
+    id: 0f5fb5e1-0ac3-49e0-9a98-3abb47ee0bcc
+    type: short_text
+    name: CNPJ / CPF DO FORNECEDOR
+  Data da Compra:
+    id: 1372513c-56c0-42dd-826f-a2c92edd624b
+    type: date
+    name: Data da Compra
+  Por que não vamos cobrar do cliente?:
+    id: 2b934bfb-4254-4351-93dc-e07b8216cc3b
+    type: text
+    name: Por que não vamos cobrar do cliente?
+  Fornecedor (nome da loja / transporte / motoboy que realizou o serviço):
+    id: 30096df4-cc95-476a-9c00-d755912aca4d
+    type: drop_down
+    name: Fornecedor (nome da loja / transporte / motoboy que realizou o serviço)
+  Sub Categoria:
+    id: 330d635b-b0be-4a4a-960c-3ff974d597c3
+    type: drop_down
+    name: Sub Categoria
+  Pagamento será feito pela Voilà HOJE? (PIX / Transferência apenas!):
+    id: 35e3d18b-bdc9-4d69-9eb3-aeb7cf3414ca
+    type: drop_down
+    name: Pagamento será feito pela Voilà HOJE? (PIX / Transferência apenas!)
+  Status Back Office:
+    id: 6abbfe79-f80b-4b55-9b4b-9bd7f65b6458
+    type: drop_down
+    name: Status Back Office
+  'Vamos cobrar o cliente? ':
+    id: b32be0ae-2da6-466f-8e9c-7641b01c9aaa
+    type: drop_down
+    name: 'Vamos cobrar o cliente? '
+  Progresso da tarefa:
+    id: b5c761b9-3a1f-49ad-be5c-311120d7cb58
+    type: drop_down
+    name: Progresso da tarefa
+  Solicitante (Info_1):
+    id: bf24f5b1-e909-473e-b864-75bf22edf67e
+    type: short_text
+    name: Solicitante (Info_1)
+  Valor da compra / pagamento:
+    id: bff2f683-93a1-4095-ae3a-ed43025363cd
+    type: currency
+    name: Valor da compra / pagamento
+  Categoria:
+    id: c19b4f95-1ff7-4966-b201-02905d33cec6
+    type: drop_down
+    name: Categoria
+  Data Cliente:
+    id: c2cc8d59-763c-41ca-a5f1-448644b3c79b
+    type: date
+    name: Data Cliente
+  Nr do PIX  OU Banco / Agencia e conta Bancária (nesse caso precisa de CPF ou CNPJ).:
+    id: d92a1e0d-f937-4be6-84f2-1aed74c16a3a
+    type: short_text
+    name: Nr do PIX  OU Banco / Agencia e conta Bancária (nesse caso precisa de CPF ou CNPJ).
+  Houve emissão de NF em nome da Voilà? Se sim, anexe aqui.:
+    id: e3f26a2f-de52-41bc-b8a8-80a8b88af7f2
+    type: attachment
+    name: Houve emissão de NF em nome da Voilà? Se sim, anexe aqui.
+  Tipo de Atividade:
+    id: f1259ffb-7be8-49ff-92f8-5ff9882888d0
+    type: drop_down
+    name: Tipo de Atividade
+dropdown_options:
+  'Qual a forma de pagamento? ':
+    - id: 71282b43-3bb1-4fff-8bc6-419da615e0e4
+      name: Adriano (pago toda sexta-feira)
+      color: '#0231E8'
+    - id: b41ae526-99d9-4698-a5ff-893ab39bb82e
+      name: VISA - Voilà
+      color: '#FF7FAB'
+    - id: fde56dec-81dd-4d8c-962d-ae15cc6720e6
+      name: MASTER - Voilà
+      color: '#81B1FF'
+    - id: 7a8ae278-ee9b-43ea-a6d8-9fadafbea137
+      name: PIX
+      color: '#2ecd6f'
+    - id: 5be27d90-e1d1-40de-a0ec-2c654e0961ee
+      name: Vamos reembolsar no final do mês (Igor)
+      color: '#800000'
+    - id: 0186336d-5cc3-4ec4-af48-a2658b8700e1
+      name: Faturado Uber
+      color: '#f9d900'
+    - id: 36c1a3cd-4454-4406-abb1-f9d56466078b
+      name: Lalamove
+      color: '#E65100'
+  Cliente Solicitante:
+    - id: de78687a-b713-4313-ba72-704174cda7da
+      name: Adriana Tavares
+      color: null
+    - id: 7d5aa97f-a27d-49c9-b5ee-556b588a73f2
+      name: Agencia Fluida (Bia Guedes)
+      color: null
+    - id: 8d5d53b9-b74f-4bbc-a8ad-f6ad2c178942
+      name: Aline Bak
+      color: null
+    - id: 5b206f2a-cd59-4b9d-b785-1521b62c894e
+      name: Alejandra Aguilera
+      color: null
+    - id: bcc5fda2-1bab-419a-ad94-c6ee32707707
+      name: Alessandra Cardim
+      color: null
+    - id: 600227bb-3d52-405d-b5a8-68f0de3aa94a
+      name: Alex Ikonomopoulos
+      color: null
+    - id: 67cfc4a6-8992-4247-b2c1-e1a415968da4
+      name: Aline Hochman
+      color: null
+    - id: e8d59699-9cb8-4c98-bb59-38179b53034f
+      name: Anarella
+      color: null
+    - id: 7d260e98-b23f-4f6f-b1ee-bed76e4720fe
+      name: Amadeu e Rebeka
+      color: null
+    - id: a68db787-eb0c-43a3-a649-ce03cad23df0
+      name: Amure Pinho
+      color: null
+    - id: 2b1d97dd-a2d4-4c90-90c2-c8392af03b00
+      name: Ana Flavia Carrilo
+      color: null
+    - id: 4dafba51-6b09-40eb-a2af-0e17f3eeb868
+      name: Ana Flavia Tavares
+      color: null
+    - id: 4ff97f3a-d6b6-4ec0-b25b-0704e33a02fe
+      name: Anabela Cunha
+      color: null
+    - id: 1e9f79c0-7b94-4da7-91c2-2945a3ef29c4
+      name: Andrew Reiter
+      color: null
+    - id: 0bf8e67f-a673-4645-b724-21e51cd1f832
+      name: 'Arcelia / Jorel '
+      color: null
+    - id: 71fbe4d2-4585-48ae-a1e2-b25c497d511c
+      name: Arnaldo e Claudia
+      color: null
+    - id: 4a485872-0be5-4870-a500-427f012c8ee2
+      name: Breno / Leticia
+      color: null
+    - id: 0e9cfa68-dddb-4d9a-a117-b21e740344ab
+      name: Caio Dalfonso
+      color: null
+    - id: 9beb4800-ee7a-4e61-b700-ec9ab9a6184a
+      name: Carlos Secron
+      color: null
+    - id: 2e569229-8f89-4b79-a1fe-54c5e6aaae12
+      name: Carolina Oliveira
+      color: null
+    - id: 5615ac61-6956-4c86-a311-d6591c73a0b3
+      name: Carolina Tavares
+      color: null
+    - id: 4f24b242-9c79-4b57-8e72-76b09b04358c
+      name: Claudia Leicand
+      color: null
+    - id: 41609996-132c-42f4-b090-8fedace8c09e
+      name: Claudio Franco / Gabriela
+      color: null
+    - id: da2e8dc1-c519-4d39-9970-8fd17df5d152
+      name: Dadá Ribeiro
+      color: null
+    - id: 7d672947-a234-4d7a-b5bf-e02fe48c2452
+      name: Daniel Rodrigues
+      color: null
+    - id: 81bce028-b080-4a15-bc44-72195fe51403
+      name: Daniela Sitzer
+      color: null
+    - id: c066fdc9-fb76-48a0-8a23-b23d335d9256
+      name: David Politanski
+      color: null
+    - id: 81385f03-aa3e-4e40-b6af-cdb426f73aea
+      name: Edwilson Coutinho
+      color: null
+    - id: 1e191518-3508-425b-b3bc-7cc7ff2f969e
+      name: Eduardo / Isabella Vasconcellos
+      color: null
+    - id: b26c2bbe-8f1d-4eb7-8f96-62123a51f40b
+      name: Eloa Figaro
+      color: null
+    - id: 00e5ad55-8c3a-4ea8-a21c-ad9c08b66e55
+      name: Emylia Chamorro
+      color: null
+    - id: 688bdab9-1c7e-435e-81cd-d255cf7cf53a
+      name: Fabio Tieopolo
+      color: null
+    - id: c6642cf2-6723-45fe-ae6d-974ce1c5815a
+      name: Fabricio Ramos
+      color: null
+    - id: 153ff4fd-0919-410f-b445-384667fc0bae
+      name: Fernanda Cruz
+      color: null
+    - id: 8b34a94b-8e12-4e11-b6ba-0c50d185664d
+      name: Fernanda Munhoz
+      color: null
+    - id: 9276e8a1-a9ad-4c10-8a00-392726646ccf
+      name: Gabriel Benarros
+      color: null
+    - id: 687c1796-573a-425f-ae58-f27b52537cd9
+      name: Gabriela Avian
+      color: null
+    - id: 4c88769e-4a81-4122-b52a-0875362df30e
+      name: Guilherme Lopes
+      color: null
+    - id: 0d631381-9347-43d0-a94a-02deb34b938b
+      name: Henrique Caldeira
+      color: null
+    - id: c5c5fa4e-aef7-4506-87c5-fe7e42da1056
+      name: Hernandes Sousa
+      color: null
+    - id: 37f134c9-b3f5-4947-aa8d-9e18b3c42aa8
+      name: Hugo / NSA Global
+      color: null
+    - id: ca5e4f88-f1d8-4880-a915-39fa848f9ede
+      name: Humberto Siuves
+      color: null
+    - id: 49284e0c-843e-42e9-ac6f-50a3338d189a
+      name: Hurá BIttencourt
+      color: null
+    - id: f2f968b2-f47d-41a4-a1d5-ccd50eb53124
+      name: Ian Gallina
+      color: null
+    - id: cd95ab7a-4dc1-4664-bccb-6fdecabd9f20
+      name: Iara Biderman
+      color: null
+    - id: 508df88a-baab-4da7-9df9-f7d1ce0b4385
+      name: Igor Marchesini
+      color: null
+    - id: 649e8429-f80c-4ee5-bdda-fb145dc43ed7
+      name: Ille Cosmeticos
+      color: null
+    - id: 2d1c1c37-2609-46ba-a52e-b72761ed1a14
+      name: Jack Sarvary/Elena Mariscal
+      color: null
+    - id: 90a87a69-67ee-4636-95a7-02dab3ed2e44
+      name: Jessica Coral
+      color: null
+    - id: 1a6ccf83-3247-4b96-ad06-f4cb71ef4c24
+      name: José Muritiba
+      color: null
+    - id: 02159429-0da8-4cde-900c-6420f3085d48
+      name: Julia Cambiaghi e Guilherme Bittencourt
+      color: null
+    - id: 48852090-1c35-417c-95d7-7fd4d5973dc4
+      name: Leo Laranjeira
+      color: null
+    - id: 2210f404-fff4-407a-8f31-6f63f690544b
+      name: Laynara Coelho
+      color: null
+    - id: 575b5f67-b2f3-4643-ac34-59ebd5923b83
+      name: Lilian Palacios
+      color: null
+    - id: b4867ab9-6f1e-45dd-8abe-a46420bafdd8
+      name: Lucas Riani
+      color: null
+    - id: ef01b0d7-c086-4ab7-8dec-77b4bbe689ab
+      name: Luciana Stracieri
+      color: null
+    - id: 682250ea-fa76-482c-8486-a4cc8a4bfdab
+      name: Luft Shoes
+      color: null
+    - id: e117d4bd-8f13-43b2-b41d-e8ab11137e58
+      name: Marcelo Caldas e Maria Gabriela
+      color: null
+    - id: 788a961d-6ec6-4f0a-a231-5b52a1568853
+      name: Marcos Bissi
+      color: null
+    - id: ecdcbf97-11bd-4728-889b-997e7c2fecfa
+      name: Margareth Darezzo
+      color: null
+    - id: d67a370b-ea91-4db8-a08e-d4a1db2463dd
+      name: Mariana e David
+      color: null
+    - id: 4739b67f-faeb-47cd-b607-2d33d07f6e82
+      name: Mariana Paixão
+      color: null
+    - id: 87191322-d57d-4d4f-b567-5604e16a34eb
+      name: Mauricio Carvalho
+      color: null
+    - id: f8a40a4e-a80f-4ddc-add1-7bdb9ec9de48
+      name: Matheus Benarrós
+      color: null
+    - id: 0958417a-6b3c-46a2-b6d7-0354c015680c
+      name: Namari
+      color: null
+    - id: 54dd8cb0-5fde-4081-ab88-f2213e7d0aee
+      name: Nicholas Vasconcellos
+      color: null
+    - id: b942c518-5174-4833-9af6-25045228f00f
+      name: Nino Vashakidze
+      color: null
+    - id: 98e14439-d7c0-4ff7-9b93-31eaff0e695a
+      name: Padaria dos Bebês
+      color: null
+    - id: 30894690-ca70-4112-8c87-0c98929b9ffb
+      name: Paula Mejia Giraldo
+      color: null
+    - id: 57790c7d-c166-4ae4-8771-7d375bb800ee
+      name: Peter Fernandez
+      color: null
+    - id: abeb7e51-2ca7-4322-9a91-4a3b7f4ebd85
+      name: Raphaela Spielberg
+      color: null
+    - id: 26c43b1b-143a-4719-9aca-280769a946aa
+      name: Renata Michaelis
+      color: null
+    - id: 546f6bb6-a322-4b03-8514-9c3cdef2c0b2
+      name: Renarto Casseb
+      color: null
+    - id: fda6a369-93b7-4492-95d3-c389d1cfa130
+      name: Ricardo Sitzer
+      color: null
+    - id: 142d17ef-ce0b-426f-b9ab-ea38edd87b7f
+      name: Roberto Cerdeira
+      color: null
+    - id: 5bfe93c7-073d-4260-8fe6-a02e0aa35e54
+      name: Samir Kerbage
+      color: null
+    - id: 50d69abb-01e9-4de5-8a7d-0e3b6ef765e7
+      name: Sandra / Grupo Casa
+      color: null
+    - id: a8d6b4de-3d1b-4e62-af2e-aa1470eaa526
+      name: Stephanie Zalcman
+      color: null
+    - id: aefb6314-37fe-4e3d-9be6-b275b979e58b
+      name: Silvia Villas Boas
+      color: null
+    - id: 7ad2e6e3-4016-4aeb-86dc-bce5448909f1
+      name: Suco Seguros
+      color: null
+    - id: a799f7a4-c618-4392-af77-7b803252a92d
+      name: Thiago Martins (Rei do Pitaco)
+      color: null
+    - id: ca8796c9-b0af-456a-a61b-629467c86400
+      name: Tivita
+      color: null
+    - id: bcee668b-a4f9-49dd-947c-681667564ba6
+      name: Vicente Carrari
+      color: null
+    - id: b0dc12f8-8e88-4f28-a2c1-0cf71f67eea9
+      name: 'Yoanna '
+      color: null
+    - id: 00c03954-0762-47e2-b9d3-8e2e61481904
+      name: Nordja
+      color: null
+    - id: 6d87e92c-8482-46e2-9bfc-825e9674eee6
+      name: Rafael Marcondes (Rei do Pitaco)
+      color: null
+    - id: 45ac5079-6af3-4445-987d-0d24a32ce64c
+      name: Victor Carbone
+      color: null
+    - id: 979c47eb-d7fb-4f24-9f94-ed795e4af360
+      name: Kiko Augusto (Rei do Pitaco)
+      color: null
+  Fornecedor (nome da loja / transporte / motoboy que realizou o serviço):
+    - id: 7feb8447-0df8-4dd7-990a-2257cf4e9931
+      name: Adriano Motoboy (Siqueira Express)
+      color: '#3397dd'
+    - id: cca8a402-d413-4b69-b908-e4790f675696
+      name: Igor Navarro
+      color: '#e50000'
+    - id: 6ed370b6-2e41-407e-bb1b-a781fd71e782
+      name: Lalamove
+      color: '#ff7800'
+    - id: 91ffde99-656f-434d-b7a1-fb36092baacb
+      name: Uber
+      color: '#EA80FC'
+    - id: 758ef7b9-f9c3-4167-8ca3-c2ac81268031
+      name: Loggi
+      color: '#3082B7'
+    - id: 3c9b8021-fc94-4f5c-b57a-c9d27bb6257e
+      name: 'Outra '
+      color: '#f9d900'
+  Sub Categoria:
+    - id: 49901a4b-2d46-429b-92a0-ee242982b030
+      name: ADM
+      color: '#1bbc9c'
+    - id: b01412cd-81c6-4495-9020-6f4258b23648
+      name: Consultas/Exames/Vacinas/Manicure/Pet, etc
+      color: '#f900ea'
+    - id: 0e2fa54b-048f-4d12-a0fe-2db16b030ed5
+      name: Atividades Financeiras / Reembolso Corporativo
+      color: '#FF7FAB'
+    - id: 4a106fb2-a2ee-4720-8715-9dd453bf2a44
+      name: Atendimento ao Cliente
+      color: '#FF7FAB'
+    - id: 43004146-90d4-451e-83ea-b60dd6d0a609
+      name: Contratação de Fornecedores / Contratação de Funcionários
+      color: '#FF7FAB'
+    - id: 54236c7a-6db4-4af2-bfde-0e8a6289e5bd
+      name: Gestão e Planilhas e Emails
+      color: '#ff7fab'
+    - id: e4d81fdb-9a33-4f99-bd17-83cb7a74fe70
+      name: Fup Documentos  / Assinatura Digital
+      color: '#FF7FAB'
+    - id: 04b876ec-1ca4-4233-b839-e2264b7a95c5
+      name: Gestão de Agenda / Gestão de Estoque
+      color: '#FF7FAB'
+    - id: 6071b824-b481-4892-92ee-3d1f814649d3
+      name: Social Media
+      color: '#ff7fab'
+    - id: 614d3333-aabb-4e30-8a86-589054f5ab24
+      name: Planilhas/Organização Pessoal/Pet
+      color: '#bf55ec'
+    - id: 0c6e7635-5a8f-4f73-bfa3-34e26ff00290
+      name: 'Carro - Assuntos em Geral '
+      color: '#c377e0'
+    - id: f01b11d2-6432-46e7-bc1b-516588cdd853
+      name: Encerramento Abertura  de CC / INSS / Empresa (CNPJ)
+      color: '#c377e0'
+    - id: 05596bd0-9de2-4dec-9370-d8f5cdae27ca
+      name: Internet/Telefone/Tv Assinatura /Gas/Luz/Assistencia Tecnica Casa / Consertos em Geral
+      color: '#c377e0'
+    - id: 21974571-9c82-402a-99e7-bbcecf7c400e
+      name: Vender/Comprar - Imóvel/ Móveis / Itens de Casa
+      color: '#c377e0'
+    - id: e047dcd7-1ad6-47d7-8634-5d0bd6ed3262
+      name: Presentes / Farmácia / Mercado / Marmitas / Fotos / Flores / Papelaria / Uniforme Escolar
+      color: '#02BCD4'
+    - id: 6db21c46-d85f-46b9-aae7-a474c6509b19
+      name: 'Contratos / Procurações / Assinaturas '
+      color: '#0079bf'
+    - id: 7a2c53d5-85de-42a3-a426-e2fffdeb17ee
+      name: Passaporte/ RG / CNH / Imóvel / Seguros (Carro/Casa) / Traduções / Vistos (outros)
+      color: '#0079bf'
+    - id: e7e75619-6665-48be-9235-ae08e58ffd84
+      name: 'Visto Americano (Renovação) '
+      color: '#0079bf'
+    - id: 3c190f43-db38-4a3a-8ec3-f091e7bb0144
+      name: Visto Americano (1 visto)
+      color: '#0079bf'
+    - id: 3129358e-7982-4ada-8ccf-7f26abb82a13
+      name: Cidadania Europeia
+      color: '#0079bf'
+    - id: afda5c39-56c0-491a-90c7-566914c56074
+      name: Cartório - Reconhecimento de Firma / Apostilamentos
+      color: '#0079bf'
+    - id: 72aa3197-f089-4231-914c-3f11e413ce6b
+      name: 'Comprar / renovar Certificado Digital '
+      color: '#0079bf'
+    - id: 8d727072-fb3b-4c2e-af0b-d8350c33b781
+      name: Carteira de vacinação (BR/Internacional)
+      color: '#0079bf'
+    - id: 1e74885f-70cd-4f12-9566-4e4027a753bc
+      name: Escola / Faculdade / Academia (fazer matricula / checar grade / atividades extra curriculares)
+      color: null
+    - id: bbb0a731-1b9e-4f1f-aa80-80de1d3cf808
+      name: Evento Externo - Passagem / Hospedagem / Carro / Estrutura
+      color: null
+    - id: f9d66477-6a02-448f-9573-7af7588bf489
+      name: Offsites (Espaço de eventos)
+      color: null
+    - id: d94bd26e-f58e-45c8-a8ec-8f1a4d4bdaca
+      name: Offsites - contratar transfer (Van)
+      color: null
+    - id: 38e4b91f-36f6-49cf-8a21-d0a32848f623
+      name: Organizar Coffee Breaks / Catering
+      color: null
+    - id: dcd2a33b-86b4-4d83-91c3-ef3f9de253ea
+      name: 'ESocial (mensal / férias / 13 salario) / VT '
+      color: null
+    - id: 8fa58985-e4a8-443a-b12d-bbbd429a684f
+      name: 'Reserva de Restaurantes / Bar '
+      color: '#f2d600'
+    - id: bf2f1612-8e98-47fb-869a-ca143057b891
+      name: Organização de Festa Adulto
+      color: '#bf55ec'
+    - id: 1c6fe740-f11a-458c-9734-063a39d7ccf0
+      name: Organização de Festa Infantil
+      color: '#bf55ec'
+    - id: 5a4393b9-da8d-4c99-a49f-70413f124d8b
+      name: ' Ingressos de Shows, Exposições, Eventos, Festas e Passeios'
+      color: '#f2d600'
+    - id: dfc2ce4f-568a-4397-874f-62c0bdc1e81a
+      name: Motoboy / Uber / Loggi / Correios
+      color: '#2ecd6f'
+    - id: 7f4fca82-98d9-4c12-8bd8-0f345eb38375
+      name: 'Mudança '
+      color: '#2ecd6f'
+    - id: 02c0dcac-6dc9-483b-913b-2db13825ee09
+      name: Controle de Gastos Mensais (Planilhas)
+      color: '#ffab4a'
+    - id: 1e9fd3b8-1bb8-4099-8861-99b49c3d1636
+      name: 'Debito Automatico / Pagamentos Pendentes / 2 Via '
+      color: '#ffab4a'
+    - id: dba6761c-83a7-4cd7-bfba-f550d03e2f06
+      name: Pagamentos via Friday / envio de codigo de barras
+      color: '#ffab4a'
+    - id: 3646d3bb-83ae-41c2-8f73-941050b702e8
+      name: Guias DARF (INSS) / MEI para pagamento
+      color: '#ffab4a'
+    - id: ea8b81c8-b16e-49e5-a83d-14048b055466
+      name: 'Envio de NF para reembolso '
+      color: '#eb5a46'
+    - id: 9566759c-0586-434a-9ad0-75633845c60d
+      name: Solicitar Autorização / Contestação / Extrato para IR / Previa de Reembolso / Reclamação
+      color: '#eb5a46'
+    - id: 59b2dad2-ec38-4a09-8810-005363808045
+      name: Contratação / Cancelamento
+      color: '#eb5a46'
+    - id: 4209e07f-f1d9-4f1c-96ac-f8652af7b47e
+      name: 'Documentação (Regras Sanitárias / vistos / vacinas) '
+      color: '#61bd4f'
+    - id: 99edd737-20d9-4daa-8a80-40e52ad3c269
+      name: 'Extravio de Malas e Bagagens '
+      color: '#61bd4f'
+    - id: e75df77b-7837-4917-b328-cfb5235deb77
+      name: 'Fazer Check in Voos '
+      color: '#61bd4f'
+    - id: 9d9e22c3-9372-42db-81b2-c3112421a567
+      name: Hospedagem - Pesquisar / Cotar / Comprar / Cancelar
+      color: '#61bd4f'
+    - id: 3ddb02a9-8013-4d4e-b1c3-1e54a76a06eb
+      name: 'Passagem de ônibus - Pesquisar / Cotar / Comprar '
+      color: '#61bd4f'
+    - id: 9ff811a8-b543-489d-a90f-03220dbaccad
+      name: Passagem Aérea - Pesquisar / Cotar / Comprar / Cancelar
+      color: '#61bd4f'
+    - id: 99be807b-6188-4dc9-9bf8-aae51b06631b
+      name: Programa de Milhagem / Cadastros e Alteração de Cadastros CIAS
+      color: '#61bd4f'
+    - id: 563deaa4-e717-4da4-a0b1-7066a40b9986
+      name: 'Seguro Viagem - Pesquisar / Cotar / Comprar '
+      color: '#61bd4f'
+    - id: f63a9631-d786-4564-88af-05f03b3ff54d
+      name: Transfer / Aluguel / Reserva de Carro / Cancelar
+      color: '#61bd4f'
+    - id: 6ff3b9ab-c3ae-493b-94eb-b69797b7b29a
+      name: Pesquisas / Orçamento
+      color: null
+    - id: 9cf26e9e-b3c4-4b09-9dc7-f00699db84ad
+      name: Emissão de NF
+      color: '#12777B'
+    - id: 829e9da1-e7f1-465c-988d-856ddecf3aa1
+      name: Controle Interno
+      color: '#FFC31F'
+    - id: cfcc3734-81f6-4d16-92db-6b51ee95986c
+      name: IR/IR MEI
+      color: '#6403D5'
+  Pagamento será feito pela Voilà HOJE? (PIX / Transferência apenas!):
+    - id: 597429fd-ad95-4b63-8c53-1a09116225b6
+      name: PAGO
+      color: '#2ecd6f'
+    - id: c0e0669f-821a-40a9-a773-22c78d222809
+      name: PAGAR SEXTA
+      color: '#e50000'
+  Status Back Office:
+    - id: db544ddc-a07d-47a9-8737-40c6be25f7ec
+      name: Concluido
+      color: '#61bd4f'
+    - id: dd9d1b1b-f842-4777-984d-c05ec6b6d8a3
+      name: Aguardando instruções
+      color: '#eb5a46'
+    - id: 7889796f-033f-450d-97dd-6fee2a44f1b1
+      name: Executar
+      color: '#0231E8'
+  'Vamos cobrar o cliente? ':
+    - id: 3edc14da-1d3e-4639-a198-a88c7a90e2dc
+      name: Sim
+      color: '#2ecd6f'
+    - id: 7c151774-32a6-4778-a52e-3300e7054740
+      name: Não
+      color: '#e50000'
+  Progresso da tarefa:
+    - id: 405cc1fb-19b3-4946-9b13-8116e5fd6090
+      name: Tarefa Criada
+      color: '#0079bf'
+    - id: 47255506-6190-4a05-91ca-9f30b60ccd42
+      name: Adiado
+      color: '#FF7FAB'
+    - id: 101816ec-3f06-429c-b919-c51a036bfdf3
+      name: Aguardando aprovação do cliente
+      color: '#f2d600'
+    - id: 3d643a01-4528-4be3-84b1-1060c0f2d999
+      name: Aguardando retorno do fornecedor
+      color: '#EA80FC'
+    - id: a01ba1c9-3c17-4178-ae4a-ff3ff4f9db91
+      name: Aguardando retorno do cliente
+      color: '#9b59b6'
+    - id: 1a8ed6b8-690f-47ef-9214-b32b34538ec7
+      name: Aguardando pagamento
+      color: '#0231E8'
+    - id: 32ea7ef6-9601-45f3-b929-f0355421c194
+      name: Em andamento
+      color: '#81B1FF'
+    - id: c55c2279-72cd-4ce2-af91-72249de5b343
+      name: Em orçamento
+      color: '#ff7800'
+    - id: bdc74f59-9cd4-4e33-a058-e59542150654
+      name: 'Follow Up '
+      color: '#800000'
+    - id: 2123aefe-d2b8-4374-8e07-cd95a35e419f
+      name: Reembolso em Análise
+      color: '#AF7E2E'
+    - id: 2e1d5a8a-0e94-4f89-b120-a9a6f6a3cc1d
+      name: Oculto para Cliente
+      color: '#e50000'
+    - id: d6c48b61-baa9-46fe-a2f6-113c7d031a36
+      name: Tarefa Concluída
+      color: '#2ecd6f'
+  Categoria:
+    - id: a4a4e85c-4eb5-44f9-9175-f98594da5c70
+      name: ADM
+      color: '#1bbc9c'
+    - id: 25102629-2b4f-4863-847c-51468e484362
+      name: Agendamento
+      color: '#f900ea'
+    - id: e0b80ba4-3b2e-47bc-9a4f-d322045d6480
+      name: Atividades Corporativas
+      color: '#FF7FAB'
+    - id: 1b61be8c-6eaa-4cd4-959d-c48f8b78ca3e
+      name: Atividades Pessoais / Domésticas
+      color: '#c377e0'
+    - id: 4799d43c-c1be-478e-ad58-57fdfa95b292
+      name: Compras
+      color: '#02BCD4'
+    - id: e57a5888-49cc-4c3a-bb4a-e235c8c58e77
+      name: Documentos
+      color: '#0079bf'
+    - id: 4232858d-8052-4fdc-9ce9-628f34d2edac
+      name: Educação / Academia
+      color: '#f900ea'
+    - id: 07c402c5-1f0b-4ae0-b38e-349553fd7a81
+      name: Eventos Corporativos
+      color: '#667684'
+    - id: 2330057a-4637-4ab6-94af-905904fdb4c3
+      name: Gestão de Funcionário Doméstico
+      color: '#81B1FF'
+    - id: 68539506-88b8-44a5-bac8-0496b2b2f148
+      name: Lazer
+      color: '#f2d600'
+    - id: a1bc0a49-2a9d-41bd-a91a-a6b4af7677b4
+      name: Logistica
+      color: '#2ecd6f'
+    - id: 18c2c60c-cfd0-4ef8-af94-7542bd9b30c7
+      name: Festas / Reuniões / Recepção
+      color: '#c377e0'
+    - id: b64b9e80-fdc4-4521-8975-45e335109b49
+      name: Pagamentos
+      color: '#ffab4a'
+    - id: 80ad2f74-7074-4eec-a4fd-8fc92d0fe0dd
+      name: Pesquisas / Orçamentos
+      color: '#FF7FAB'
+    - id: 3496ba6c-9d7f-495f-951e-6017dfdbd55b
+      name: Plano de Saúde
+      color: '#eb5a46'
+    - id: 2aebf637-6534-487c-bd35-d28334c8d685
+      name: Viagens
+      color: '#61bd4f'
+    - id: 16c6bd8a-05d3-4bd7-8fd9-906ef3e8b2d2
+      name: Controle Interno
+      color: null
+    - id: 8fb02d9e-febb-4b94-9e9e-cdf8ff5a28fb
+      name: Compra/Venda/Aluguel
+      color: '#E65100'
+    - id: 14f5e8ff-df26-4446-8766-053e47c001c7
+      name: Atividade Baixada/Duplicada
+      color: '#667684'
+  Tipo de Atividade:
+    - id: 64f034f3-c5db-46e5-80e5-f515f11e2131
+      name: Rotineira
+      color: '#e50000'
+    - id: e85a4dc7-82d8-4f63-89ee-462232f50f31
+      name: Especifica
+      color: '#f2d600'
+    - id: 6c810e95-f5e8-4e8f-ba23-808cf555046f
+      name: Dedicada
+      color: '#c377e0'
+categories:
+  - ADM
+  - Agendamento
+  - Atividades Corporativas
+  - Atividades Pessoais / Domésticas
+  - Compras
+  - Documentos
+  - Educação / Academia
+  - Eventos Corporativos
+  - Gestão de Funcionário Doméstico
+  - Lazer
+  - Logistica
+  - Festas / Reuniões / Recepção
+  - Pagamentos
+  - Pesquisas / Orçamentos
+  - Plano de Saúde
+  - Viagens
+  - Controle Interno
+  - Compra/Venda/Aluguel
+  - Atividade Baixada/Duplicada
+activity_types:
+  - name: Rotineira
+    id: 64f034f3-c5db-46e5-80e5-f515f11e2131
+    description: tarefas recorrentes e do dia a dia
+  - name: Especifica
+    id: e85a4dc7-82d8-4f63-89ee-462232f50f31
+    description: tarefas pontuais com propósito específico
+  - name: Dedicada
+    id: 6c810e95-f5e8-4e8f-ba23-808cf555046f
+    description: tarefas que demandam dedicação especial
+status_options:
+  - Concluido
+  - Aguardando instruções
+  - Executar
+subcategories:
+  - ADM
+  - Consultas/Exames/Vacinas/Manicure/Pet, etc
+  - Atividades Financeiras / Reembolso Corporativo
+  - Atendimento ao Cliente
+  - Contratação de Fornecedores / Contratação de Funcionários
+  - Gestão e Planilhas e Emails
+  - Fup Documentos  / Assinatura Digital
+  - Gestão de Agenda / Gestão de Estoque
+  - Social Media
+  - Planilhas/Organização Pessoal/Pet
+  - 'Carro - Assuntos em Geral '
+  - Encerramento Abertura  de CC / INSS / Empresa (CNPJ)
+  - Internet/Telefone/Tv Assinatura /Gas/Luz/Assistencia Tecnica Casa / Consertos em Geral
+  - Vender/Comprar - Imóvel/ Móveis / Itens de Casa
+  - Presentes / Farmácia / Mercado / Marmitas / Fotos / Flores / Papelaria / Uniforme Escolar
+  - 'Contratos / Procurações / Assinaturas '
+  - Passaporte/ RG / CNH / Imóvel / Seguros (Carro/Casa) / Traduções / Vistos (outros)
+  - 'Visto Americano (Renovação) '
+  - Visto Americano (1 visto)
+  - Cidadania Europeia
+  - Cartório - Reconhecimento de Firma / Apostilamentos
+  - 'Comprar / renovar Certificado Digital '
+  - Carteira de vacinação (BR/Internacional)
+  - Escola / Faculdade / Academia (fazer matricula / checar grade / atividades extra curriculares)
+  - Evento Externo - Passagem / Hospedagem / Carro / Estrutura
+  - Offsites (Espaço de eventos)
+  - Offsites - contratar transfer (Van)
+  - Organizar Coffee Breaks / Catering
+  - 'ESocial (mensal / férias / 13 salario) / VT '
+  - 'Reserva de Restaurantes / Bar '
+  - Organização de Festa Adulto
+  - Organização de Festa Infantil
+  - ' Ingressos de Shows, Exposições, Eventos, Festas e Passeios'
+  - Motoboy / Uber / Loggi / Correios
+  - 'Mudança '
+  - Controle de Gastos Mensais (Planilhas)
+  - 'Debito Automatico / Pagamentos Pendentes / 2 Via '
+  - Pagamentos via Friday / envio de codigo de barras
+  - Guias DARF (INSS) / MEI para pagamento
+  - 'Envio de NF para reembolso '
+  - Solicitar Autorização / Contestação / Extrato para IR / Previa de Reembolso / Reclamação
+  - Contratação / Cancelamento
+  - 'Documentação (Regras Sanitárias / vistos / vacinas) '
+  - 'Extravio de Malas e Bagagens '
+  - 'Fazer Check in Voos '
+  - Hospedagem - Pesquisar / Cotar / Comprar / Cancelar
+  - 'Passagem de ônibus - Pesquisar / Cotar / Comprar '
+  - Passagem Aérea - Pesquisar / Cotar / Comprar / Cancelar
+  - Programa de Milhagem / Cadastros e Alteração de Cadastros CIAS
+  - 'Seguro Viagem - Pesquisar / Cotar / Comprar '
+  - Transfer / Aluguel / Reserva de Carro / Cancelar
+  - Pesquisas / Orçamento
+  - Emissão de NF
+  - Controle Interno
+  - IR/IR MEI
+id_mappings:
+  category_field_id: c19b4f95-1ff7-4966-b201-02905d33cec6
+  subcategory_field_id: 330d635b-b0be-4a4a-960c-3ff974d597c3
+  activity_type_field_id: f1259ffb-7be8-49ff-92f8-5ff9882888d0
+  status_field_id: 6abbfe79-f80b-4b55-9b4b-9bd7f65b6458
+  info1_field_id: bf24f5b1-e909-473e-b864-75bf22edf67e
+  info2_field_id: 0cd1d510-1906-4484-ba66-06ccdd659768

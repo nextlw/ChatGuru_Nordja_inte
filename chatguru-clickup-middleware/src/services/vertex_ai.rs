@@ -4,6 +4,10 @@ use crate::utils::logging::*;
 use crate::services::context_cache::ContextCache;
 use crate::services::openai_fallback::OpenAIService;
 use crate::services::conversation_tracker::{ConversationTracker, TaskAction};
+use crate::services::ai_prompt_loader::AiPromptConfig;
+use crate::services::clickup_fields_fetcher::{ClickUpFieldsFetcher, FieldMappings};
+use std::fs;
+use serde_yaml;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -19,6 +23,11 @@ pub struct ActivityClassification {
     pub subtasks: Vec<String>,
     pub priority: Option<String>,
     pub reason: String,
+    // Novos campos para mapeamento inteligente
+    pub cliente_solicitante_id: Option<String>,  // ID da opção no dropdown
+    pub tipo_atividade: Option<String>,  // Rotineira, Urgente, etc.
+    pub sub_categoria: Option<String>,  // Sub categoria selecionada
+    pub status_back_office: Option<String>,  // Status inicial
 }
 
 #[derive(Clone)]
@@ -28,21 +37,35 @@ pub struct VertexAIService {
     access_token: Option<String>,
     cache: ContextCache,  // Cache inteligente para economizar
     openai_fallback: Option<OpenAIService>,  // Fallback para OpenAI
-    conversation_tracker: ConversationTracker,  // Rastreador de contexto
+    conversation_tracker: ConversationTracker,  // Rastreador de contexto para evitar duplicatas
+    prompt_config: AiPromptConfig,  // Configuração do prompt carregada do YAML
+    fields_fetcher: Option<ClickUpFieldsFetcher>,  // Busca campos dinâmicos do ClickUp
+    cached_field_mappings: Option<FieldMappings>,  // Cache dos mapeamentos
 }
 
 impl VertexAIService {
     /// Cria nova instância usando as credenciais padrão do Google Cloud
     /// Isso é mais eficiente pois usa as credenciais já configuradas no ambiente
+    #[allow(dead_code)]
     pub async fn new(project_id: String) -> AppResult<Self> {
-        // Primeiro tentar usar API key do ambiente
-        let access_token = if let Ok(api_key) = std::env::var("VERTEX_AI_API_KEY") {
-            log_info("Using VERTEX_AI_API_KEY from environment");
-            Some(api_key)
+        Self::new_with_clickup(project_id, None, None).await
+    }
+    
+    /// Cria nova instância com suporte para buscar campos do ClickUp dinamicamente
+    pub async fn new_with_clickup(
+        project_id: String, 
+        clickup_token: Option<String>,
+        clickup_list_id: Option<String>
+    ) -> AppResult<Self> {
+        // Obter access token OAuth2 usando o metadata service do Google Cloud
+        // Isso funciona automaticamente no Cloud Run com a conta de serviço
+        let access_token = Self::get_access_token().await.ok();
+        
+        if access_token.is_none() {
+            log_warning("Failed to get OAuth2 access token from metadata service. Vertex AI will not be available.");
         } else {
-            // Fallback para metadata service token
-            Self::get_access_token().await.ok()
-        };
+            log_info("Successfully obtained OAuth2 access token for Vertex AI");
+        }
         
         // Configurar OpenAI como fallback
         let openai_fallback = OpenAIService::new(None);
@@ -51,6 +74,31 @@ impl VertexAIService {
             log_warning("Neither Vertex AI nor OpenAI are configured. AI classification will be disabled.");
         }
         
+        // Carregar configuração do prompt
+        let prompt_config = AiPromptConfig::load_default()
+            .unwrap_or_else(|e| {
+                log_warning(&format!("Failed to load AI prompt config: {}. Using default.", e));
+                // Criar uma configuração padrão mínima se falhar
+                AiPromptConfig {
+                    system_role: "Você é um assistente de classificação.".to_string(),
+                    task_description: "Classifique a mensagem.".to_string(),
+                    categories: vec![],
+                    activity_types: vec![],
+                    status_options: vec![],
+                    category_mappings: std::collections::HashMap::new(),
+                    subcategory_examples: std::collections::HashMap::new(),
+                    rules: vec![],
+                    response_format: "Responda em JSON.".to_string(),
+                }
+            });
+        
+        // Configurar fetcher do ClickUp se tokens foram fornecidos
+        let fields_fetcher = if let (Some(token), Some(list_id)) = (clickup_token, clickup_list_id) {
+            Some(ClickUpFieldsFetcher::new(token, list_id))
+        } else {
+            None
+        };
+        
         Ok(Self {
             client: Client::new(),
             project_id,
@@ -58,6 +106,9 @@ impl VertexAIService {
             cache: ContextCache::new(),
             openai_fallback,
             conversation_tracker: ConversationTracker::new(),
+            prompt_config,
+            fields_fetcher,
+            cached_field_mappings: None,
         })
     }
 
@@ -94,7 +145,7 @@ impl VertexAIService {
     }
 
     /// Classifica se o payload representa uma atividade válida usando Vertex AI
-    pub async fn classify_activity(&self, payload: &WebhookPayload) -> AppResult<ActivityClassification> {
+    pub async fn classify_activity(&mut self, payload: &WebhookPayload) -> AppResult<ActivityClassification> {
         let context = self.extract_context(payload);
         
         // Incrementar contador de requisições
@@ -110,6 +161,10 @@ impl VertexAIService {
                 category: None,
                 subtasks: Vec::new(),
                 priority: None,
+                cliente_solicitante_id: None,
+                tipo_atividade: None,
+                sub_categoria: None,
+                status_back_office: None,
             });
         }
         
@@ -127,6 +182,10 @@ impl VertexAIService {
                 category: None,
                 subtasks: Vec::new(),
                 priority: None,
+                cliente_solicitante_id: None,
+                tipo_atividade: None,
+                sub_categoria: None,
+                status_back_office: None,
             });
         }
         
@@ -193,51 +252,124 @@ impl VertexAIService {
     }
 
     /// Chama o Vertex AI para classificação
-    async fn call_vertex_ai(&self, context: &str) -> AppResult<Value> {
+    async fn call_vertex_ai(&mut self, context: &str) -> AppResult<Value> {
+        // Usar apenas OAuth2 com Vertex AI
         let token = self.access_token.as_ref()
-            .ok_or_else(|| AppError::ConfigError("No access token available".to_string()))?;
+            .ok_or_else(|| AppError::ConfigError("No OAuth2 access token available for Vertex AI".to_string()))?;
         
-        // IMPORTANTE: Gemini só está disponível em us-central1, não em southamerica-east1
-        // Usar sempre us-central1 para Vertex AI, independente de onde o Cloud Run está
+        // Usar us-central1 onde o modelo está disponível
         let vertex_region = "us-central1";
+        let model_name = "gemini-2.0-flash-001";  // Modelo mais recente do Gemini
         
-        // Detectar se é API key ou access token
-        let is_api_key = token.starts_with("AIza");
-        
-        // Endpoint do Vertex AI para Gemini (deve usar us-central1)
-        // IMPORTANTE: Usar gemini-pro que está disponível para todos os projetos
-        let url = if is_api_key {
-            // Com API key, usar o endpoint com o key como query parameter
-            format!(
-                "https://{}-{}/projects/{}/locations/{}/publishers/google/models/gemini-pro:generateContent?key={}",
-                vertex_region, VERTEX_AI_BASE, self.project_id, vertex_region, token
-            )
-        } else {
-            // Com access token OAuth, usar o endpoint normal
-            format!(
-                "https://{}-{}/projects/{}/locations/{}/publishers/google/models/gemini-pro:generateContent",
-                vertex_region, VERTEX_AI_BASE, self.project_id, vertex_region
-            )
-        };
-        
-        // Prompt otimizado para classificação rápida
-        let prompt = format!(
-            r#"Classifique se esta mensagem representa uma atividade de trabalho válida.
-
-MENSAGEM:
-{}
-
-Responda APENAS com JSON:
-{{
-    "is_activity": true/false,
-    "reason": "explicação curta"
-}}"#,
-            context
+        // Endpoint do Vertex AI com OAuth2
+        let url = format!(
+            "https://{}-{}/projects/{}/locations/{}/publishers/google/models/{}:generateContent",
+            vertex_region, VERTEX_AI_BASE, self.project_id, vertex_region, model_name
         );
+        
+        // Gerar prompt dinâmico com campos atualizados do ClickUp
+        let prompt = if let Some(ref fetcher) = self.fields_fetcher {
+            // Buscar categorias dinâmicas do ClickUp
+            let categories = fetcher.get_available_categories().await.ok();
+            
+            // Buscar tipos de atividade dinâmicos
+            let activity_types = if let Ok(fields) = fetcher.get_custom_fields().await {
+                fields.iter()
+                    .find(|f| f.name == "Tipo de Atividade")
+                    .and_then(|f| f.type_config.as_ref())
+                    .and_then(|tc| tc.options.as_ref())
+                    .map(|opts| opts.iter()
+                        .map(|o| {
+                            // Mapear descrições conhecidas
+                            let desc = match o.name.as_str() {
+                                "Rotineira" => "tarefas recorrentes e do dia a dia",
+                                "Especifica" => "tarefas pontuais com propósito específico",
+                                "Dedicada" => "tarefas que demandam dedicação especial",
+                                _ => "tarefa",
+                            };
+                            (o.name.clone(), desc.to_string())
+                        })
+                        .collect::<Vec<_>>()
+                    )
+            } else {
+                None
+            };
+            
+            // Buscar status dinâmicos
+            let status_options = if let Ok(fields) = fetcher.get_custom_fields().await {
+                fields.iter()
+                    .find(|f| f.name == "Status Back Office")
+                    .and_then(|f| f.type_config.as_ref())
+                    .and_then(|tc| tc.options.as_ref())
+                    .map(|opts| opts.iter()
+                        .map(|o| o.name.clone())
+                        .collect::<Vec<_>>()
+                    )
+            } else {
+                None
+            };
+            
+            // Atualizar cache de mapeamentos
+            if let Ok(mappings) = fetcher.get_all_field_mappings().await {
+                self.cached_field_mappings = Some(mappings);
+            }
+            
+            // Gerar prompt com campos dinâmicos
+            let mut full_prompt = self.prompt_config.generate_prompt_with_dynamic_fields(
+                context,
+                categories,
+                activity_types,
+                status_options
+            );
+            
+            // Adicionar subcategorias disponíveis (limitado para não ficar muito grande)
+            if let Ok(subcategories) = fetcher.get_available_subcategories().await {
+                if !subcategories.is_empty() {
+                    full_prompt.push_str("\nSUBCATEGORIAS DISPONÍVEIS (exemplos):\n");
+                    for (i, sub) in subcategories.iter().enumerate() {
+                        if i < 15 { // Limitar para não deixar o prompt muito grande
+                            full_prompt.push_str(&format!("- {}\n", sub));
+                        }
+                    }
+                    if subcategories.len() > 15 {
+                        full_prompt.push_str(&format!("... e mais {} opções relacionadas às categorias\n", subcategories.len() - 15));
+                    }
+                    full_prompt.push_str("\nIMPORTANTE: A subcategoria deve sempre estar relacionada à categoria principal escolhida.\n");
+                }
+            }
+            
+            log_info("Using dynamic prompt with updated ClickUp fields");
+            full_prompt
+        } else {
+            // Sem fetcher, tentar usar arquivo estático atualizado
+            if let Ok(static_fields) = self.load_static_fields() {
+                log_info("Using static fields from clickup_fields_static.yaml");
+                
+                // Gerar prompt com campos estáticos
+                let categories = Some(static_fields.categories);
+                let activity_types = Some(static_fields.activity_types
+                    .into_iter()
+                    .map(|at| (at.name, at.description))
+                    .collect());
+                let status_options = Some(static_fields.status_options);
+                
+                self.prompt_config.generate_prompt_with_dynamic_fields(
+                    context,
+                    categories,
+                    activity_types,
+                    status_options
+                )
+            } else {
+                // Fallback final: usar prompt estático do YAML
+                log_info("Using fallback static prompt from YAML");
+                self.prompt_config.generate_prompt(context)
+            }
+        };
         
         // Formato correto para generateContent endpoint
         let request_body = json!({
             "contents": [{
+                "role": "user",  // Obrigatório para Gemini 2.0
                 "parts": [{
                     "text": prompt
                 }]
@@ -250,16 +382,11 @@ Responda APENAS com JSON:
             }
         });
 
-        let mut request = self.client
+        // Configurar requisição com OAuth2
+        let response = self.client
             .post(&url)
-            .header("Content-Type", "application/json");
-        
-        // Só adicionar Authorization header se não for API key
-        if !is_api_key {
-            request = request.header("Authorization", format!("Bearer {}", token));
-        }
-        
-        let response = request
+            .header("Content-Type", "application/json")
+            .header("Authorization", format!("Bearer {}", token))
             .json(&request_body)
             .send()
             .await?;
@@ -288,32 +415,139 @@ Responda APENAS com JSON:
             .and_then(|t| t.as_str())
             .ok_or_else(|| AppError::InternalError("Invalid Vertex AI response format".to_string()))?;
 
-        // Parse do JSON na resposta
-        let classification: Value = serde_json::from_str(text_response)
-            .map_err(|e| AppError::InternalError(format!("Failed to parse classification from response: {} - Response was: {}", e, text_response)))?;
+        // Limpar resposta que pode vir com markdown
+        let cleaned_response = text_response
+            .trim()
+            .trim_start_matches("```json")
+            .trim_start_matches("```")
+            .trim_end_matches("```")
+            .trim();
+        
+        // Parse do JSON na resposta limpa
+        let classification: Value = serde_json::from_str(cleaned_response)
+            .map_err(|e| AppError::InternalError(format!("Failed to parse classification from response: {} - Response was: {}", e, cleaned_response)))?;
 
-        // Criar estrutura simplificada
+        // Criar estrutura completa com mapeamento de campos
         Ok(ActivityClassification {
             is_activity: classification.get("is_activity")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
-            activity_type: None,  // Simplificado para performance
-            category: None,
-            subtasks: Vec::new(),
+            activity_type: classification.get("tipo_atividade")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            category: classification.get("category")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            subtasks: classification.get("subtasks")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect())
+                .unwrap_or_else(Vec::new),
             priority: None,
             reason: classification.get("reason")
                 .and_then(|v| v.as_str())
                 .unwrap_or("Sem motivo especificado")
                 .to_string(),
+            // Novos campos mapeados
+            cliente_solicitante_id: None, // Será mapeado depois com Info_1
+            tipo_atividade: classification.get("tipo_atividade")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            sub_categoria: classification.get("sub_categoria")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            status_back_office: classification.get("status_back_office")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
         })
     }
 
-    /// Constrói anotação para enviar de volta ao ChatGuru
+    /// Constrói anotação profissional e detalhada para enviar ao ChatGuru
     pub fn build_chatguru_annotation(&self, classification: &ActivityClassification) -> String {
         if classification.is_activity {
-            format!("Tarefa: **Atividade Identificada** - {}", classification.reason)
+            // Extrair título profissional da razão
+            let titulo = self.extract_professional_title(&classification.reason);
+            
+            let mut annotation = format!("Tarefa: Atividade Identificada: {}", titulo);
+            
+            // Tipo de atividade é OBRIGATÓRIO para atividades válidas
+            if let Some(ref tipo) = classification.tipo_atividade {
+                annotation.push_str(&format!("\nTipo de Atividade: {}", tipo));
+            } else {
+                // Fallback para tipo padrão se não foi identificado
+                annotation.push_str("\nTipo de Atividade: Rotineira");
+            }
+            
+            // Categoria é OBRIGATÓRIA para atividades válidas
+            if let Some(ref category) = classification.category {
+                annotation.push_str(&format!("\nCategoria: {}", category));
+            } else {
+                // Fallback para categoria genérica
+                annotation.push_str("\nCategoria: Atividades Corporativas");
+            }
+            
+            // Subcategoria detalhada quando disponível
+            if let Some(ref sub_categoria) = classification.sub_categoria {
+                if !sub_categoria.is_empty() && sub_categoria != "null" {
+                    annotation.push_str(&format!("\nSub Categoria: {}", sub_categoria));
+                }
+            }
+            
+            // Adicionar subtarefas se houver (apresentar de forma profissional)
+            if !classification.subtasks.is_empty() {
+                annotation.push_str("\nSubtarefas: (se aplicável)");
+                for subtask in &classification.subtasks {
+                    annotation.push_str(&format!("\n- {}", subtask));
+                }
+            }
+            
+            // Status do back office quando relevante
+            if let Some(ref status) = classification.status_back_office {
+                if !status.is_empty() {
+                    annotation.push_str(&format!("\nStatus Back Office: {}", status));
+                }
+            }
+            
+            annotation
         } else {
-            format!("Tarefa: Não é uma atividade - {}", classification.reason)
+            format!("Tarefa: Não é uma atividade de trabalho - {}", classification.reason)
+        }
+    }
+    
+    /// Extrai um título profissional da razão/descrição da atividade
+    fn extract_professional_title(&self, reason: &str) -> String {
+        // Remover prefixos comuns e deixar apenas a essência da atividade
+        let clean_reason = reason
+            .replace("A mensagem contém", "")
+            .replace("O usuário solicitou", "")
+            .replace("A solicitação é sobre", "")
+            .replace("Trata-se de", "")
+            .replace("É uma solicitação de", "")
+            .replace("um pedido específico de", "")
+            .replace("uma solicitação para", "")
+            .replace("solicita", "")
+            .trim()
+            .to_string();
+        
+        // Capitalizar primeira letra e formatar profissionalmente
+        if clean_reason.is_empty() {
+            "Atividade Profissional".to_string()
+        } else {
+            // Capitalizar primeira letra
+            let mut chars = clean_reason.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(first) => {
+                    let capitalized = first.to_uppercase().collect::<String>() + chars.as_str();
+                    // Limitar tamanho e garantir que termine bem
+                    if capitalized.len() > 80 {
+                        format!("{}...", &capitalized[..77])
+                    } else {
+                        capitalized
+                    }
+                }
+            }
         }
     }
     
@@ -329,6 +563,10 @@ Responda APENAS com JSON:
                 category: result.category,
                 subtasks: Vec::new(),
                 priority: None,
+                cliente_solicitante_id: None,
+                tipo_atividade: None,
+                sub_categoria: None,
+                status_back_office: None,
             })
         } else {
             // Se nem OpenAI está configurado, usar classificação básica
@@ -358,11 +596,16 @@ Responda APENAS com JSON:
                 category: None,
                 subtasks: Vec::new(),
                 priority: None,
+                cliente_solicitante_id: None,
+                tipo_atividade: None,
+                sub_categoria: None,
+                status_back_office: None,
             })
         }
     }
     
     /// Analisa contexto da conversa para decidir se deve atualizar tarefa
+    #[allow(dead_code)]
     pub async fn analyze_conversation_context(
         &self,
         phone: &str,
@@ -376,4 +619,30 @@ Responda APENAS com JSON:
     pub async fn register_created_task(&self, phone: &str, task_id: String, title: String) {
         self.conversation_tracker.register_task(phone, task_id, title).await;
     }
+    
+    /// Carrega campos estáticos do arquivo YAML atualizado pelo script
+    fn load_static_fields(&self) -> AppResult<StaticFields> {
+        let path = "config/clickup_fields_static.yaml";
+        let contents = fs::read_to_string(path)
+            .map_err(|e| AppError::ConfigError(format!("Failed to read static fields: {}", e)))?;
+        
+        let fields: StaticFields = serde_yaml::from_str(&contents)
+            .map_err(|e| AppError::ConfigError(format!("Failed to parse static fields: {}", e)))?;
+        
+        Ok(fields)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct StaticFields {
+    categories: Vec<String>,
+    activity_types: Vec<StaticActivityType>,
+    status_options: Vec<String>,
+    _subcategories: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StaticActivityType {
+    name: String,
+    description: String,
 }

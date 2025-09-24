@@ -42,8 +42,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Inicializar serviços
     let clickup_service = ClickUpService::new(&settings);
     
-    // Inicializar scheduler (como o APScheduler do legado)
-    let mut scheduler = MessageScheduler::new(100); // 100 segundos como no legado
+    // Inicializar scheduler com intervalo menor para desenvolvimento
+    let interval = if cfg!(debug_assertions) { 10 } else { 100 }; // 10s em dev, 100s em prod
+    let mut scheduler = MessageScheduler::new(interval);
     scheduler.configure(settings.clone(), clickup_service.clone());
     
     // PubSub é opcional - se falhar, apenas log warning

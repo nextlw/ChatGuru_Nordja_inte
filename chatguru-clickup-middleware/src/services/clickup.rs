@@ -192,9 +192,22 @@ impl ClickUpService {
     /// 2. Se existir, adiciona comentário com histórico e atualiza tarefa
     /// 3. Se não existir, cria tarefa nova
     pub async fn process_webhook_payload(&self, payload: &WebhookPayload) -> AppResult<Value> {
+        self.process_webhook_payload_with_ai(payload, None).await
+    }
+    
+    /// Processa webhook payload com classificação AI opcional
+    pub async fn process_webhook_payload_with_ai(
+        &self, 
+        payload: &WebhookPayload,
+        ai_classification: Option<&crate::services::vertex_ai::ActivityClassification>
+    ) -> AppResult<Value> {
         // Extrair título e dados da tarefa
         let task_title = payload.get_task_title();
-        let task_data = payload.to_clickup_task_data();
+        let task_data = if ai_classification.is_some() {
+            payload.to_clickup_task_data_with_ai(ai_classification)
+        } else {
+            payload.to_clickup_task_data()
+        };
         
         log_info(&format!("Processing webhook payload - Task title: {}", task_title));
         

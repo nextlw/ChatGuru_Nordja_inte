@@ -88,6 +88,15 @@ async fn process_webhook_with_ai(state: &Arc<AppState>, payload: &WebhookPayload
     // 3. AI classifica no scheduler
     // 4. Cria tarefa apenas se for atividade
     
+    // Filtrar eventos que não devem ser processados
+    if let WebhookPayload::EventType(event_payload) = payload {
+        // Ignorar eventos de annotation.added - estes são criados pelo próprio sistema
+        if event_payload.event_type == "annotation.added" {
+            log_info("Ignoring annotation.added event - this is a system-generated event");
+            return Ok(());
+        }
+    }
+    
     // Extrair dados básicos
     let _chat_id = extract_chat_id_from_payload(payload);  // Usado internamente no scheduler
     let _phone = extract_phone_from_payload(payload);      // Usado internamente no scheduler

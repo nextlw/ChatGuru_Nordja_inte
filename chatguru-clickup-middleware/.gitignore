@@ -41,3 +41,7 @@ verify-*.sh
 *.temp
 /tmp/
 /temp/
+
+# Node modules
+node_modules/
+scripts/node_modules/

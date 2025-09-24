@@ -8,6 +8,8 @@ pub mod context_cache;
 pub mod openai_fallback;
 pub mod conversation_tracker;
 pub mod message_scheduler;
+pub mod ai_prompt_loader;
+pub mod clickup_fields_fetcher;
 
 pub use clickup::*;
 pub use vertex_ai::*;

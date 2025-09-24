@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use crate::services::ai_prompt_loader::AiPromptConfig;
 
 /// Estrutura flexível que aceita múltiplos formatos de webhook
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -108,52 +109,223 @@ impl WebhookPayload {
         }
     }
     
-    /// Converte payload ChatGuru para ClickUp
-    fn chatguru_to_clickup(&self, payload: &ChatGuruPayload) -> serde_json::Value {
-        let mut description = format!(
-            "**Dados do Contato**\n\n\
-             - Nome: {}\n\
-             - Email: {}\n\
-             - Celular: {}\n\
-             - Campanha: {}\n\
-             - Origem: {}\n\n",
-            payload.nome,
-            payload.email,
-            payload.celular,
-            payload.campanha_nome,
-            payload.origem
-        );
+    /// Converte payload para dados do ClickUp com classificação AI
+    pub fn to_clickup_task_data_with_ai(
+        &self, 
+        ai_classification: Option<&crate::services::vertex_ai::ActivityClassification>
+    ) -> serde_json::Value {
+        match self {
+            WebhookPayload::ChatGuru(payload) => {
+                self.chatguru_to_clickup_with_ai(payload, ai_classification)
+            },
+            WebhookPayload::EventType(payload) => {
+                self.eventtype_to_clickup(payload)
+            },
+            WebhookPayload::Generic(payload) => {
+                self.generic_to_clickup(payload)
+            }
+        }
+    }
+    
+    /// Converte payload ChatGuru para ClickUp com classificação AI
+    fn chatguru_to_clickup_with_ai(
+        &self, 
+        payload: &ChatGuruPayload,
+        ai_classification: Option<&crate::services::vertex_ai::ActivityClassification>
+    ) -> serde_json::Value {
+        // FORMATO EXATO DO SISTEMA LEGADO
+        let mut description = String::new();
         
+        // Dados do Contato - FORMATO LEGADO
+        description.push_str("**Dados do Contato**\n\n");
+        description.push_str(&format!("- Nome: {}\n", payload.nome));
+        description.push_str(&format!("- Email: {}\n", 
+            if !payload.email.is_empty() { &payload.email } else { &payload.celular }
+        ));
+        description.push_str(&format!("- Celular: {}\n", payload.celular));
+        description.push_str(&format!("- Campanha: {}\n", payload.campanha_nome));
+        description.push_str(&format!("- Origem: {}\n", 
+            if !payload.origem.is_empty() { &payload.origem } else { "scheduler" }
+        ));
+        
+        // Mensagem - FORMATO LEGADO
         if !payload.texto_mensagem.is_empty() {
-            description.push_str(&format!("**Mensagem**\n{}\n\n", payload.texto_mensagem));
+            description.push_str("\n**Mensagem**\n");
+            description.push_str(&payload.texto_mensagem);
         }
         
-        if !payload.link_chat.is_empty() {
-            description.push_str(&format!("**Link do Chat**\n{}\n\n", payload.link_chat));
-        }
+        // Nome da tarefa - FORMATO LEGADO: [ChatGuru] Nome
+        let task_name = format!("[ChatGuru] {}", payload.nome);
         
-        if !payload.campos_personalizados.is_empty() {
-            description.push_str("**Campos Personalizados**\n");
-            for (key, value) in &payload.campos_personalizados {
-                description.push_str(&format!("- {}: {}\n", key, value));
+        // Preparar campos personalizados do ClickUp
+        let mut custom_fields = Vec::new();
+        
+        // Mapear campos baseado na classificação AI
+        if let Some(ai) = ai_classification {
+            // Carregar configuração para obter os IDs corretos
+            // Por enquanto usar os IDs hardcoded, mas idealmente isso viria do prompt_config
+            // TODO: Passar o prompt_config como parâmetro ou carregá-lo aqui
+            
+            // Tipo de Atividade (dropdown)
+            if let Some(ref tipo) = ai.tipo_atividade {
+                let tipo_id = match tipo.as_str() {
+                    "Rotineira" => "64f034f3-c5db-46e5-80e5-f515f11e2131",
+                    "Especifica" => "e85a4dc7-82d8-4f63-89ee-462232f50f31",
+                    "Dedicada" => "6c810e95-f5e8-4e8f-ba23-808cf555046f",
+                    _ => "64f034f3-c5db-46e5-80e5-f515f11e2131", // Default Rotineira
+                };
+                custom_fields.push(serde_json::json!({
+                    "id": "f1259ffb-7be8-49ff-92f8-5ff9882888d0",
+                    "value": tipo_id
+                }));
             }
-            description.push_str("\n");
+            
+            // Categoria (dropdown)
+            if let Some(ref category) = ai.category {
+                // Tentar carregar a configuração para obter os IDs
+                let cat_id = if let Ok(config) = AiPromptConfig::load_default() {
+                    config.get_category_id(category)
+                        .unwrap_or_else(|| "80ad2f74-7074-4eec-a4fd-8fc92d0fe0dd".to_string())
+                } else {
+                    // Fallback para mapeamento hardcoded
+                    match category.as_str() {
+                        "ADM" => "a4a4e85c-4eb5-44f9-9175-f98594da5c70",
+                        "Agendamento" => "25102629-2b4f-4863-847c-51468e484362",
+                        "Atividades Corporativas" => "e0b80ba4-3b2e-47bc-9a4f-d322045d6480",
+                        "Atividades Pessoais / Domésticas" => "1b61be8c-6eaa-4cd4-959d-c48f8b78ca3e",
+                        "Compras" => "4799d43c-c1be-478e-ad58-57fdfa95b292",
+                        "Documentos" => "e57a5888-49cc-4c3a-bb4a-e235c8c58e77",
+                        "Educação / Academia" => "4232858d-8052-4fdc-9ce9-628f34d2edac",
+                        "Eventos Corporativos" => "07c402c5-1f0b-4ae0-b38e-349553fd7a81",
+                        "Lazer" => "68539506-88b8-44a5-bac8-0496b2b2f148",
+                        "Logistica" => "a1bc0a49-2a9d-41bd-a91a-a6b4af7677b4",
+                        "Festas / Reuniões / Recepção" => "18c2c60c-cfd0-4ef8-af94-7542bd9b30c7",
+                        "Pagamentos" => "b64b9e80-fdc4-4521-8975-45e335109b49",
+                        "Pesquisas / Orçamentos" => "80ad2f74-7074-4eec-a4fd-8fc92d0fe0dd",
+                        "Plano de Saúde" => "3496ba6c-9d7f-495f-951e-6017dfdbd55b",
+                        "Viagens" => "2aebf637-6534-487c-bd35-d28334c8d685",
+                        "Controle Interno" => "16c6bd8a-05d3-4bd7-8fd9-906ef3e8b2d2",
+                        _ => "80ad2f74-7074-4eec-a4fd-8fc92d0fe0dd", // Default Pesquisas
+                    }.to_string()
+                };
+                
+                custom_fields.push(serde_json::json!({
+                    "id": "c19b4f95-1ff7-4966-b201-02905d33cec6",
+                    "value": cat_id
+                }));
+            }
+            
+            // Status Back Office (dropdown)
+            if let Some(ref status) = ai.status_back_office {
+                let status_id = if let Ok(config) = AiPromptConfig::load_default() {
+                    config.get_status_id(status)
+                        .unwrap_or_else(|| "7889796f-033f-450d-97dd-6fee2a44f1b1".to_string())
+                } else {
+                    match status.as_str() {
+                        "Concluido" => "db544ddc-a07d-47a9-8737-40c6be25f7ec",
+                        "Aguardando instruções" => "dd9d1b1b-f842-4777-984d-c05ec6b6d8a3",
+                        "Executar" => "7889796f-033f-450d-97dd-6fee2a44f1b1",
+                        _ => "7889796f-033f-450d-97dd-6fee2a44f1b1", // Default Executar
+                    }.to_string()
+                };
+                
+                custom_fields.push(serde_json::json!({
+                    "id": "6abbfe79-f80b-4b55-9b4b-9bd7f65b6458",
+                    "value": status_id
+                }));
+            }
         }
         
-        if let Some(ref responsavel) = payload.responsavel_nome {
-            description.push_str(&format!("**Responsável**: {}", responsavel));
-            if let Some(ref email) = payload.responsavel_email {
-                description.push_str(&format!(" ({})", email));
+        // Extrair Info_1 (Solicitante) e Info_2 (Conta Cliente) dos campos personalizados
+        if let Some(info_1) = payload.campos_personalizados.get("Info_1") {
+            if let Some(info_1_str) = info_1.as_str() {
+                // Campo de texto "Solicitante (Info_1)"
+                custom_fields.push(serde_json::json!({
+                    "id": "bf24f5b1-e909-473e-b864-75bf22edf67e",
+                    "value": info_1_str
+                }));
             }
-            description.push_str("\n");
+        }
+        
+        if let Some(info_2) = payload.campos_personalizados.get("Info_2") {
+            if let Some(info_2_str) = info_2.as_str() {
+                // Campo de texto "Outro cliente"
+                custom_fields.push(serde_json::json!({
+                    "id": "0cd1d510-1906-4484-ba66-06ccdd659768",
+                    "value": info_2_str
+                }));
+            }
         }
         
         serde_json::json!({
-            "name": format!("[{}] {}", payload.campanha_nome, payload.nome),
-            "description": description,
-            "tags": payload.tags.clone(),
+            "name": task_name,
+            "description": description.trim(),
+            "tags": Vec::<String>::new(),
             "status": "pendente",
-            "priority": 3
+            "priority": 3,
+            "custom_fields": custom_fields
+        })
+    }
+    
+    /// Converte payload ChatGuru para ClickUp (FORMATO IDÊNTICO AO LEGADO)
+    fn chatguru_to_clickup(&self, payload: &ChatGuruPayload) -> serde_json::Value {
+        // FORMATO EXATO DO SISTEMA LEGADO
+        let mut description = String::new();
+        
+        // Dados do Contato - FORMATO LEGADO
+        description.push_str("**Dados do Contato**\n\n");
+        description.push_str(&format!("- Nome: {}\n", payload.nome));
+        description.push_str(&format!("- Email: {}\n", 
+            if !payload.email.is_empty() { &payload.email } else { &payload.celular }
+        ));
+        description.push_str(&format!("- Celular: {}\n", payload.celular));
+        description.push_str(&format!("- Campanha: {}\n", payload.campanha_nome));
+        description.push_str(&format!("- Origem: {}\n", 
+            if !payload.origem.is_empty() { &payload.origem } else { "scheduler" }
+        ));
+        
+        // Mensagem - FORMATO LEGADO
+        if !payload.texto_mensagem.is_empty() {
+            description.push_str("\n**Mensagem**\n");
+            description.push_str(&payload.texto_mensagem);
+        }
+        
+        // Nome da tarefa - FORMATO LEGADO: [ChatGuru] Nome
+        let task_name = format!("[ChatGuru] {}", payload.nome);
+        
+        // Preparar campos personalizados do ClickUp
+        let mut custom_fields = Vec::new();
+        
+        // Extrair Info_1 (Solicitante) e Info_2 (Conta Cliente) dos campos personalizados
+        if let Some(info_1) = payload.campos_personalizados.get("Info_1") {
+            if let Some(info_1_str) = info_1.as_str() {
+                // ID do campo "Solicitante (Info_1)" que acabamos de criar
+                custom_fields.push(serde_json::json!({
+                    "id": "bf24f5b1-e909-473e-b864-75bf22edf67e",
+                    "value": info_1_str
+                }));
+            }
+        }
+        
+        if let Some(info_2) = payload.campos_personalizados.get("Info_2") {
+            if let Some(info_2_str) = info_2.as_str() {
+                // ID do campo "Cliente Solicitante" que já existe
+                // Este campo precisa ser mapeado para um dropdown option se for dropdown
+                // Por enquanto vamos usar o campo "Outro cliente" que é text
+                custom_fields.push(serde_json::json!({
+                    "id": "0cd1d510-1906-4484-ba66-06ccdd659768",  // Campo "Outro cliente"
+                    "value": info_2_str
+                }));
+            }
+        }
+        
+        serde_json::json!({
+            "name": task_name,
+            "description": description.trim(),
+            "tags": Vec::<String>::new(),  // Legado não usa tags
+            "status": "pendente",  // Status exato do legado
+            "priority": 3,  // Prioridade normal (3) como no legado
+            "custom_fields": custom_fields  // Adicionar campos personalizados
         })
     }
     
