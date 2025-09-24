@@ -1,0 +1,14 @@
+# Legacy Reference Files
+# These files are for documentation and reference only
+# DO NOT commit sensitive data
+
+# Ignore everything in this directory
+*
+
+# Except these files
+!.gitignore
+!README.md
+!scheduler-analysis.md
+!api-behavior.md
+!logs/
+!logs/*.md

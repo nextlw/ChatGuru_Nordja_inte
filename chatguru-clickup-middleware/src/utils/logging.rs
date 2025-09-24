@@ -69,3 +69,7 @@ pub fn log_info(message: &str) {
 pub fn log_error(message: &str) {
     error!("{}", message);
 }
+
+pub fn log_warning(message: &str) {
+    warn!("{}", message);
+}

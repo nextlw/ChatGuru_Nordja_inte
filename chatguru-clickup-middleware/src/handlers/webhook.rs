@@ -9,8 +9,7 @@ use std::sync::Arc;
 use tokio::time::Instant;
 
 use crate::models::WebhookPayload;
-use crate::services::{VertexAIService, ChatGuruApiService};
-use crate::utils::{AppError, AppResult};
+use crate::utils::{AppResult, AppError};
 use crate::utils::logging::*;
 use crate::AppState;
 
@@ -83,60 +82,30 @@ pub async fn handle_webhook_flexible(
 }
 
 async fn process_webhook_with_ai(state: &Arc<AppState>, payload: &WebhookPayload) -> AppResult<()> {
-    // Extrair telefone do payload
-    let phone = extract_phone_from_payload(payload);
+    // COMPORTAMENTO DO LEGADO:
+    // 1. Agrupa mensagem primeiro
+    // 2. Scheduler processa depois (a cada 100 segundos)
+    // 3. AI classifica no scheduler
+    // 4. Cria tarefa apenas se for atividade
     
-    // Verificar se IA está habilitada
-    if let Some(ai_config) = &state.settings.ai {
-        if ai_config.enabled {
-            // Usar Vertex AI (único provider no Google Cloud)
-            let vertex_service = VertexAIService::new(state.settings.gcp.project_id.clone()).await?;
-            let classification = vertex_service.classify_activity(payload).await?;
-            
-            // Construir anotação
-            let annotation = vertex_service.build_chatguru_annotation(&classification);
-            
-            // Enviar anotação de volta para o ChatGuru (se configurado)
-            if let Some(chatguru_token) = &state.settings.chatguru.api_token {
-                let api_endpoint = state.settings.chatguru.api_endpoint.as_ref()
-                    .map(|s| s.clone())
-                    .unwrap_or_else(|| "https://s15.chatguru.app/api/v1".to_string());
-                let account_id = state.settings.chatguru.account_id.as_ref()
-                    .map(|s| s.clone())
-                    .unwrap_or_else(|| "625584ce6fdcb7bda7d94aa8".to_string());
-                
-                let chatguru_service = ChatGuruApiService::new(
-                    chatguru_token.clone(),
-                    api_endpoint,
-                    account_id
-                );
-                
-                // Enviar anotação
-                if let Some(phone_number) = phone {
-                    if let Err(e) = chatguru_service.send_annotation(&phone_number, &annotation).await {
-                        log_error(&format!("Failed to send ChatGuru annotation: {}", e));
-                        // Não falha o processamento se a anotação falhar
-                    }
-                }
-            }
-            
-            // Se for uma atividade válida, criar tarefa no ClickUp
-            if classification.is_activity {
-                log_info("Activity classified as valid - Creating ClickUp task");
-                state.clickup.process_webhook_payload(payload).await?;
-            } else {
-                log_info(&format!("Activity classified as invalid: {}", classification.reason));
-            }
-        } else {
-            // IA desabilitada, processa normalmente
-            log_info("AI is disabled - Processing webhook normally");
-            state.clickup.process_webhook_payload(payload).await?;
-        }
-    } else {
-        // Sem configuração de IA, processa normalmente (cria tarefa sempre)
-        log_info("No AI configuration - Processing webhook normally");
-        state.clickup.process_webhook_payload(payload).await?;
-    }
+    // Extrair dados básicos
+    let _chat_id = extract_chat_id_from_payload(payload);  // Usado internamente no scheduler
+    let _phone = extract_phone_from_payload(payload);      // Usado internamente no scheduler
+    let nome = extract_nome_from_payload(payload);
+    let message = extract_message_from_payload(payload);
+    
+    // Log como o legado
+    log_info(&format!(
+        "Mensagem de {} agrupada recebida: {}",
+        if !nome.is_empty() { nome.clone() } else { "Não Disponível".to_string() },
+        message
+    ));
+    
+    // Adicionar ao scheduler para processamento posterior (COMO O LEGADO)
+    state.scheduler.queue_message(payload, None).await;
+    
+    // NÃO processar imediatamente - o scheduler fará isso
+    log_info("Message queued for processing by scheduler");
     
     Ok(())
 }
@@ -146,6 +115,36 @@ fn extract_phone_from_payload(payload: &WebhookPayload) -> Option<String> {
         WebhookPayload::ChatGuru(p) => Some(p.celular.clone()),
         WebhookPayload::EventType(p) => p.data.phone.clone(),
         WebhookPayload::Generic(p) => p.celular.clone(),
+    }
+}
+
+fn extract_chat_id_from_payload(payload: &WebhookPayload) -> Option<String> {
+    match payload {
+        WebhookPayload::ChatGuru(p) => p.chat_id.clone(),
+        WebhookPayload::EventType(_) => None,  // EventType não tem chat_id
+        WebhookPayload::Generic(_) => None,    // Generic também não tem
+    }
+}
+
+fn extract_message_from_payload(payload: &WebhookPayload) -> String {
+    match payload {
+        WebhookPayload::ChatGuru(p) => p.texto_mensagem.clone(),
+        WebhookPayload::EventType(p) => {
+            // EventData não tem campo message, usar annotation ou task_title
+            p.data.annotation.clone()
+                .or(p.data.task_title.clone())
+                .or(p.data.lead_name.clone())
+                .unwrap_or_default()
+        },
+        WebhookPayload::Generic(p) => p.mensagem.clone().unwrap_or_default(),
+    }
+}
+
+fn extract_nome_from_payload(payload: &WebhookPayload) -> String {
+    match payload {
+        WebhookPayload::ChatGuru(p) => p.nome.clone(),
+        WebhookPayload::EventType(p) => p.data.lead_name.clone().unwrap_or_default(),
+        WebhookPayload::Generic(p) => p.nome.clone().unwrap_or_default(),
     }
 }
 

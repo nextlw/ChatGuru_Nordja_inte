@@ -38,6 +38,12 @@ pub struct ChatGuruPayload {
     #[serde(default)]
     pub link_chat: String,
     pub celular: String,
+    #[serde(default)]
+    pub phone_id: Option<String>,
+    #[serde(default)]
+    pub chat_id: Option<String>,
+    #[serde(default)]
+    pub chat_created: Option<String>,
 }
 
 /// Payload com event_type (formato antigo)

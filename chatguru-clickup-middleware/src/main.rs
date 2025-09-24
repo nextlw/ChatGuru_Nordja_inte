@@ -13,11 +13,11 @@ mod utils;
 
 use config::Settings;
 use handlers::{
-    health_check, ready_check, status_check,
+    health_check, ready_check, status_check, scheduler_status,
     handle_webhook_flexible,
     list_clickup_tasks, get_clickup_list_info, test_clickup_connection,
 };
-use services::ClickUpService;
+use services::{ClickUpService, MessageScheduler};
 use utils::{AppError, logging::*};
 
 #[derive(Clone)]
@@ -25,6 +25,7 @@ pub struct AppState {
     pub settings: Settings,
     pub clickup_client: reqwest::Client,
     pub clickup: ClickUpService,
+    pub scheduler: MessageScheduler,
 }
 
 #[tokio::main]
@@ -41,6 +42,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Inicializar serviços
     let clickup_service = ClickUpService::new(&settings);
     
+    // Inicializar scheduler (como o APScheduler do legado)
+    let mut scheduler = MessageScheduler::new(100); // 100 segundos como no legado
+    scheduler.configure(settings.clone(), clickup_service.clone());
+    
     // PubSub é opcional - se falhar, apenas log warning
     // if let Err(e) = PubSubService::new(&settings).await {
     //     tracing::warn!("PubSub service not available: {}. Running without PubSub.", e);
@@ -50,8 +55,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app_state = Arc::new(AppState {
         clickup_client: reqwest::Client::new(),
         clickup: clickup_service,
+        scheduler: scheduler.clone(),
         settings: settings.clone(),
     });
+    
+    // Iniciar o scheduler (como no legado)
+    scheduler.start().await;
+    log_info("Scheduler started - verificar_e_enviar_mensagens job enabled");
 
     // Configurar rotas
     let app = Router::new()
@@ -59,6 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/health", get(health_check))
         .route("/ready", get(ready_check))
         .route("/status", get(status_check))
+        .route("/scheduler/status", get(scheduler_status))
         
         // Webhooks ChatGuru (aceita múltiplos formatos)
         .route("/webhooks/chatguru", post(handle_webhook_flexible))

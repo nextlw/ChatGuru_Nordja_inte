@@ -4,8 +4,14 @@ pub mod secret_manager;
 pub mod pubsub;
 pub mod vertex_ai;
 pub mod chatguru_api;
+pub mod context_cache;
+pub mod openai_fallback;
+pub mod conversation_tracker;
+pub mod message_scheduler;
 
 pub use clickup::*;
 pub use vertex_ai::*;
 pub use chatguru_api::*;
+// pub use conversation_tracker::TaskAction;
+pub use message_scheduler::MessageScheduler;
 // pub use pubsub::*; // Comentado temporariamente até ser utilizado

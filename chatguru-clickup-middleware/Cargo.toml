@@ -42,6 +42,12 @@ hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
 
+# Regex for pattern matching
+regex = "1.10"
+
+# URL encoding
+urlencoding = "2.1"
+
 # Google Cloud
 google-cloud-pubsub = "0.30"
 google-cloud-googleapis = { version = "0.16", features = ["pubsub"] }

@@ -1,0 +1,54 @@
+[2m2025-09-24T11:30:39.343147Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Configuration loaded successfully for environment: development
+[2m2025-09-24T11:30:39.360072Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Scheduler started - verificar_e_enviar_mensagens job enabled
+[2m2025-09-24T11:30:39.360316Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Added job "verificar_e_enviar_mensagens" to job store "default"
+[2m2025-09-24T11:30:39.362746Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m 🚀 ChatGuru-ClickUp middleware server starting on port 8080
+[2m2025-09-24T11:30:39.362753Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m ✅ Server ready and listening on http://0.0.0.0:8080
+[2m2025-09-24T11:30:58.567734Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Request received: POST /webhooks/chatguru
+[2m2025-09-24T11:30:58.568105Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Detected ChatGuru payload format
+[2m2025-09-24T11:30:58.568112Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Request processed: /webhooks/chatguru - Status: 200 - Duration: 0ms
+[2m2025-09-24T11:30:58.568324Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Mensagem de Maria Costa agrupada recebida: Favor criar relatório de vendas do último trimestre e enviar para o diretor até sexta-feira
+[2m2025-09-24T11:30:58.568652Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Mensagem de Maria Costa agrupada recebida: Favor criar relatório de vendas do último trimestre e enviar para o diretor até sexta-feira
+[2m2025-09-24T11:30:58.568660Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Message queued for processing by scheduler
+[2m2025-09-24T11:32:19.362896Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Executando verificar_e_enviar_mensagens para Maria Costa
+[2m2025-09-24T11:32:19.362938Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Aguardando mais mensagens ou intervalo para Maria Costa
+[2m2025-09-24T11:33:59.364418Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Executando verificar_e_enviar_mensagens para Maria Costa
+[2m2025-09-24T11:33:59.370957Z[0m [33m WARN[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Neither Vertex AI nor OpenAI are configured. AI classification will be disabled.
+[2m2025-09-24T11:33:59.371150Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Cache MISS - Calling AI for: Campanha: 
+Origem: 
+Nome: Maria Costa
+Mensagem: Favor criar relatório de vendas do último trimestre e enviar para o diretor até sexta-feira
+Tags: []
+[2m2025-09-24T11:33:59.371156Z[0m [33m WARN[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Vertex AI failed: Configuration error: No access token available, using OpenAI fallback
+[2m2025-09-24T11:33:59.371158Z[0m [33m WARN[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m No AI service available, using basic classification
+[2m2025-09-24T11:33:59.371167Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Cache Stats: Total: 1, Hits: 0, Patterns: 0, AI Calls: 1, Hit Rate: 0.0%, Saved: $0.0000
+[2m2025-09-24T11:33:59.371169Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Activity classification result: is_activity=false, reason=Sem indicadores de atividade
+[2m2025-09-24T11:33:59.371174Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Mensagem enviada com sucesso: Tarefa: Não é uma atividade - Sem indicadores de atividade
+[2m2025-09-24T11:33:59.371176Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Resposta enviada e estado atualizado para Maria Costa
+[2m2025-09-24T11:34:43.448783Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Request received: POST /webhooks/chatguru
+[2m2025-09-24T11:34:43.448808Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Detected ChatGuru payload format
+[2m2025-09-24T11:34:43.448811Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Request processed: /webhooks/chatguru - Status: 200 - Duration: 0ms
+[2m2025-09-24T11:34:43.448837Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Mensagem de Carlos Mendes agrupada recebida: TAREFA: Agendar reunião com fornecedor novo para discutir contrato - urgente
+[2m2025-09-24T11:34:43.448841Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Mensagem de Carlos Mendes agrupada recebida: TAREFA: Agendar reunião com fornecedor novo para discutir contrato - urgente
+[2m2025-09-24T11:34:43.448844Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Message queued for processing by scheduler
+[2m2025-09-24T11:35:39.364034Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Executando verificar_e_enviar_mensagens para Carlos Mendes, Maria Costa
+[2m2025-09-24T11:35:39.364052Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Aguardando mais mensagens ou intervalo para Carlos Mendes
+[2m2025-09-24T11:35:39.364072Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Aguardando mais mensagens ou intervalo para Maria Costa
+[2m2025-09-24T11:37:19.338666Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Executando verificar_e_enviar_mensagens para Carlos Mendes, Maria Costa
+[2m2025-09-24T11:37:19.340723Z[0m [33m WARN[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Neither Vertex AI nor OpenAI are configured. AI classification will be disabled.
+[2m2025-09-24T11:37:19.340739Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Cache MISS - Calling AI for: Campanha: 
+Origem: 
+Nome: Carlos Mendes
+Mensagem: TAREFA: Agendar reunião com fornecedor novo para discutir contrato - urgente
+Tags: []
+[2m2025-09-24T11:37:19.340742Z[0m [33m WARN[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Vertex AI failed: Configuration error: No access token available, using OpenAI fallback
+[2m2025-09-24T11:37:19.340743Z[0m [33m WARN[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m No AI service available, using basic classification
+[2m2025-09-24T11:37:19.340752Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Cache Stats: Total: 1, Hits: 0, Patterns: 0, AI Calls: 1, Hit Rate: 0.0%, Saved: $0.0000
+[2m2025-09-24T11:37:19.340754Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Activity classification result: is_activity=false, reason=Sem indicadores de atividade
+[2m2025-09-24T11:37:19.340758Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Mensagem enviada com sucesso: Tarefa: Não é uma atividade - Sem indicadores de atividade
+[2m2025-09-24T11:37:19.340760Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Resposta enviada e estado atualizado para Carlos Mendes
+[2m2025-09-24T11:37:19.340766Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Fim de verificar_e_enviar_mensagens para Maria Costa
+[2m2025-09-24T11:38:59.343524Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Executando verificar_e_enviar_mensagens para Carlos Mendes
+[2m2025-09-24T11:40:39.338121Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Executando verificar_e_enviar_mensagens para Carlos Mendes
+[2m2025-09-24T11:40:39.338176Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Aguardando mais mensagens ou intervalo para Carlos Mendes
+[2m2025-09-24T11:42:19.338191Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Executando verificar_e_enviar_mensagens para Carlos Mendes
+[2m2025-09-24T11:42:19.338212Z[0m [32m INFO[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Fim de verificar_e_enviar_mensagens para Carlos Mendes

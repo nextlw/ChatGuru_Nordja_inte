@@ -25,11 +25,12 @@ CLICKUP_LIST_ID="901300373349"
 
 # Configurações do ChatGuru
 CHATGURU_API_TOKEN="TXUKDWXS92SSN9KP3MCLX9AADSXAYVGB2MWWER0ESYNRZE80ZNLUQ9HYCXKXQ1BK"
-CHATGURU_API_ENDPOINT="https://s15.chatguru.app/api/v1"
+CHATGURU_API_ENDPOINT="https://s15.chatguru.app"
 CHATGURU_ACCOUNT_ID="625584ce6fdcb7bda7d94aa8"
 
 # Configurações da IA
 AI_ENABLED="true"
+OPENAI_API_KEY="${OPENAI_API_KEY:-}"  # Definir via variável de ambiente
 
 # Funções para output colorido
 print_header() {
@@ -179,7 +180,7 @@ case $DEPLOY_METHOD in
             --timeout 300 \
             --min-instances 0 \
             --max-instances 10 \
-            --set-env-vars "CLICKUP_API_TOKEN=${CLICKUP_API_TOKEN},CLICKUP_LIST_ID=${CLICKUP_LIST_ID},CHATGURU__API_TOKEN=${CHATGURU_API_TOKEN},CHATGURU__API_ENDPOINT=${CHATGURU_API_ENDPOINT},CHATGURU__ACCOUNT_ID=${CHATGURU_ACCOUNT_ID},AI__ENABLED=${AI_ENABLED},GCP__PROJECT_ID=${PROJECT_ID},RUST_LOG=info"; then
+            --set-env-vars "CLICKUP_API_TOKEN=${CLICKUP_API_TOKEN},CLICKUP_LIST_ID=${CLICKUP_LIST_ID},CHATGURU__API_TOKEN=${CHATGURU_API_TOKEN},CHATGURU__API_ENDPOINT=${CHATGURU_API_ENDPOINT},CHATGURU__ACCOUNT_ID=${CHATGURU_ACCOUNT_ID},AI__ENABLED=${AI_ENABLED},GCP__PROJECT_ID=${PROJECT_ID},OPENAI_API_KEY=${OPENAI_API_KEY},RUST_LOG=info"; then
             
             print_success "Deploy concluído com sucesso!"
             
@@ -231,17 +232,25 @@ case $DEPLOY_METHOD in
         gcloud auth configure-docker ${REGION}-docker.pkg.dev --quiet
         print_success "Docker autenticado"
         
-        # Build da imagem
-        print_status "Construindo imagem Docker (multi-platform)..."
-        docker buildx create --use --name=multibuilder --driver=docker-container 2>/dev/null || true
+        # Build da imagem específica para amd64/linux (requerido pelo Cloud Run)
+        print_status "Construindo imagem Docker para linux/amd64..."
         
-        if docker buildx build \
+        # Garantir que estamos usando o builder padrão para evitar problemas com manifests OCI
+        docker buildx use default 2>/dev/null || true
+        
+        # Build tradicional para garantir compatibilidade
+        if docker build \
             --platform linux/amd64 \
             --tag ${IMAGE_URI}:latest \
             --tag ${IMAGE_URI}:$(date +%Y%m%d-%H%M%S) \
-            --push \
             .; then
-            print_success "Imagem construída e enviada!"
+            print_success "Imagem construída com sucesso!"
+            
+            # Push das imagens
+            print_status "Enviando imagem para Artifact Registry..."
+            docker push ${IMAGE_URI}:latest
+            docker push ${IMAGE_URI}:$(date +%Y%m%d-%H%M%S)
+            print_success "Imagem enviada!"
         else
             print_error "Build falhou!"
             exit 1
@@ -259,7 +268,7 @@ case $DEPLOY_METHOD in
             --timeout 300 \
             --min-instances 0 \
             --max-instances 10 \
-            --set-env-vars "CLICKUP_API_TOKEN=${CLICKUP_API_TOKEN},CLICKUP_LIST_ID=${CLICKUP_LIST_ID},CHATGURU__API_TOKEN=${CHATGURU_API_TOKEN},CHATGURU__API_ENDPOINT=${CHATGURU_API_ENDPOINT},CHATGURU__ACCOUNT_ID=${CHATGURU_ACCOUNT_ID},AI__ENABLED=${AI_ENABLED},GCP__PROJECT_ID=${PROJECT_ID},RUST_LOG=info" \
+            --set-env-vars "CLICKUP_API_TOKEN=${CLICKUP_API_TOKEN},CLICKUP_LIST_ID=${CLICKUP_LIST_ID},CHATGURU__API_TOKEN=${CHATGURU_API_TOKEN},CHATGURU__API_ENDPOINT=${CHATGURU_API_ENDPOINT},CHATGURU__ACCOUNT_ID=${CHATGURU_ACCOUNT_ID},AI__ENABLED=${AI_ENABLED},GCP__PROJECT_ID=${PROJECT_ID},OPENAI_API_KEY=${OPENAI_API_KEY},RUST_LOG=info" \
             --quiet
             
         print_success "Deploy concluído!"
