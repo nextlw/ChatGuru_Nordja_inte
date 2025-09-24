@@ -382,14 +382,39 @@ impl VertexAIService {
             }
         });
 
-        // Configurar requisição com OAuth2
+        // OTIMIZAÇÃO FASE 1: Timeout adaptativo baseado no tamanho do texto
+        // Escala: 10s base + crescimento proporcional até 60s
+        // - Até 500 chars: 15s
+        // - Até 1000 chars: 20s  
+        // - Até 2000 chars: 30s
+        // - Até 4000 chars: 45s
+        // - Acima 4000 chars: 60s
+        let text_length = prompt.len();
+        let timeout_seconds = std::cmp::min(
+            60, // Máximo 60 segundos (1 minuto)
+            10 + (text_length / 250) * 3 // Escala mais gradual: 3s para cada 250 chars
+        ) as u64;
+        
+        log_info(&format!("⏱️ Vertex AI timeout adaptativo: {}s para {} caracteres", 
+            timeout_seconds, text_length));
+        
+        // Configurar requisição com OAuth2 e timeout
         let response = self.client
             .post(&url)
             .header("Content-Type", "application/json")
             .header("Authorization", format!("Bearer {}", token))
             .json(&request_body)
+            .timeout(std::time::Duration::from_secs(timeout_seconds))
             .send()
-            .await?;
+            .await
+            .map_err(|e| {
+                if e.is_timeout() {
+                    log_warning(&format!("Vertex AI timeout after {}s", timeout_seconds));
+                    AppError::InternalError(format!("Vertex AI timeout após {}s", timeout_seconds))
+                } else {
+                    AppError::InternalError(format!("Vertex AI request error: {}", e))
+                }
+            })?;
 
         let status = response.status();
         

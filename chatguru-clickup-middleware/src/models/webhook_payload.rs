@@ -93,6 +93,43 @@ pub struct BotContext {
     pub chat_guru: Option<bool>,
 }
 
+/// Função helper para extrair título profissional da reason
+fn extract_professional_title(reason: &str) -> String {
+    // Remover prefixos comuns e deixar apenas a essência da atividade
+    let clean_reason = reason
+        .replace("A mensagem contém", "")
+        .replace("O usuário solicitou", "")
+        .replace("A solicitação é sobre", "")
+        .replace("Trata-se de", "")
+        .replace("É uma solicitação de", "")
+        .replace("um pedido específico de", "")
+        .replace("um pedido de", "")
+        .replace("uma solicitação de", "")
+        .replace("uma solicitação para", "")
+        .replace("A ação envolve", "")
+        .replace("O pedido é para", "")
+        .replace("uma série de", "")
+        .trim()
+        .to_string();
+    
+    // Capitalizar primeira letra e limitar tamanho
+    let clean_reason = if !clean_reason.is_empty() {
+        let mut chars = clean_reason.chars();
+        match chars.next() {
+            None => String::new(),
+            Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        }
+    } else {
+        clean_reason
+    };
+    
+    if clean_reason.len() > 100 {
+        format!("{}...", &clean_reason[..97])
+    } else {
+        clean_reason
+    }
+}
+
 impl WebhookPayload {
     /// Converte qualquer formato para dados do ClickUp
     pub fn to_clickup_task_data(&self) -> serde_json::Value {
@@ -154,11 +191,29 @@ impl WebhookPayload {
             description.push_str(&payload.texto_mensagem);
         }
         
-        // Nome da tarefa - FORMATO LEGADO: [ChatGuru] Nome
-        let task_name = format!("[ChatGuru] {}", payload.nome);
-        
         // Preparar campos personalizados do ClickUp
         let mut custom_fields = Vec::new();
+        
+        // Nome da tarefa - usar título profissional se temos AI classification
+        let task_name = if let Some(ai) = ai_classification {
+            if ai.is_activity {
+                // Extrair título profissional da reason
+                let titulo = extract_professional_title(&ai.reason);
+                if !titulo.is_empty() && titulo.len() > 5 {
+                    format!("[ChatGuru] {}", titulo)
+                } else if let Some(ref tipo) = ai.tipo_atividade {
+                    // Fallback: usar tipo de atividade + contexto
+                    format!("[ChatGuru] {} - {}", tipo, payload.nome)
+                } else {
+                    // Fallback final
+                    format!("[ChatGuru] {}", payload.nome)
+                }
+            } else {
+                format!("[ChatGuru] {}", payload.nome)
+            }
+        } else {
+            format!("[ChatGuru] {}", payload.nome)
+        };
         
         // Mapear campos baseado na classificação AI
         if let Some(ai) = ai_classification {
@@ -236,23 +291,23 @@ impl WebhookPayload {
             }
         }
         
-        // Extrair Info_1 (Solicitante) e Info_2 (Conta Cliente) dos campos personalizados
-        if let Some(info_1) = payload.campos_personalizados.get("Info_1") {
-            if let Some(info_1_str) = info_1.as_str() {
-                // Campo de texto "Solicitante (Info_1)"
+        // Mapeamento correto: Info_2 → Solicitante, Info_1 → Conta cliente
+        if let Some(info_2) = payload.campos_personalizados.get("Info_2") {
+            if let Some(info_2_str) = info_2.as_str() {
+                // Info_2 vai para o campo "Solicitante (Info_1)"
                 custom_fields.push(serde_json::json!({
-                    "id": "bf24f5b1-e909-473e-b864-75bf22edf67e",
-                    "value": info_1_str
+                    "id": "bf24f5b1-e909-473e-b864-75bf22edf67e",  // Campo Solicitante
+                    "value": info_2_str
                 }));
             }
         }
         
-        if let Some(info_2) = payload.campos_personalizados.get("Info_2") {
-            if let Some(info_2_str) = info_2.as_str() {
-                // Campo de texto "Outro cliente"
+        if let Some(info_1) = payload.campos_personalizados.get("Info_1") {
+            if let Some(info_1_str) = info_1.as_str() {
+                // Info_1 vai para o campo "Conta cliente"
                 custom_fields.push(serde_json::json!({
-                    "id": "0cd1d510-1906-4484-ba66-06ccdd659768",
-                    "value": info_2_str
+                    "id": "0cd1d510-1906-4484-ba66-06ccdd659768",  // Campo Conta cliente
+                    "value": info_1_str
                 }));
             }
         }
@@ -296,25 +351,23 @@ impl WebhookPayload {
         // Preparar campos personalizados do ClickUp
         let mut custom_fields = Vec::new();
         
-        // Extrair Info_1 (Solicitante) e Info_2 (Conta Cliente) dos campos personalizados
-        if let Some(info_1) = payload.campos_personalizados.get("Info_1") {
-            if let Some(info_1_str) = info_1.as_str() {
-                // ID do campo "Solicitante (Info_1)" que acabamos de criar
+        // Mapeamento correto: Info_2 → Solicitante, Info_1 → Conta cliente
+        if let Some(info_2) = payload.campos_personalizados.get("Info_2") {
+            if let Some(info_2_str) = info_2.as_str() {
+                // Info_2 vai para o campo "Solicitante (Info_1)"
                 custom_fields.push(serde_json::json!({
-                    "id": "bf24f5b1-e909-473e-b864-75bf22edf67e",
-                    "value": info_1_str
+                    "id": "bf24f5b1-e909-473e-b864-75bf22edf67e",  // Campo Solicitante
+                    "value": info_2_str
                 }));
             }
         }
         
-        if let Some(info_2) = payload.campos_personalizados.get("Info_2") {
-            if let Some(info_2_str) = info_2.as_str() {
-                // ID do campo "Cliente Solicitante" que já existe
-                // Este campo precisa ser mapeado para um dropdown option se for dropdown
-                // Por enquanto vamos usar o campo "Outro cliente" que é text
+        if let Some(info_1) = payload.campos_personalizados.get("Info_1") {
+            if let Some(info_1_str) = info_1.as_str() {
+                // Info_1 vai para o campo "Conta cliente"
                 custom_fields.push(serde_json::json!({
-                    "id": "0cd1d510-1906-4484-ba66-06ccdd659768",  // Campo "Outro cliente"
-                    "value": info_2_str
+                    "id": "0cd1d510-1906-4484-ba66-06ccdd659768",  // Campo Conta cliente
+                    "value": info_1_str
                 }));
             }
         }

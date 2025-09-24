@@ -141,14 +141,15 @@ impl MessageScheduler {
         
         entry.messages.push(queued_message);
         
-        // Processar imediatamente se tem muitas mensagens ou passou tempo suficiente
-        let should_process = entry.messages.len() >= 3 || 
-            (Utc::now() - entry.last_processed).num_seconds() > 30;
+        // OTIMIZAÇÃO FASE 1: Processar imediatamente para melhor performance
+        // Reduzido de 3 mensagens para 1 e de 30s para 5s
+        let should_process = entry.messages.len() >= 1 || // Processar com apenas 1 mensagem
+            (Utc::now() - entry.last_processed).num_seconds() > 5; // Máximo 5s de espera
             
         if should_process {
-            log_info(&format!("Triggering immediate processing for {} (messages: {})", 
+            log_info(&format!("⚡ Immediate processing triggered for {} (messages: {}, optimized)", 
                 entry.nome, entry.messages.len()));
-            // Marcar para processamento imediato
+            // Marcar para processamento imediato na próxima iteração
             entry.last_processed = Utc::now() - chrono::Duration::seconds(self.interval_seconds as i64 + 1);
         }
     }
@@ -404,28 +405,40 @@ impl MessageScheduler {
                         }
                         
                         // ENVIAR "Ok" DE CONFIRMAÇÃO AO USUÁRIO
-                        if let Some(chatguru_token) = &settings.chatguru.api_token {
-                            let api_endpoint = settings.chatguru.api_endpoint.as_ref()
-                                .map(|s| s.clone())
-                                .unwrap_or_else(|| "https://s15.chatguru.app".to_string());
-                            let account_id = settings.chatguru.account_id.as_ref()
-                                .map(|s| s.clone())
-                                .unwrap_or_else(|| "625584ce6fdcb7bda7d94aa8".to_string());
-                            
-                            let chatguru_service = ChatGuruApiService::new(
-                                chatguru_token.clone(),
-                                api_endpoint,
-                                account_id
-                            );
-                            
-                            // Enviar mensagem de confirmação
-                            if let Err(e) = chatguru_service.send_confirmation_message(
-                                &conversation.phone,
-                                Some("62558780e2923cc4705beee1"),
-                                "Ok ✅"
-                            ).await {
-                                log_error(&format!("Failed to send confirmation: {}", e));
+                        // Só enviar se temos um chat_id real (não um número de telefone usado como fallback)
+                        let has_real_chat_id = !conversation.chat_id.starts_with("generic_") && 
+                                               !conversation.chat_id.starts_with("event_") &&
+                                               !conversation.chat_id.chars().all(|c| c.is_numeric() || c == '+');
+                        
+                        if has_real_chat_id {
+                            if let Some(chatguru_token) = &settings.chatguru.api_token {
+                                let api_endpoint = settings.chatguru.api_endpoint.as_ref()
+                                    .map(|s| s.clone())
+                                    .unwrap_or_else(|| "https://s15.chatguru.app".to_string());
+                                let account_id = settings.chatguru.account_id.as_ref()
+                                    .map(|s| s.clone())
+                                    .unwrap_or_else(|| "625584ce6fdcb7bda7d94aa8".to_string());
+                                
+                                let chatguru_service = ChatGuruApiService::new(
+                                    chatguru_token.clone(),
+                                    api_endpoint,
+                                    account_id
+                                );
+                                
+                                // Enviar mensagem de confirmação
+                                if let Err(e) = chatguru_service.send_confirmation_message(
+                                    &conversation.phone,
+                                    Some("62558780e2923cc4705beee1"),
+                                    "Ok ✅"
+                                ).await {
+                                    log_error(&format!("Failed to send confirmation: {}", e));
+                                }
                             }
+                        } else {
+                            log_info(&format!(
+                                "Skipping confirmation message for {} - no active ChatGuru chat",
+                                conversation.nome
+                            ));
                         }
                     },
                     Err(e) => {

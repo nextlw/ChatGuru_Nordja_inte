@@ -28,8 +28,17 @@ struct MessageState {
 
 impl ChatGuruApiService {
     pub fn new(api_token: String, api_endpoint: String, account_id: String) -> Self {
+        // OTIMIZAÇÃO FASE 1: Cliente HTTP com timeout de 5s para ChatGuru
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .connect_timeout(std::time::Duration::from_secs(3))
+            .build()
+            .unwrap_or_else(|_| Client::new());
+            
+        log_info("⚡ ChatGuru client configured with 5s timeout");
+        
         Self {
-            client: Client::new(),
+            client,
             api_token,
             api_endpoint,
             account_id,
@@ -98,10 +107,18 @@ impl ChatGuruApiService {
             
             Ok(())
         } else {
-            log_error(&format!(
-                "Failed to add annotation. Status: {}, Response: {}",
-                status, response_text
-            ));
+            // Apenas logar warning se for erro de chat não encontrado
+            if response_text.contains("Chat não encontrado") || response_text.contains("Chat n") {
+                log_warning(&format!(
+                    "Chat not found for annotation (phone: {}). This is normal for inactive chats.",
+                    phone_number
+                ));
+            } else {
+                log_error(&format!(
+                    "Failed to add annotation. Status: {}, Response: {}",
+                    status, response_text
+                ));
+            }
             
             // Não falhar o processo se a anotação falhar
             Ok(())
@@ -110,6 +127,7 @@ impl ChatGuruApiService {
     
     /// Enviar mensagem de confirmação "Ok" via WhatsApp
     /// Usa a API do ChatGuru para enviar mensagem direta ao usuário
+    /// NOTA: Só funciona se já existe um chat ativo com o número
     pub async fn send_confirmation_message(
         &self, 
         phone_number: &str,
@@ -172,10 +190,18 @@ impl ChatGuruApiService {
             
             Ok(())
         } else {
-            log_error(&format!(
-                "Failed to send confirmation message. Status: {}, Response: {}",
-                status, response_text
-            ));
+            // Apenas logar warning se for erro de chat não encontrado
+            if response_text.contains("Chat não existe") || response_text.contains("Chat n") {
+                log_warning(&format!(
+                    "Chat not found for message (phone: {}). This is normal - user may not have active chat.",
+                    phone_number
+                ));
+            } else {
+                log_error(&format!(
+                    "Failed to send confirmation message. Status: {}, Response: {}",
+                    status, response_text
+                ));
+            }
             
             // Não falhar o processo se o envio falhar
             Ok(())

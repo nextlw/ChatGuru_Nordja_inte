@@ -1,4 +1,4 @@
-last_updated: '2025-09-24T17:03:19.058Z'
+last_updated: '2025-09-24T19:41:07.059Z'
 clickup_list_id: '901300373349'
 task_fields:
   Sub Categoria:
@@ -165,10 +165,10 @@ task_dropdown_options:
       name: Pagamentos
     - id: 80ad2f74-7074-4eec-a4fd-8fc92d0fe0dd
       name: Pesquisas / Orçamentos
-    - id: 3496ba6c-9d7f-495f-951e-6017dfdbd55b
-      name: Plano de Saúde
     - id: 2aebf637-6534-487c-bd35-d28334c8d685
       name: Viagens
+    - id: 3496ba6c-9d7f-495f-951e-6017dfdbd55b
+      name: Plano de Saúde
     - id: 16c6bd8a-05d3-4bd7-8fd9-906ef3e8b2d2
       name: Controle Interno
     - id: 8fb02d9e-febb-4b94-9e9e-cdf8ff5a28fb
@@ -197,8 +197,8 @@ categories:
   - Festas / Reuniões / Recepção
   - Pagamentos
   - Pesquisas / Orçamentos
-  - Plano de Saúde
   - Viagens
+  - Plano de Saúde
   - Controle Interno
   - Compra/Venda/Aluguel
   - Atividade Baixada/Duplicada

@@ -42,8 +42,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Inicializar serviços
     let clickup_service = ClickUpService::new(&settings);
     
-    // Inicializar scheduler com intervalo menor para desenvolvimento
-    let interval = if cfg!(debug_assertions) { 10 } else { 100 }; // 10s em dev, 100s em prod
+    // Inicializar scheduler com intervalos otimizados para performance
+    // Redução de 100s para 10s em produção = melhoria de 90% no tempo de resposta
+    let is_development = cfg!(debug_assertions) || 
+        std::env::var("RUST_ENV").unwrap_or_default() == "development";
+    
+    let interval = if is_development { 
+        5  // 5s em desenvolvimento para testes rápidos
+    } else { 
+        10 // 10s em produção (era 100s - redução de 90%)
+    };
+    
+    log_info(&format!("Scheduler interval configured: {}s ({})", 
+        interval, 
+        if is_development { "development" } else { "production" }
+    ));
+    
     let mut scheduler = MessageScheduler::new(interval);
     scheduler.configure(settings.clone(), clickup_service.clone());
     
