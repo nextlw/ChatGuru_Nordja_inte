@@ -35,8 +35,14 @@ impl VertexAIService {
     /// Cria nova instância usando as credenciais padrão do Google Cloud
     /// Isso é mais eficiente pois usa as credenciais já configuradas no ambiente
     pub async fn new(project_id: String) -> AppResult<Self> {
-        // Tentar obter token do Vertex AI (pode falhar)
-        let access_token = Self::get_access_token().await.ok();
+        // Primeiro tentar usar API key do ambiente
+        let access_token = if let Ok(api_key) = std::env::var("VERTEX_AI_API_KEY") {
+            log_info("Using VERTEX_AI_API_KEY from environment");
+            Some(api_key)
+        } else {
+            // Fallback para metadata service token
+            Self::get_access_token().await.ok()
+        };
         
         // Configurar OpenAI como fallback
         let openai_fallback = OpenAIService::new(None);
@@ -195,12 +201,24 @@ impl VertexAIService {
         // Usar sempre us-central1 para Vertex AI, independente de onde o Cloud Run está
         let vertex_region = "us-central1";
         
+        // Detectar se é API key ou access token
+        let is_api_key = token.starts_with("AIza");
+        
         // Endpoint do Vertex AI para Gemini (deve usar us-central1)
         // IMPORTANTE: Usar gemini-pro que está disponível para todos os projetos
-        let url = format!(
-            "https://{}-{}/projects/{}/locations/{}/publishers/google/models/gemini-pro:generateContent",
-            vertex_region, VERTEX_AI_BASE, self.project_id, vertex_region
-        );
+        let url = if is_api_key {
+            // Com API key, usar o endpoint com o key como query parameter
+            format!(
+                "https://{}-{}/projects/{}/locations/{}/publishers/google/models/gemini-pro:generateContent?key={}",
+                vertex_region, VERTEX_AI_BASE, self.project_id, vertex_region, token
+            )
+        } else {
+            // Com access token OAuth, usar o endpoint normal
+            format!(
+                "https://{}-{}/projects/{}/locations/{}/publishers/google/models/gemini-pro:generateContent",
+                vertex_region, VERTEX_AI_BASE, self.project_id, vertex_region
+            )
+        };
         
         // Prompt otimizado para classificação rápida
         let prompt = format!(
@@ -232,10 +250,16 @@ Responda APENAS com JSON:
             }
         });
 
-        let response = self.client
+        let mut request = self.client
             .post(&url)
-            .header("Authorization", format!("Bearer {}", token))
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "application/json");
+        
+        // Só adicionar Authorization header se não for API key
+        if !is_api_key {
+            request = request.header("Authorization", format!("Bearer {}", token));
+        }
+        
+        let response = request
             .json(&request_body)
             .send()
             .await?;
