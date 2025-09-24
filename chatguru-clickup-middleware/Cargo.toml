@@ -49,11 +49,25 @@ regex = "1.10"
 # URL encoding
 urlencoding = "2.1"
 
+# Base64 encoding
+base64 = "0.22"
+
+# Rate limiting and batch processing
+governor = "0.6"
+itertools = "0.12"
+
+# Metrics and monitoring
+prometheus = "0.13"
+
 # Google Cloud
 google-cloud-pubsub = "0.30"
 google-cloud-googleapis = { version = "0.16", features = ["pubsub"] }
 google-cloud-auth = "0.17"  # Para autenticação com Vertex AI
 google-cloud-token = "0.1"  # Token provider para Vertex AI
+google-cloud-tasks-v2 = "0.1"  # Biblioteca oficial Google Cloud Tasks
+
+# TLS para Google Cloud (necessário para rustls)
+rustls = { version = "0.23", features = ["aws-lc-rs"] }
 
 # Secret Manager - aguardando versão compatível com Rust 1.82
 # TODO: Adicionar quando disponível versão compatível

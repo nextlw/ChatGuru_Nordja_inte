@@ -122,6 +122,15 @@ pub async fn status_check(State(state): State<Arc<AppState>>) -> Json<Value> {
     pubsub_info["connection"] = json!("not_configured");
     pubsub_info["note"] = json!("PubSub will be configured later");
     
+        // Verificar status do PubSub Event Service - Fase 2
+    if let Some(pubsub) = &state.pubsub_events {
+        pubsub_info["connection"] = json!("configured");
+        pubsub_info["note"] = json!("PubSub Event Service active for notifications and fan-out");
+    } else {
+        pubsub_info["connection"] = json!("not_available");
+        pubsub_info["note"] = json!("PubSub Event Service not initialized (optional)");
+    }
+    
     Json(json!({
         "service": "chatguru-clickup-middleware",
         "version": env!("CARGO_PKG_VERSION"),
@@ -131,6 +140,7 @@ pub async fn status_check(State(state): State<Arc<AppState>>) -> Json<Value> {
         "clickup_connected": clickup_connected,
         "ai_enabled": ai_enabled,
         "chatguru_configured": chatguru_configured,
+        "pubsub_events_available": state.pubsub_events.is_some(),
         "integrations": {
             "clickup": clickup_info,
             "pubsub": pubsub_info,
@@ -146,4 +156,39 @@ pub async fn status_check(State(state): State<Arc<AppState>>) -> Json<Value> {
             }
         }
     }))
+}
+
+// Handler de teste para PubSub Event Service - Fase 2
+pub async fn test_pubsub_connection(State(state): State<Arc<AppState>>) -> Result<Json<Value>, StatusCode> {
+    if let Some(pubsub) = &state.pubsub_events {
+        match pubsub.test_connection().await {
+            Ok(message_id) => {
+                Ok(Json(json!({
+                    "status": "success",
+                    "service": "pubsub_events",
+                    "topic": state.settings.gcp.topic_name,
+                    "project": state.settings.gcp.project_id,
+                    "test_message_id": message_id,
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                    "note": "PubSub Event Service connection test successful"
+                })))
+            },
+            Err(e) => {
+                Ok(Json(json!({
+                    "status": "error",
+                    "service": "pubsub_events", 
+                    "error": e.to_string(),
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                    "note": "PubSub Event Service connection test failed"
+                })))
+            }
+        }
+    } else {
+        Ok(Json(json!({
+            "status": "not_configured",
+            "service": "pubsub_events",
+            "message": "PubSub Event Service not initialized (optional service)",
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        })))
+    }
 }

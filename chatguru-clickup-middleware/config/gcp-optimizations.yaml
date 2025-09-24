@@ -1,0 +1,170 @@
+# Configurações de Otimizações GCP - Fase 3
+# Este arquivo contém exemplos de configuração para rate limiting,
+# circuit breaker, batch processing e monitoramento
+
+# === Rate Limiting Configuration ===
+rate_limiting:
+  # Máximo de dispatches por segundo (tasks processadas)
+  max_dispatches_per_second: 10.0
+  
+  # Máximo de dispatches simultâneos
+  max_concurrent_dispatches: 100
+  
+  # Tamanho do lote para processamento em batch
+  batch_size: 5
+  
+  # Capacidade de burst (picos de tráfego)
+  burst_capacity: 20
+
+# === Circuit Breaker Configuration ===
+circuit_breaker:
+  # Número de falhas consecutivas antes de abrir o circuit
+  failure_threshold: 5
+  
+  # Tempo em segundos que o circuit permanece aberto
+  timeout_duration: 30
+  
+  # Máximo de chamadas permitidas no estado half-open
+  half_open_max_calls: 3
+  
+  # Sucessos necessários para fechar o circuit
+  success_threshold: 3
+
+# === Batch Processing Configuration ===
+batch_processing:
+  # Ativa/desativa o processamento em lote
+  enabled: true
+  
+  # Número de tasks por lote
+  batch_size: 5
+  
+  # Timeout máximo para formar um lote (segundos)
+  batch_timeout: 30
+  
+  # Tempo máximo de espera entre lotes (segundos)
+  max_batch_wait: 10
+
+# === Monitoring Configuration ===
+monitoring:
+  # Ativa/desativa monitoramento customizado
+  enabled: true
+  
+  # Porta para métricas Prometheus
+  metrics_port: 9090
+  
+  # Lista de métricas customizadas coletadas
+  custom_metrics:
+    - "task_processing_duration"
+    - "clickup_api_calls"
+    - "batch_processing_size"
+    - "circuit_breaker_state"
+
+# === Configurações de Performance ===
+performance:
+  # Buffer size para filas internas
+  internal_queue_size: 1000
+  
+  # Timeout para operações HTTP (segundos)
+  http_timeout: 30
+  
+  # Número de tentativas para retry
+  max_retries: 3
+  
+  # Backoff inicial em segundos
+  initial_backoff: 1
+  
+  # Backoff máximo em segundos  
+  max_backoff: 60
+
+# === Configurações de Alertas ===
+alerts:
+  # Configurações para alertas baseados em métricas
+  
+  # Taxa de erro alta (percentage)
+  high_error_rate_threshold: 10.0
+  
+  # Latência alta (segundos)
+  high_latency_threshold: 5.0
+  
+  # Circuit breaker aberto por muito tempo (segundos)
+  circuit_open_alert_threshold: 300
+  
+  # Queue size muito alta
+  high_queue_size_threshold: 500
+
+# === Configurações de Logs Estruturados ===
+structured_logging:
+  # Incluir contexto de trace
+  include_trace_context: true
+  
+  # Incluir métricas nos logs
+  include_metrics: true
+  
+  # Level mínimo para logs estruturados
+  min_level: "info"
+  
+  # Campos adicionais nos logs
+  additional_fields:
+    - "task_id"
+    - "contact_id" 
+    - "processing_duration"
+    - "batch_size"
+
+# === Exemplos de Configuração para Diferentes Ambientes ===
+
+# Configuração para desenvolvimento
+development:
+  rate_limiting:
+    max_dispatches_per_second: 5.0
+    max_concurrent_dispatches: 10
+    batch_size: 2
+    burst_capacity: 5
+  
+  circuit_breaker:
+    failure_threshold: 3
+    timeout_duration: 10
+  
+  monitoring:
+    enabled: true
+    metrics_port: 9091
+
+# Configuração para produção (otimizada)
+production:
+  rate_limiting:
+    max_dispatches_per_second: 20.0
+    max_concurrent_dispatches: 200
+    batch_size: 10
+    burst_capacity: 50
+  
+  circuit_breaker:
+    failure_threshold: 10
+    timeout_duration: 60
+    half_open_max_calls: 5
+    success_threshold: 5
+  
+  batch_processing:
+    enabled: true
+    batch_size: 10
+    batch_timeout: 15
+    max_batch_wait: 5
+  
+  monitoring:
+    enabled: true
+    metrics_port: 9090
+
+# Configuração para alta carga
+high_load:
+  rate_limiting:
+    max_dispatches_per_second: 50.0
+    max_concurrent_dispatches: 500
+    batch_size: 20
+    burst_capacity: 100
+  
+  circuit_breaker:
+    failure_threshold: 15
+    timeout_duration: 90
+  
+  batch_processing:
+    batch_size: 20
+    batch_timeout: 10
+    max_batch_wait: 3

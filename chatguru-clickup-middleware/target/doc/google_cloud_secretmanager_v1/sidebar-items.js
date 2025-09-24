@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"mod":["builder","client","model","stub"],"struct":["Error"],"type":["Result"]};

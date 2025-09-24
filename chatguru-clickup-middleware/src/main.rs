@@ -13,23 +13,28 @@ mod utils;
 
 use config::Settings;
 use handlers::{
-    health_check, ready_check, status_check, scheduler_status,
-    handle_webhook_flexible,
-    list_clickup_tasks, get_clickup_list_info, test_clickup_connection,
+    webhook::handle_webhook_flexible,
+    health::{health_check, ready_check, status_check, test_pubsub_connection},
+    worker::process_task_handler,
 };
-use services::{ClickUpService, MessageScheduler};
+use services::{ClickUpService, MessageScheduler, CloudTasksService, PubSubEventService};
 use utils::{AppError, logging::*};
-
 #[derive(Clone)]
 pub struct AppState {
     pub settings: Settings,
     pub clickup_client: reqwest::Client,
     pub clickup: ClickUpService,
     pub scheduler: MessageScheduler,
+    pub cloud_tasks: Option<CloudTasksService>, // Optional para rollback
+    pub pubsub_events: Option<PubSubEventService>, // Optional para eventos
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Inicializar CryptoProvider para rustls
+    rustls::crypto::aws_lc_rs::default_provider().install_default()
+        .expect("Failed to install rustls crypto provider");
+        
     // Inicializar tracing
     tracing_subscriber::fmt::init();
 
@@ -42,29 +47,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Inicializar serviços
     let clickup_service = ClickUpService::new(&settings);
     
+    // Inicializar Cloud Tasks (opcional para rollback)
+    let cloud_tasks_service = match CloudTasksService::new(settings.cloud_tasks.clone()).await {
+        Ok(service) => {
+            log_info("Cloud Tasks service initialized successfully");
+            Some(service)
+        }
+        Err(e) => {
+            log_error(&format!("Failed to initialize Cloud Tasks service: {}. Falling back to MessageScheduler", e));
+            None
+        }
+    };
+    
     // Inicializar scheduler com intervalos otimizados para performance
     // Redução de 100s para 10s em produção = melhoria de 90% no tempo de resposta
-    let is_development = cfg!(debug_assertions) || 
+    let is_development = cfg!(debug_assertions) ||
         std::env::var("RUST_ENV").unwrap_or_default() == "development";
     
-    let interval = if is_development { 
+    let interval = if is_development {
         5  // 5s em desenvolvimento para testes rápidos
-    } else { 
+    } else {
         10 // 10s em produção (era 100s - redução de 90%)
     };
     
-    log_info(&format!("Scheduler interval configured: {}s ({})", 
-        interval, 
+    log_info(&format!("Scheduler interval configured: {}s ({})",
+        interval,
         if is_development { "development" } else { "production" }
     ));
     
     let mut scheduler = MessageScheduler::new(interval);
     scheduler.configure(settings.clone(), clickup_service.clone());
     
-    // PubSub é opcional - se falhar, apenas log warning
-    // if let Err(e) = PubSubService::new(&settings).await {
-    //     tracing::warn!("PubSub service not available: {}. Running without PubSub.", e);
-    // }
+        // Inicializar PubSub Event Service (opcional para Fase 2)
+    let pubsub_events_service = match PubSubEventService::new(&settings.gcp).await {
+        Ok(service) => {
+            log_info("PubSub Event Service initialized successfully");
+            Some(service)
+        }
+        Err(e) => {
+            tracing::warn!("PubSub Event Service not available: {}. Running without event publishing.", e);
+            None
+        }
+    };
 
     // Inicializar estado da aplicação
     let app_state = Arc::new(AppState {
@@ -72,6 +96,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         clickup: clickup_service,
         scheduler: scheduler.clone(),
         settings: settings.clone(),
+        cloud_tasks: cloud_tasks_service,
+        pubsub_events: pubsub_events_service,
     });
     
     // Iniciar o scheduler (como no legado)
@@ -84,15 +110,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/health", get(health_check))
         .route("/ready", get(ready_check))
         .route("/status", get(status_check))
-        .route("/scheduler/status", get(scheduler_status))
         
         // Webhooks ChatGuru (aceita múltiplos formatos)
         .route("/webhooks/chatguru", post(handle_webhook_flexible))
         
-        // ClickUp endpoints
-        .route("/clickup/tasks", get(list_clickup_tasks))
-        .route("/clickup/list", get(get_clickup_list_info))
-        .route("/clickup/test", get(test_clickup_connection))
+        // Cloud Tasks Worker endpoints
+        .route("/worker/process", post(process_task_handler))
+        
+        // PubSub test endpoint (Fase 2)
+        .route("/pubsub/test", get(test_pubsub_connection))
         
         .with_state(app_state);
 

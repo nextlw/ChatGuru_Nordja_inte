@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"struct":["AccessSecretVersion","AddSecretVersion","CreateSecret","DeleteSecret","DestroySecretVersion","DisableSecretVersion","EnableSecretVersion","GetIamPolicy","GetLocation","GetSecret","GetSecretVersion","ListLocations","ListSecretVersions","ListSecrets","SetIamPolicy","TestIamPermissions","UpdateSecret"],"type":["ClientBuilder"]};

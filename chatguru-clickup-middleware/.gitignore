@@ -1,7 +1,9 @@
 # Build artifacts
 /target/
+target/
 **/*.rs.bk
 *.pdb
+Cargo.lock
 
 # IDE
 .idea/
@@ -12,6 +14,7 @@
 
 # Environment files
 .env
+.env.*
 .env.local
 .env.*.local
 
@@ -41,6 +44,8 @@ verify-*.sh
 *.temp
 /tmp/
 /temp/
+deploy-test-info.txt
+deploy-info.txt
 
 # Node modules
 node_modules/

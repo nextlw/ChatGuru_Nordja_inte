@@ -61,6 +61,17 @@ pub async fn handle_webhook_flexible(
         WebhookPayload::Generic(_) => log_info("Detected Generic payload format"),
     }
 
+    // Publicar evento de webhook recebido (auditoria) - Fase 2
+    if let Some(pubsub) = &state.pubsub_events {
+        let pubsub_clone = pubsub.clone();
+        let payload_clone = webhook_payload.clone();
+        tokio::spawn(async move {
+            if let Err(e) = pubsub_clone.publish_webhook_received(&payload_clone).await {
+                log_error(&format!("Failed to publish webhook_received event: {}", e));
+            }
+        });
+    }
+    
     // Clonar estado e payload para processamento assíncrono
     let state_clone = Arc::clone(&state);
     let webhook_payload_clone = webhook_payload.clone();
@@ -69,6 +80,15 @@ pub async fn handle_webhook_flexible(
     tokio::spawn(async move {
         if let Err(e) = process_webhook_with_ai(&state_clone, &webhook_payload_clone).await {
             log_error(&format!("Background webhook processing error: {}", e));
+            
+            // Publicar erro crítico se PubSub disponível
+            if let Some(pubsub) = &state_clone.pubsub_events {
+                let _ = pubsub.publish_critical_error(
+                    "webhook_processing",
+                    &e.to_string(),
+                    Some(&webhook_payload_clone)
+                ).await;
+            }
         }
     });
     
@@ -82,11 +102,7 @@ pub async fn handle_webhook_flexible(
 }
 
 async fn process_webhook_with_ai(state: &Arc<AppState>, payload: &WebhookPayload) -> AppResult<()> {
-    // COMPORTAMENTO DO LEGADO:
-    // 1. Agrupa mensagem primeiro
-    // 2. Scheduler processa depois (a cada 100 segundos)
-    // 3. AI classifica no scheduler
-    // 4. Cria tarefa apenas se for atividade
+    // COMPORTAMENTO NOVO (Fase 1): Cloud Tasks com fallback para MessageScheduler
     
     // Filtrar eventos que não devem ser processados
     if let WebhookPayload::EventType(event_payload) = payload {
@@ -98,22 +114,65 @@ async fn process_webhook_with_ai(state: &Arc<AppState>, payload: &WebhookPayload
     }
     
     // Extrair dados básicos
-    let _chat_id = extract_chat_id_from_payload(payload);  // Usado internamente no scheduler
-    let _phone = extract_phone_from_payload(payload);      // Usado internamente no scheduler
+    let _chat_id = extract_chat_id_from_payload(payload);
+    let _phone = extract_phone_from_payload(payload);
     let nome = extract_nome_from_payload(payload);
     let message = extract_message_from_payload(payload);
     
-    // Log como o legado
+    // Log da mensagem recebida
     log_info(&format!(
-        "Mensagem de {} agrupada recebida: {}",
+        "Mensagem de {} recebida: {}",
         if !nome.is_empty() { nome.clone() } else { "Não Disponível".to_string() },
         message
     ));
     
-    // Adicionar ao scheduler para processamento posterior (COMO O LEGADO)
-    state.scheduler.queue_message(payload, None).await;
+    // *** FASE 1: Cloud Tasks com fallback para MessageScheduler ***
+    if let Some(cloud_tasks) = &state.cloud_tasks {
+        // Usar Cloud Tasks para processamento assíncrono (clonando para evitar borrow issues)
+        let mut cloud_tasks_clone = cloud_tasks.clone();
+        match cloud_tasks_clone.enqueue_webhook_task(payload).await {
+            Ok(task_name) => {
+                log_info(&format!("Task enqueued in Cloud Tasks: {}", task_name));
+                
+                // Publicar evento de Cloud Task enqueued - Fase 2
+                if let Some(pubsub) = &state.pubsub_events {
+                    let pubsub_clone = pubsub.clone();
+                    let payload_clone = payload.clone();
+                    let task_name_clone = task_name.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = pubsub_clone.publish_cloud_task_enqueued(&task_name_clone, &payload_clone).await {
+                            log_error(&format!("Failed to publish cloud_task_enqueued event: {}", e));
+                        }
+                    });
+                }
+                
+                return Ok(());
+            }
+            Err(e) => {
+                log_error(&format!("Cloud Tasks failed: {}. Falling back to MessageScheduler", e));
+                
+                // Publicar erro crítico de Cloud Tasks - Fase 2
+                if let Some(pubsub) = &state.pubsub_events {
+                    let pubsub_clone = pubsub.clone();
+                    let payload_clone = payload.clone();
+                    let error_msg = e.to_string();
+                    tokio::spawn(async move {
+                        let _ = pubsub_clone.publish_critical_error(
+                            "cloud_tasks_enqueue_failed",
+                            &error_msg,
+                            Some(&payload_clone)
+                        ).await;
+                    });
+                }
+                
+                // Continua para usar MessageScheduler como fallback
+            }
+        }
+    }
     
-    // NÃO processar imediatamente - o scheduler fará isso
+    // Fallback: usar MessageScheduler (comportamento original)
+    log_info("Using MessageScheduler fallback (Cloud Tasks not available or failed)");
+    state.scheduler.queue_message(payload, None).await;
     log_info("Message queued for processing by scheduler");
     
     Ok(())

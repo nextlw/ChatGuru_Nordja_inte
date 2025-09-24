@@ -1,1 +1,0 @@
-pub(crate) const RUSTC_VERSION: &str = "1.89.0";

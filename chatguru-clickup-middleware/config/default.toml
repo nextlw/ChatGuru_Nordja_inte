@@ -1,6 +1,7 @@
 [server]
 host = "0.0.0.0"
 port = 8080
+base_url = "https://chatguru-clickup-middleware-123456789-uc.a.run.app"
 
 [clickup]
 base_url = "https://api.clickup.com/api/v2"
@@ -26,3 +27,9 @@ phone_ids = [
 [ai]
 enabled = true  # Sempre usar Vertex AI para classificação de atividades
 # No Cloud Run, Vertex AI usa automaticamente a service account configurada
+
+[cloud_tasks]
+project_id = "buzzlightear"
+location = "southamerica-east1"
+queue_name = "chatguru-webhook-queue"
+service_account_email = "chatguru-worker@buzzlightear.iam.gserviceaccount.com"
