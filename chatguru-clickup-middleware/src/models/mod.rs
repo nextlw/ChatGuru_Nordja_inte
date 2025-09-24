@@ -1,3 +1,3 @@
-pub mod chatguru_events;
+pub mod webhook_payload;
 
-pub use chatguru_events::*;
+pub use webhook_payload::*;

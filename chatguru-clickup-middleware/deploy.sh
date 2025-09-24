@@ -23,6 +23,14 @@ SERVICE_NAME="chatguru-clickup-middleware"
 CLICKUP_API_TOKEN="pk_106092691_UC96HSQJH4ZUS3NJATYHIQ06BQQYM657"
 CLICKUP_LIST_ID="901300373349"
 
+# Configurações do ChatGuru
+CHATGURU_API_TOKEN="TXUKDWXS92SSN9KP3MCLX9AADSXAYVGB2MWWER0ESYNRZE80ZNLUQ9HYCXKXQ1BK"
+CHATGURU_API_ENDPOINT="https://s15.chatguru.app/api/v1"
+CHATGURU_ACCOUNT_ID="625584ce6fdcb7bda7d94aa8"
+
+# Configurações da IA
+AI_ENABLED="true"
+
 # Funções para output colorido
 print_header() {
     echo ""
@@ -86,7 +94,7 @@ print_success "Projeto configurado: ${PROJECT_ID}"
 
 # 4. Verificar/Habilitar APIs necessárias
 print_status "Verificando APIs necessárias..."
-APIS_NEEDED="run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com"
+APIS_NEEDED="run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com aiplatform.googleapis.com"
 
 for api in $APIS_NEEDED; do
     if gcloud services list --enabled --filter="name:${api}" --format="value(name)" | grep -q "${api}"; then
@@ -97,6 +105,30 @@ for api in $APIS_NEEDED; do
         print_success "API ${api} habilitada"
     fi
 done
+
+# 4.1 Configurar Service Account para Vertex AI
+print_status "Configurando permissões para Vertex AI..."
+
+# Obter a service account padrão do Cloud Run
+# O número do projeto é 707444002434
+SERVICE_ACCOUNT="707444002434-compute@developer.gserviceaccount.com"
+print_status "Service Account: ${SERVICE_ACCOUNT}"
+
+# Verificar/adicionar role para Vertex AI
+VERTEX_ROLE="roles/aiplatform.user"
+if gcloud projects get-iam-policy ${PROJECT_ID} \
+    --flatten="bindings[].members" \
+    --format="table(bindings.role)" \
+    --filter="bindings.members:${SERVICE_ACCOUNT}" | grep -q "${VERTEX_ROLE}"; then
+    print_success "Permissão ${VERTEX_ROLE} já configurada"
+else
+    print_warning "Adicionando permissão ${VERTEX_ROLE}..."
+    gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+        --member="serviceAccount:${SERVICE_ACCOUNT}" \
+        --role="${VERTEX_ROLE}" \
+        --quiet > /dev/null 2>&1
+    print_success "Permissão ${VERTEX_ROLE} adicionada"
+fi
 
 # 5. Escolher método de deploy
 echo ""
@@ -147,7 +179,7 @@ case $DEPLOY_METHOD in
             --timeout 300 \
             --min-instances 0 \
             --max-instances 10 \
-            --set-env-vars "CLICKUP_API_TOKEN=${CLICKUP_API_TOKEN},CLICKUP_LIST_ID=${CLICKUP_LIST_ID},RUST_LOG=info"; then
+            --set-env-vars "CLICKUP_API_TOKEN=${CLICKUP_API_TOKEN},CLICKUP_LIST_ID=${CLICKUP_LIST_ID},CHATGURU__API_TOKEN=${CHATGURU_API_TOKEN},CHATGURU__API_ENDPOINT=${CHATGURU_API_ENDPOINT},CHATGURU__ACCOUNT_ID=${CHATGURU_ACCOUNT_ID},AI__ENABLED=${AI_ENABLED},GCP__PROJECT_ID=${PROJECT_ID},RUST_LOG=info"; then
             
             print_success "Deploy concluído com sucesso!"
             
@@ -227,7 +259,7 @@ case $DEPLOY_METHOD in
             --timeout 300 \
             --min-instances 0 \
             --max-instances 10 \
-            --set-env-vars "CLICKUP_API_TOKEN=${CLICKUP_API_TOKEN},CLICKUP_LIST_ID=${CLICKUP_LIST_ID},RUST_LOG=info" \
+            --set-env-vars "CLICKUP_API_TOKEN=${CLICKUP_API_TOKEN},CLICKUP_LIST_ID=${CLICKUP_LIST_ID},CHATGURU__API_TOKEN=${CHATGURU_API_TOKEN},CHATGURU__API_ENDPOINT=${CHATGURU_API_ENDPOINT},CHATGURU__ACCOUNT_ID=${CHATGURU_ACCOUNT_ID},AI__ENABLED=${AI_ENABLED},GCP__PROJECT_ID=${PROJECT_ID},RUST_LOG=info" \
             --quiet
             
         print_success "Deploy concluído!"

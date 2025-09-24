@@ -45,6 +45,8 @@ hex = "0.4"
 # Google Cloud
 google-cloud-pubsub = "0.30"
 google-cloud-googleapis = { version = "0.16", features = ["pubsub"] }
+google-cloud-auth = "0.17"  # Para autenticação com Vertex AI
+google-cloud-token = "0.1"  # Token provider para Vertex AI
 
 # Secret Manager - aguardando versão compatível com Rust 1.82
 # TODO: Adicionar quando disponível versão compatível

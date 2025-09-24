@@ -7,6 +7,7 @@ pub struct Settings {
     pub clickup: ClickUpSettings,
     pub gcp: GcpSettings,
     pub chatguru: ChatGuruSettings,
+    pub ai: Option<AISettings>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -33,6 +34,18 @@ pub struct GcpSettings {
 pub struct ChatGuruSettings {
     pub webhook_secret: Option<String>,
     pub validate_signature: bool,
+    #[serde(default)]
+    pub legacy_response_mode: Option<bool>,
+    pub api_token: Option<String>,  // Token para enviar anotações de volta
+    pub api_endpoint: Option<String>,  // Endpoint da API do ChatGuru
+    pub account_id: Option<String>,  // ID da conta no ChatGuru
+    pub phone_ids: Option<Vec<String>>,  // IDs dos telefones configurados
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AISettings {
+    pub enabled: bool,
+    // Usa sempre Vertex AI no Google Cloud (mais eficiente e integrado)
 }
 
 impl Settings {

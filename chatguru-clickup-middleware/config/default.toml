@@ -14,3 +14,15 @@ subscription_name = "chatguru-events-subscription"
 
 [chatguru]
 validate_signature = false
+legacy_response_mode = true  # Sempre retorna {"message": "Success"} para compatibilidade
+api_token = "TXUKDWXS92SSN9KP3MCLX9AADSXAYVGB2MWWER0ESYNRZE80ZNLUQ9HYCXKXQ1BK"  # API Key do ChatGuru
+api_endpoint = "https://s15.chatguru.app/api/v1"
+account_id = "625584ce6fdcb7bda7d94aa8"  # ID da conta Voila
+phone_ids = [
+    "6537de23b6d5b0bb0b80421a",  # +55 (11) 988348951
+    "62558780e2923cc4705beee1"   # +55 (11) 970525814
+]
+
+[ai]
+enabled = true  # Sempre usar Vertex AI para classificação de atividades
+# No Cloud Run, Vertex AI usa automaticamente a service account configurada

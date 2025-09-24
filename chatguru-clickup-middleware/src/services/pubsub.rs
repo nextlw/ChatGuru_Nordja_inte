@@ -1,3 +1,7 @@
+// NOTA: Este serviço está temporariamente desabilitado
+// Precisa ser atualizado para usar WebhookPayload ao invés de ChatGuruEvent
+
+/*
 #![allow(dead_code)]
 
 use crate::config::Settings;
@@ -221,3 +225,4 @@ impl PubSubService {
         self.publisher.shutdown().await;
     }
 }
+*/

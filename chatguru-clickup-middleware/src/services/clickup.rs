@@ -1,5 +1,5 @@
 use crate::config::Settings;
-use crate::models::ChatGuruEvent;
+use crate::models::WebhookPayload;
 use crate::services::secret_manager::SecretManagerService;
 use crate::utils::{AppError, AppResult};
 use crate::utils::logging::*;
@@ -43,33 +43,21 @@ impl ClickUpService {
         })
     }
 
-    pub async fn create_task_from_event(&self, event: &ChatGuruEvent) -> AppResult<Value> {
-        let task_data = event.to_clickup_task_data();
+    pub async fn create_task_from_json(&self, task_data: &Value) -> AppResult<Value> {
         let url = format!("https://api.clickup.com/api/v2/list/{}/task", self.list_id);
-
-        log_chatguru_event(&event.campanha_nome, &serde_json::to_value(event)?);
-
+        
         let response = self.client
             .post(&url)
             .header("Authorization", &self.token)
             .header("Content-Type", "application/json")
-            .json(&task_data)
+            .json(task_data)
             .send()
             .await?;
 
         let status = response.status();
         
         if status.is_success() {
-            let task_response: Value = response.json().await?;
-            
-            if let (Some(id), Some(name)) = (
-                task_response.get("id").and_then(|v| v.as_str()),
-                task_response.get("name").and_then(|v| v.as_str())
-            ) {
-                log_clickup_task_created(id, name);
-            }
-            
-            Ok(task_response)
+            Ok(response.json().await?)
         } else {
             let error_text = response.text().await.unwrap_or_default();
             log_clickup_api_error(&url, Some(status.as_u16()), &error_text);
@@ -198,107 +186,88 @@ impl ClickUpService {
         Ok(updated_task)
     }
 
-    /// Função principal que processa a tarefa conforme regra de negócio:
+    /// Processa webhook payload de qualquer formato (ChatGuru, EventType, Generic)
+    /// Regras de negócio:
     /// 1. Verifica se já existe tarefa com mesmo título
     /// 2. Se existir, adiciona comentário com histórico e atualiza tarefa
     /// 3. Se não existir, cria tarefa nova
-    pub async fn process_clickup_task(&self, event: &ChatGuruEvent) -> AppResult<Value> {
-        // Log do evento recebido
-        log_info(&format!("Processing ChatGuru event - Campanha: {}, Contato: {}",
-            event.campanha_nome, event.nome));
+    pub async fn process_webhook_payload(&self, payload: &WebhookPayload) -> AppResult<Value> {
+        // Extrair título e dados da tarefa
+        let task_title = payload.get_task_title();
+        let task_data = payload.to_clickup_task_data();
         
-        // 1. Gera dados da tarefa usando o novo método
-        let task_data = event.to_clickup_task_data();
-
-        let title = task_data.get("name")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default();
+        log_info(&format!("Processing webhook payload - Task title: {}", task_title));
         
-        log_info(&format!("Task title generated: {}", title));
-
-        // 2. Busca tarefa existente na lista com mesmo título
-        log_info(&format!("Searching for existing task with title: {}", title));
-        
-        if let Some(existing_task) = self.find_existing_task_in_list(title).await? {
-            let task_id = existing_task.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+        // Buscar tarefa existente
+        if let Some(existing_task) = self.find_existing_task_in_list(&task_title).await? {
+            // Tarefa existe - atualizar
+            let task_id = existing_task.get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             
             log_info(&format!("Found existing task with ID: {} - Will update", task_id));
-
-            // 3. Preserva histórico adicionando comentário com dados anteriores
-            let prev_title = existing_task.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            let prev_description = existing_task.get("description").and_then(|v| v.as_str()).unwrap_or("");
             
-            // Obter data de atualização anterior
-            let prev_updated = if let Some(date_str) = existing_task.get("date_updated").and_then(|v| v.as_str()) {
-                date_str.to_string()
-            } else if let Some(date_num) = existing_task.get("date_updated").and_then(|v| v.as_u64()) {
-                date_num.to_string()
-            } else {
-                "Unknown".to_string()
-            };
-
-            let history_comment = format!(
-                "📝 **Atualização Automática via ChatGuru**\n\n\
-                **Campanha:** {}\n\
-                **Contato:** {}\n\
-                **Timestamp:** {}\n\n\
-                ---\n\n\
-                **Histórico da Versão Anterior:**\n\
-                - **Título:** {}\n\
-                - **Última Atualização:** {}\n\n\
-                **Descrição Anterior:**\n```\n{}\n```\n\n\
-                **Nova Mensagem:**\n{}\n\n\
-                **Link do Chat:** {}",
-                event.campanha_nome,
-                event.nome,
-                chrono::Utc::now().to_rfc3339(),
-                prev_title,
-                prev_updated,
-                prev_description,
-                event.texto_mensagem,
-                event.link_chat
-            );
-
-            log_info(&format!("Adding history comment to task {}", task_id));
+            // Adicionar comentário com histórico
+            let history_comment = self.build_history_comment(&existing_task, payload);
             self.add_comment_to_task(task_id, &history_comment).await?;
-
-            // Atualiza a tarefa com os novos dados
-            log_info(&format!("Updating task {} with new data", task_id));
-            let updated_task = self.update_task(task_id, &task_data).await?;
             
-            log_clickup_task_updated(task_id, title);
-
+            // Atualizar tarefa
+            let updated_task = self.update_task(task_id, &task_data).await?;
+            log_clickup_task_updated(task_id, &task_title);
+            
             Ok(updated_task)
         } else {
-            log_info(&format!("No existing task found - Creating new task"));
-            
-            // 4. Cria a tarefa nova
-            let url = format!("https://api.clickup.com/api/v2/list/{}/task", self.list_id);
-
-            let resp = self.client.post(&url)
-                .header("Authorization", &self.token)
-                .header("Content-Type", "application/json")
-                .json(&task_data)
-                .send()
-                .await?;
-
-            let status = resp.status();
-            if !status.is_success() {
-                let err_text = resp.text().await.unwrap_or_default();
-                log_clickup_api_error(&url, Some(status.as_u16()), &err_text);
-                return Err(AppError::ClickUpApi(format!("Failed to create task: {}", err_text)));
-            }
-
-            let created_task: Value = resp.json().await?;
+            // Tarefa não existe - criar nova
+            log_info("No existing task found - Creating new task");
+            let new_task = self.create_task_from_json(&task_data).await?;
             
             if let (Some(id), Some(name)) = (
-                created_task.get("id").and_then(|v| v.as_str()),
-                created_task.get("name").and_then(|v| v.as_str())
+                new_task.get("id").and_then(|v| v.as_str()),
+                new_task.get("name").and_then(|v| v.as_str())
             ) {
                 log_clickup_task_created(id, name);
             }
             
-            Ok(created_task)
+            Ok(new_task)
         }
+    }
+    
+    /// Constrói comentário com histórico para atualização de tarefa
+    fn build_history_comment(&self, existing_task: &Value, payload: &WebhookPayload) -> String {
+        let prev_title = existing_task.get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let prev_description = existing_task.get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let prev_updated = if let Some(date_str) = existing_task.get("date_updated").and_then(|v| v.as_str()) {
+            date_str.to_string()
+        } else if let Some(date_num) = existing_task.get("date_updated").and_then(|v| v.as_u64()) {
+            date_num.to_string()
+        } else {
+            "Unknown".to_string()
+        };
+        
+        let payload_type = match payload {
+            WebhookPayload::ChatGuru(_) => "ChatGuru",
+            WebhookPayload::EventType(_) => "EventType", 
+            WebhookPayload::Generic(_) => "Generic",
+        };
+        
+        format!(
+            "📝 **Atualização Automática via Webhook**\n\n\
+            **Timestamp:** {}\n\
+            **Tipo de Payload:** {}\n\n\
+            ---\n\n\
+            **Histórico da Versão Anterior:**\n\
+            - **Título:** {}\n\
+            - **Última Atualização:** {}\n\n\
+            **Descrição Anterior:**\n```\n{}\n```",
+            chrono::Utc::now().to_rfc3339(),
+            payload_type,
+            prev_title,
+            prev_updated,
+            prev_description
+        )
     }
 }

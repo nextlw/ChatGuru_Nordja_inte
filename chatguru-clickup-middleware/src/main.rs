@@ -14,7 +14,7 @@ mod utils;
 use config::Settings;
 use handlers::{
     health_check, ready_check, status_check,
-    handle_chatguru_webhook,
+    handle_webhook_flexible,
     list_clickup_tasks, get_clickup_list_info, test_clickup_connection,
 };
 use services::ClickUpService;
@@ -60,8 +60,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/ready", get(ready_check))
         .route("/status", get(status_check))
         
-        // Webhooks ChatGuru
-        .route("/webhooks/chatguru", post(handle_chatguru_webhook))
+        // Webhooks ChatGuru (aceita múltiplos formatos)
+        .route("/webhooks/chatguru", post(handle_webhook_flexible))
         
         // ClickUp endpoints
         .route("/clickup/tasks", get(list_clickup_tasks))
