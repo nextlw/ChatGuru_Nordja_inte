@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"enum":["Replication"],"mod":["user_managed"],"struct":["Automatic","UserManaged"]};

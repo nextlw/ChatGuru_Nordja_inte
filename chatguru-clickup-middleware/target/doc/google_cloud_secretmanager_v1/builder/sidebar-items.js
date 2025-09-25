@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"mod":["secret_manager_service"]};

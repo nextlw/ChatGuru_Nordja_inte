@@ -16,6 +16,8 @@ pub struct QueuedMessage {
     pub phone: String,
     pub nome: String,
     pub message: String,
+    pub media_url: Option<String>,  // URL da mídia anexada
+    pub media_type: Option<String>,  // Tipo da mídia (audio/image)
     pub annotation: Option<String>,
     pub timestamp: DateTime<Utc>,
     pub processed: bool,
@@ -68,7 +70,7 @@ impl MessageScheduler {
     
     /// Add a message to the queue (called from webhook handler)
     pub async fn queue_message(&self, payload: &WebhookPayload, annotation: Option<String>) {
-        let (chat_id, phone, nome, message, info_1, info_2) = match payload {
+        let (chat_id, phone, nome, message, media_url, media_type, info_1, info_2) = match payload {
             WebhookPayload::ChatGuru(p) => {
                 // Extrair Info_1 e Info_2 dos campos personalizados
                 let info_1 = p.campos_personalizados.get("Info_1")
@@ -83,6 +85,8 @@ impl MessageScheduler {
                     p.celular.clone(),
                     p.nome.clone(),
                     p.texto_mensagem.clone(),
+                    p.media_url.clone(),
+                    p.media_type.clone(),
                     info_1,
                     info_2,
                 )
@@ -96,6 +100,8 @@ impl MessageScheduler {
                     p.data.annotation.clone().unwrap_or_default(),
                     None,
                     None,
+                    None,
+                    None,
                 )
             },
             WebhookPayload::Generic(p) => {
@@ -107,6 +113,8 @@ impl MessageScheduler {
                     p.mensagem.clone().unwrap_or_default(),
                     None,
                     None,
+                    None,
+                    None,
                 )
             }
         };
@@ -116,6 +124,8 @@ impl MessageScheduler {
             phone: phone.clone(),
             nome: nome.clone(),
             message,
+            media_url,
+            media_type,
             annotation,
             timestamp: Utc::now(),
             processed: false,
@@ -309,6 +319,8 @@ impl MessageScheduler {
                         nome: conversation.nome.clone(),
                         tags: vec![],
                         texto_mensagem: message.message.clone(),
+                        media_url: message.media_url.clone(),
+                        media_type: message.media_type.clone(),
                         campos_personalizados: HashMap::new(),
                         bot_context: None,
                         responsavel_nome: None,
@@ -365,6 +377,8 @@ impl MessageScheduler {
                     nome: conversation.nome.clone(),
                     tags: vec![],  // Legado não usa tags
                     texto_mensagem: message.message.clone(),
+                    media_url: message.media_url.clone(),  // Preservar mídia se houver
+                    media_type: message.media_type.clone(),  // Preservar tipo de mídia
                     campos_personalizados,  // Preservar campos Info_1 e Info_2 se vierem
                     bot_context: None,  // Legado não usa bot_context
                     responsavel_nome: None,  // Legado não define responsável

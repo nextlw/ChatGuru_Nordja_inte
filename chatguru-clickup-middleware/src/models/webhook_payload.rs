@@ -29,6 +29,10 @@ pub struct ChatGuruPayload {
     #[serde(default)]
     pub texto_mensagem: String,
     #[serde(default)]
+    pub media_url: Option<String>,  // URL do áudio ou mídia anexada
+    #[serde(default)]
+    pub media_type: Option<String>, // Tipo da mídia (audio, image, video)
+    #[serde(default)]
     pub campos_personalizados: HashMap<String, Value>,
     #[serde(default)]
     pub bot_context: Option<BotContext>,
@@ -191,6 +195,26 @@ impl WebhookPayload {
             description.push_str(&payload.texto_mensagem);
         }
         
+        // Adicionar mídia anexada se houver
+        if let Some(ref media_url) = payload.media_url {
+            if let Some(ref media_type) = payload.media_type {
+                description.push_str("\n\n**Mídia Anexada**\n");
+                
+                if media_type.contains("image") || media_type.contains("photo") {
+                    // Para imagens, incluir link direto e preview no Markdown
+                    description.push_str(&format!("🖼️ Imagem anexada: [Visualizar]({})\n", media_url));
+                    // Tentar incluir a imagem inline no Markdown do ClickUp
+                    description.push_str(&format!("\n![Imagem anexada]({})\n", media_url));
+                } else if media_type.contains("audio") || media_type.contains("voice") {
+                    // Para áudios, apenas incluir o link
+                    description.push_str(&format!("🎵 Áudio anexado: [Ouvir]({})\n", media_url));
+                } else {
+                    // Para outros tipos de mídia
+                    description.push_str(&format!("📎 Arquivo anexado: [Baixar]({})\n", media_url));
+                }
+            }
+        }
+        
         // Preparar campos personalizados do ClickUp
         let mut custom_fields = Vec::new();
         
@@ -343,6 +367,26 @@ impl WebhookPayload {
         if !payload.texto_mensagem.is_empty() {
             description.push_str("\n**Mensagem**\n");
             description.push_str(&payload.texto_mensagem);
+        }
+        
+        // Adicionar mídia anexada se houver
+        if let Some(ref media_url) = payload.media_url {
+            if let Some(ref media_type) = payload.media_type {
+                description.push_str("\n\n**Mídia Anexada**\n");
+                
+                if media_type.contains("image") || media_type.contains("photo") {
+                    // Para imagens, incluir link direto e preview no Markdown
+                    description.push_str(&format!("🖼️ Imagem anexada: [Visualizar]({})\n", media_url));
+                    // Tentar incluir a imagem inline no Markdown do ClickUp
+                    description.push_str(&format!("\n![Imagem anexada]({})\n", media_url));
+                } else if media_type.contains("audio") || media_type.contains("voice") {
+                    // Para áudios, apenas incluir o link
+                    description.push_str(&format!("🎵 Áudio anexado: [Ouvir]({})\n", media_url));
+                } else {
+                    // Para outros tipos de mídia
+                    description.push_str(&format!("📎 Arquivo anexado: [Baixar]({})\n", media_url));
+                }
+            }
         }
         
         // Nome da tarefa - FORMATO LEGADO: [ChatGuru] Nome

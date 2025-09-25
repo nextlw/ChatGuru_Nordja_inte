@@ -1,2 +1,0 @@
-createSrcSidebar('[["google_cloud_secretmanager_v1",["",[["stub",[],["dynamic.rs"]]],["builder.rs","client.rs","lib.rs","model.rs","stub.rs","tracing.rs","transport.rs"]]]]');
-//{"start":19,"fragment_lengths":[152]}

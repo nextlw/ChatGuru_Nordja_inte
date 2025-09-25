@@ -103,6 +103,17 @@ async fn process_webhook_with_ai(state: &Arc<AppState>, payload: &WebhookPayload
     let nome = extract_nome_from_payload(payload);
     let message = extract_message_from_payload(payload);
     
+    // Verificar se há mídia anexada (áudio ou imagem)
+    let media_info = extract_media_from_payload(payload);
+    if let Some((media_url, media_type)) = &media_info {
+        log_info(&format!(
+            "Mídia {} recebida de {}: {}",
+            media_type,
+            if !nome.is_empty() { nome.clone() } else { "Não Disponível".to_string() },
+            media_url
+        ));
+    }
+    
     // Log como o legado
     log_info(&format!(
         "Mensagem de {} agrupada recebida: {}",
@@ -201,4 +212,17 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
         result |= x ^ y;
     }
     result == 0
+}
+
+fn extract_media_from_payload(payload: &WebhookPayload) -> Option<(String, String)> {
+    match payload {
+        WebhookPayload::ChatGuru(p) => {
+            if let (Some(url), Some(media_type)) = (&p.media_url, &p.media_type) {
+                Some((url.clone(), media_type.clone()))
+            } else {
+                None
+            }
+        },
+        _ => None,
+    }
 }

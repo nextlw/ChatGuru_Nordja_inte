@@ -6,6 +6,7 @@ use crate::services::openai_fallback::OpenAIService;
 use crate::services::conversation_tracker::{ConversationTracker, TaskAction};
 use crate::services::ai_prompt_loader::AiPromptConfig;
 use crate::services::clickup_fields_fetcher::{ClickUpFieldsFetcher, FieldMappings};
+use crate::services::chatguru_api::ChatGuruApiService;
 use std::fs;
 use serde_yaml;
 use reqwest::Client;
@@ -144,9 +145,276 @@ impl VertexAIService {
         Ok(token_response.access_token)
     }
 
+    /// Processa mídia (áudio ou imagem) e retorna texto processado
+    pub async fn process_media(&self, media_url: &str, media_type: &str) -> AppResult<String> {
+        // Baixar o arquivo de mídia
+        let media_bytes = self.download_media(media_url).await?;
+        
+        match media_type {
+            "audio" | "voice" => {
+                // Transcrever áudio usando Vertex AI Speech-to-Text ou Gemini
+                self.transcribe_audio(&media_bytes).await
+            },
+            "image" | "photo" => {
+                // Analisar imagem usando Vertex AI Vision ou Gemini
+                self.analyze_image(&media_bytes).await
+            },
+            _ => {
+                log_warning(&format!("Tipo de mídia não suportado: {}", media_type));
+                Ok(format!("[Mídia {} não processada]", media_type))
+            }
+        }
+    }
+    
+    /// Baixa arquivo de mídia da URL
+    async fn download_media(&self, url: &str) -> AppResult<Vec<u8>> {
+        let response = self.client
+            .get(url)
+            .timeout(std::time::Duration::from_secs(30))
+            .send()
+            .await
+            .map_err(|e| AppError::InternalError(format!("Erro ao baixar mídia: {}", e)))?;
+        
+        if !response.status().is_success() {
+            return Err(AppError::InternalError(format!(
+                "Erro ao baixar mídia: Status {}",
+                response.status()
+            )));
+        }
+        
+        response
+            .bytes()
+            .await
+            .map(|b| b.to_vec())
+            .map_err(|e| AppError::InternalError(format!("Erro ao ler bytes da mídia: {}", e)))
+    }
+    
+    /// Transcreve áudio usando Gemini multimodal
+    async fn transcribe_audio(&self, audio_bytes: &[u8]) -> AppResult<String> {
+        // Verificar token de acesso
+        let token = self.access_token.as_ref()
+            .ok_or_else(|| AppError::ConfigError("Vertex AI access token not configured".to_string()))?;
+        
+        // Usar Gemini 2.0 que suporta áudio
+        let model = "gemini-2.0-flash-exp";
+        let url = format!(
+            "https://{}-aiplatform.googleapis.com/v1/projects/{}/locations/us-central1/publishers/google/models/{}:generateContent",
+            "us-central1", self.project_id, model
+        );
+        
+        // Codificar áudio em base64
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        let audio_base64 = STANDARD.encode(audio_bytes);
+        
+        // Criar request com áudio
+        let request_body = json!({
+            "contents": [{
+                "role": "user",
+                "parts": [
+                    {
+                        "inline_data": {
+                            "mime_type": "audio/mpeg",  // Assumir MP3, ajustar conforme necessário
+                            "data": audio_base64
+                        }
+                    },
+                    {
+                        "text": "Transcreva este áudio em português brasileiro. Retorne apenas o texto transcrito, sem formatação adicional."
+                    }
+                ]
+            }],
+            "generationConfig": {
+                "temperature": 0.1,
+                "maxOutputTokens": 1024,
+                "topP": 0.8
+            }
+        });
+        
+        log_info("Enviando áudio para transcrição no Gemini 2.0");
+        
+        let response = self.client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .json(&request_body)
+            .timeout(std::time::Duration::from_secs(60))
+            .send()
+            .await
+            .map_err(|e| AppError::InternalError(format!("Erro ao transcrever áudio: {}", e)))?;
+        
+        if !response.status().is_success() {
+            let error = response.text().await.unwrap_or_default();
+            return Err(AppError::InternalError(format!("Erro na transcrição: {}", error)));
+        }
+        
+        let json_response: Value = response.json().await?;
+        
+        // Extrair texto transcrito
+        let transcription = json_response
+            .get("candidates")
+            .and_then(|c| c.get(0))
+            .and_then(|candidate| candidate.get("content"))
+            .and_then(|content| content.get("parts"))
+            .and_then(|parts| parts.get(0))
+            .and_then(|part| part.get("text"))
+            .and_then(|t| t.as_str())
+            .unwrap_or("[Erro na transcrição]")
+            .to_string();
+        
+        log_info(&format!("Áudio transcrito: {}", transcription));
+        Ok(transcription)
+    }
+    
+    /// Analisa imagem usando Gemini multimodal
+    async fn analyze_image(&self, image_bytes: &[u8]) -> AppResult<String> {
+        // Verificar token de acesso
+        let token = self.access_token.as_ref()
+            .ok_or_else(|| AppError::ConfigError("Vertex AI access token not configured".to_string()))?;
+        
+        // Usar Gemini 2.0 que suporta imagens
+        let model = "gemini-2.0-flash-exp";
+        let url = format!(
+            "https://{}-aiplatform.googleapis.com/v1/projects/{}/locations/us-central1/publishers/google/models/{}:generateContent",
+            "us-central1", self.project_id, model
+        );
+        
+        // Codificar imagem em base64
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        let image_base64 = STANDARD.encode(image_bytes);
+        
+        // Detectar tipo MIME baseado nos primeiros bytes
+        let mime_type = if image_bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+            "image/jpeg"
+        } else if image_bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+            "image/png"
+        } else {
+            "image/jpeg"  // Padrão
+        };
+        
+        // Criar request com imagem
+        let request_body = json!({
+            "contents": [{
+                "role": "user",
+                "parts": [
+                    {
+                        "inline_data": {
+                            "mime_type": mime_type,
+                            "data": image_base64
+                        }
+                    },
+                    {
+                        "text": "Descreva brevemente o que você vê nesta imagem em português brasileiro. Seja conciso e objetivo, focando nos elementos principais e qualquer texto visível."
+                    }
+                ]
+            }],
+            "generationConfig": {
+                "temperature": 0.1,
+                "maxOutputTokens": 256,
+                "topP": 0.8
+            }
+        });
+        
+        log_info("Enviando imagem para análise no Gemini 2.0");
+        
+        let response = self.client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .json(&request_body)
+            .timeout(std::time::Duration::from_secs(45))
+            .send()
+            .await
+            .map_err(|e| AppError::InternalError(format!("Erro ao analisar imagem: {}", e)))?;
+        
+        if !response.status().is_success() {
+            let error = response.text().await.unwrap_or_default();
+            return Err(AppError::InternalError(format!("Erro na análise de imagem: {}", error)));
+        }
+        
+        let json_response: Value = response.json().await?;
+        
+        // Extrair descrição da imagem
+        let description = json_response
+            .get("candidates")
+            .and_then(|c| c.get(0))
+            .and_then(|candidate| candidate.get("content"))
+            .and_then(|content| content.get("parts"))
+            .and_then(|parts| parts.get(0))
+            .and_then(|part| part.get("text"))
+            .and_then(|t| t.as_str())
+            .unwrap_or("[Erro na análise da imagem]")
+            .to_string();
+        
+        log_info(&format!("Imagem analisada: {}", description));
+        Ok(description)
+    }
+
     /// Classifica se o payload representa uma atividade válida usando Vertex AI
     pub async fn classify_activity(&mut self, payload: &WebhookPayload) -> AppResult<ActivityClassification> {
-        let context = self.extract_context(payload);
+        // Primeiro, verificar se há mídia para processar
+        let mut context = self.extract_context(payload);
+        
+        // Se houver mídia anexada, processar primeiro
+        if let WebhookPayload::ChatGuru(ref p) = payload {
+            if let (Some(media_url), Some(media_type)) = (&p.media_url, &p.media_type) {
+                log_info(&format!("Processando {} antes da classificação", media_type));
+                
+                match self.process_media(media_url, media_type).await {
+                    Ok(processed_text) => {
+                        // Adicionar texto processado ao contexto
+                        if media_type.contains("audio") || media_type.contains("voice") {
+                            context = format!("[Transcrição de áudio]: {} | Mensagem original: {}", 
+                                processed_text, context);
+                        } else if media_type.contains("image") || media_type.contains("photo") {
+                            context = format!("[Descrição da imagem]: {} | Mensagem original: {}", 
+                                processed_text, context);
+                        }
+                        
+                        // Enviar anotação de volta ao ChatGuru com a transcrição/descrição
+                        let annotation = if media_type.contains("audio") || media_type.contains("voice") {
+                            format!("📝 Transcrição do áudio: {}", processed_text)
+                        } else {
+                            format!("🖼️ Descrição da imagem: {}", processed_text)
+                        };
+                        
+                        // Enviar anotação ao ChatGuru
+                        if let Some(ref chat_id) = p.chat_id {
+                            // Pegar configurações das variáveis de ambiente
+                            let api_token = std::env::var("CHATGURU_API_TOKEN")
+                                .unwrap_or_else(|_| {
+                                    log_warning("CHATGURU_API_TOKEN não configurado");
+                                    String::new()
+                                });
+                            
+                            let api_endpoint = std::env::var("CHATGURU_API_ENDPOINT")
+                                .unwrap_or_else(|_| "https://api.chatguru.app/api/v1".to_string());
+                            
+                            let account_id = std::env::var("CHATGURU_ACCOUNT_ID")
+                                .unwrap_or_else(|_| "62558780e2923cc4705beee1".to_string());
+                            
+                            // Só enviar se tivermos o token configurado
+                            if !api_token.is_empty() {
+                                let chatguru_service = ChatGuruApiService::new(
+                                    api_token,
+                                    api_endpoint,
+                                    account_id
+                                );
+                                
+                                match chatguru_service.add_annotation(chat_id, &p.celular, &annotation).await {
+                                    Ok(_) => log_info(&format!("Anotação enviada ao ChatGuru: {}", annotation)),
+                                    Err(e) => log_error(&format!("Erro ao enviar anotação: {}", e))
+                                }
+                            } else {
+                                log_warning("Anotação não enviada: CHATGURU_API_TOKEN não configurado");
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        log_error(&format!("Erro ao processar mídia: {}", e));
+                        // Continuar com o contexto original se falhar o processamento
+                    }
+                }
+            }
+        }
+        
+        let context = context;
         
         // Incrementar contador de requisições
         self.cache.increment_request_count().await;
