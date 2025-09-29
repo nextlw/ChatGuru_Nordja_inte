@@ -348,73 +348,8 @@ impl VertexAIService {
 
     /// Classifica se o payload representa uma atividade válida usando Vertex AI
     pub async fn classify_activity(&mut self, payload: &WebhookPayload) -> AppResult<ActivityClassification> {
-        // Primeiro, verificar se há mídia para processar
-        let mut context = self.extract_context(payload);
-        
-        // Se houver mídia anexada, processar primeiro
-        if let WebhookPayload::ChatGuru(ref p) = payload {
-            if let (Some(media_url), Some(media_type)) = (&p.media_url, &p.media_type) {
-                log_info(&format!("Processando {} antes da classificação", media_type));
-                
-                match self.process_media(media_url, media_type).await {
-                    Ok(processed_text) => {
-                        // Adicionar texto processado ao contexto
-                        if media_type.contains("audio") || media_type.contains("voice") {
-                            context = format!("[Transcrição de áudio]: {} | Mensagem original: {}", 
-                                processed_text, context);
-                        } else if media_type.contains("image") || media_type.contains("photo") {
-                            context = format!("[Descrição da imagem]: {} | Mensagem original: {}", 
-                                processed_text, context);
-                        }
-                        
-                        // Enviar anotação de volta ao ChatGuru com a transcrição/descrição
-                        let annotation = if media_type.contains("audio") || media_type.contains("voice") {
-                            format!("📝 Transcrição do áudio: {}", processed_text)
-                        } else {
-                            format!("🖼️ Descrição da imagem: {}", processed_text)
-                        };
-                        
-                        // Enviar anotação ao ChatGuru
-                        if let Some(ref chat_id) = p.chat_id {
-                            // Pegar configurações das variáveis de ambiente
-                            let api_token = std::env::var("CHATGURU_API_TOKEN")
-                                .unwrap_or_else(|_| {
-                                    log_warning("CHATGURU_API_TOKEN não configurado");
-                                    String::new()
-                                });
-                            
-                            let api_endpoint = std::env::var("CHATGURU_API_ENDPOINT")
-                                .unwrap_or_else(|_| "https://api.chatguru.app/api/v1".to_string());
-                            
-                            let account_id = std::env::var("CHATGURU_ACCOUNT_ID")
-                                .unwrap_or_else(|_| "62558780e2923cc4705beee1".to_string());
-                            
-                            // Só enviar se tivermos o token configurado
-                            if !api_token.is_empty() {
-                                let chatguru_service = ChatGuruApiService::new(
-                                    api_token,
-                                    api_endpoint,
-                                    account_id
-                                );
-                                
-                                match chatguru_service.add_annotation(chat_id, &p.celular, &annotation).await {
-                                    Ok(_) => log_info(&format!("Anotação enviada ao ChatGuru: {}", annotation)),
-                                    Err(e) => log_error(&format!("Erro ao enviar anotação: {}", e))
-                                }
-                            } else {
-                                log_warning("Anotação não enviada: CHATGURU_API_TOKEN não configurado");
-                            }
-                        }
-                    },
-                    Err(e) => {
-                        log_error(&format!("Erro ao processar mídia: {}", e));
-                        // Continuar com o contexto original se falhar o processamento
-                    }
-                }
-            }
-        }
-        
-        let context = context;
+        // Extrair contexto (já processa mídia se houver)
+        let context = self.extract_context(payload).await;
         
         // Incrementar contador de requisições
         self.cache.increment_request_count().await;
@@ -496,12 +431,68 @@ impl VertexAIService {
         Ok(classification)
     }
 
-    fn extract_context(&self, payload: &WebhookPayload) -> String {
+    async fn extract_context(&self, payload: &WebhookPayload) -> String {
         match payload {
             WebhookPayload::ChatGuru(p) => {
+                // Se houver mídia anexada, processar antes
+                let message_content = if let (Some(media_url), Some(media_type)) = (&p.media_url, &p.media_type) {
+                    log_info(&format!("Processando mídia - URL: {}, Tipo: {}", media_url, media_type));
+                    // Processar mídia e obter transcrição/descrição
+                    match self.process_media(media_url, media_type).await {
+                        Ok(transcription) => {
+                            log_info(&format!("Mídia processada com sucesso - tipo: {}, conteúdo: {}", media_type, transcription));
+                            
+                            // Enviar transcrição como anotação ao ChatGuru
+                            if let Some(ref chat_id) = p.chat_id {
+                                let annotation = if media_type.contains("audio") || media_type.contains("voice") {
+                                    format!("📝 Transcrição do áudio:\n{}", transcription)
+                                } else {
+                                    format!("🖼️ Descrição da imagem:\n{}", transcription)
+                                };
+                                
+                                // Tentar enviar anotação ao ChatGuru
+                                if let Ok(api_token) = std::env::var("CHATGURU_API_TOKEN") {
+                                    if !api_token.is_empty() {
+                                        let api_endpoint = std::env::var("CHATGURU_API_ENDPOINT")
+                                            .unwrap_or_else(|_| "https://s15.chatguru.app".to_string());
+                                        let account_id = std::env::var("CHATGURU_ACCOUNT_ID")
+                                            .unwrap_or_else(|_| "625584ce6fdcb7bda7d94aa8".to_string());
+                                        
+                                        let chatguru_service = ChatGuruApiService::new(
+                                            api_token,
+                                            api_endpoint,
+                                            account_id
+                                        );
+                                        
+                                        match chatguru_service.add_annotation(chat_id, &p.celular, &annotation).await {
+                                            Ok(_) => log_info("Transcrição enviada como anotação ao ChatGuru"),
+                                            Err(e) => log_error(&format!("Erro ao enviar transcrição: {}", e))
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Se for áudio e o texto da mensagem for apenas "audio", usar a transcrição
+                            if p.texto_mensagem == "audio" || p.texto_mensagem.is_empty() {
+                                transcription
+                            } else {
+                                // Combinar texto original com transcrição
+                                format!("{}\n[Transcrição de {}]: {}", p.texto_mensagem, media_type, transcription)
+                            }
+                        },
+                        Err(e) => {
+                            log_error(&format!("ERRO ao processar mídia {}: {} - URL: {}", media_type, e, media_url));
+                            // Em caso de erro, incluir mensagem de erro na descrição
+                            format!("[Erro ao processar {}: {}] Mensagem original: {}", media_type, e, p.texto_mensagem)
+                        }
+                    }
+                } else {
+                    p.texto_mensagem.clone()
+                };
+                
                 format!(
                     "Campanha: {}\nOrigem: {}\nNome: {}\nMensagem: {}\nTags: {:?}",
-                    p.campanha_nome, p.origem, p.nome, p.texto_mensagem, p.tags
+                    p.campanha_nome, p.origem, p.nome, message_content, p.tags
                 )
             },
             WebhookPayload::EventType(p) => {
@@ -764,6 +755,9 @@ impl VertexAIService {
             
             let mut annotation = format!("Tarefa: Atividade Identificada: {}", titulo);
             
+            // Sempre incluir a razão/descrição completa (contém a transcrição se for áudio)
+            annotation.push_str(&format!("\nDescrição: {}", classification.reason));
+            
             // Tipo de atividade é OBRIGATÓRIO para atividades válidas
             if let Some(ref tipo) = classification.tipo_atividade {
                 annotation.push_str(&format!("\nTipo de Atividade: {}", tipo));
@@ -804,7 +798,23 @@ impl VertexAIService {
             
             annotation
         } else {
-            format!("Tarefa: Não é uma atividade de trabalho - {}", classification.reason)
+            // Para mensagens que não são atividades, SEMPRE incluir o conteúdo completo
+            // Especialmente importante para transcrições de áudio
+            let mut annotation = "Tarefa: Não é uma atividade de trabalho".to_string();
+            
+            // Verificar se é uma transcrição de áudio
+            if classification.reason.contains("Transcrição") || 
+               classification.reason.contains("áudio") || 
+               classification.reason.contains("audio") ||
+               classification.reason.contains("[Transcrição de") {
+                // Para áudio, mostrar como conteúdo transcrito
+                annotation.push_str(&format!("\n\n📝 Conteúdo transcrito:\n{}", classification.reason));
+            } else {
+                // Para outros casos, mostrar como motivo
+                annotation.push_str(&format!("\nMotivo: {}", classification.reason));
+            }
+            
+            annotation
         }
     }
     

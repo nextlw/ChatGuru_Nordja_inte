@@ -54,9 +54,19 @@ pub async fn handle_webhook_flexible(
         }
     };
     
-    // Log do tipo de payload detectado
+    // Log do tipo de payload detectado e verificar mídia
     match &webhook_payload {
-        WebhookPayload::ChatGuru(_) => log_info("Detected ChatGuru payload format"),
+        WebhookPayload::ChatGuru(p) => {
+            log_info("Detected ChatGuru payload format");
+            // Debug: verificar se há mídia anexada
+            if p.media_url.is_some() || p.media_type.is_some() {
+                log_info(&format!("📎 Mídia detectada no payload - URL: {:?}, Tipo: {:?}", 
+                    p.media_url, p.media_type));
+            } else if p.texto_mensagem == "audio" || p.texto_mensagem.contains("áudio") {
+                log_warning(&format!("⚠️ Mensagem parece ser áudio mas sem media_url/media_type. Payload completo: {:?}", 
+                    serde_json::to_string(&p).unwrap_or_default()));
+            }
+        },
         WebhookPayload::EventType(_) => log_info("Detected EventType payload format"),
         WebhookPayload::Generic(_) => log_info("Detected Generic payload format"),
     }

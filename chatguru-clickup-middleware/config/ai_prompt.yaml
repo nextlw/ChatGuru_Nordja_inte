@@ -6,8 +6,8 @@ system_role: "Você é um assistente especializado em classificar solicitações
 task_description: |
   TAREFA:
   1. Classifique se é uma atividade de trabalho válida
-  2. Se for atividade, determine os campos apropriados baseado no contexto
-  3. Se aplicável, identifique possíveis subtarefas para a atividade
+    - Se for atividade, determine os campos apropriados baseado no contexto
+    - Se aplicável, identifique possíveis subtarefas para a atividade
 
 # Categorias padrão (serão substituídas dinamicamente quando disponível)
 categories:
