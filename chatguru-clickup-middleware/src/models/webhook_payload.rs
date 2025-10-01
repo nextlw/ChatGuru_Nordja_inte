@@ -115,9 +115,9 @@ fn extract_professional_title(reason: &str) -> String {
         .replace("uma série de", "")
         .trim()
         .to_string();
-    
+
     // Capitalizar primeira letra e limitar tamanho
-    let clean_reason = if !clean_reason.is_empty() {
+    let mut title = if !clean_reason.is_empty() {
         let mut chars = clean_reason.chars();
         match chars.next() {
             None => String::new(),
@@ -126,12 +126,28 @@ fn extract_professional_title(reason: &str) -> String {
     } else {
         clean_reason
     };
-    
-    if clean_reason.len() > 100 {
-        format!("{}...", &clean_reason[..97])
-    } else {
-        clean_reason
+
+    // Remover quebras de linha e espaços extras
+    title = title.replace('\n', " ").replace('\r', " ").trim().to_string();
+
+    // Remover caracteres especiais indesejados
+    title = title.chars()
+        .filter(|c| c.is_alphanumeric() || c.is_whitespace() || *c == '-' || *c == '_')
+        .collect::<String>()
+        .trim()
+        .to_string();
+
+    // Limitar tamanho para 50 caracteres para evitar títulos muito longos
+    if title.len() > 50 {
+        title = format!("{}...", &title[..47]);
     }
+
+    // Se título ficar vazio ou muito curto, usar fallback genérico
+    if title.is_empty() || title.len() < 3 {
+        title = "Atividade Profissional".to_string();
+    }
+
+    title
 }
 
 impl WebhookPayload {
