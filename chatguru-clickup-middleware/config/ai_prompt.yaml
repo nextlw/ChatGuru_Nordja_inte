@@ -136,7 +136,7 @@ response_format: |
   Responda APENAS com JSON válido:
   {
     "is_activity": true/false,
-    "reason": "explicação curta e clara do porquê é ou não uma atividade",
+    "reason": "título curto e profissional para a tarefa (máximo 5 palavras)",
     "tipo_atividade": "{{activity_types_exact}}",
     "category": "{{categories_exact}}",
     "sub_categoria": "{{subcategories_exact}} ou null se não aplicável",
