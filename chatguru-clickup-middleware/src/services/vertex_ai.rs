@@ -917,29 +917,20 @@ impl VertexAIService {
                 status_back_office: None,
             })
         } else {
-            // Se nem OpenAI está configurado, usar classificação básica
-            log_warning("No AI service available, using basic classification");
-            
-            let context_lower = context.to_lowercase();
-            let is_activity = context_lower.contains("preciso") ||
-                             context_lower.contains("quero") ||
-                             context_lower.contains("pedido") ||
-                             context_lower.contains("orçamento") ||
-                             context_lower.contains("comprar") ||
-                             context_lower.contains("tarefa") ||
-                             context_lower.contains("agendar") ||
-                             context_lower.contains("reunião") ||
-                             context_lower.contains("criar") ||
-                             context_lower.contains("relatório") ||
-                             context_lower.contains("urgente");
-            
+            // FALLBACK CRÍTICO: Se nem OpenAI está configurado, NÃO classificar como atividade
+            // para evitar falsos positivos. É melhor perder uma atividade real do que criar
+            // tarefas inválidas baseadas em saudações ou mensagens casuais.
+            log_error("CRITICAL: No AI service available (neither Vertex AI nor OpenAI)");
+            log_error("Cannot safely classify activity without AI. Returning is_activity=false to prevent false positives.");
+            log_error("Please configure OPENAI_API_KEY or fix Vertex AI authentication.");
+
+            // Retornar sempre falso para evitar classificações erradas
+            // Mensagens com potencial de atividade serão perdidas, mas é mais seguro
+            // do que criar tarefas para saudações como "oi", "olá", "obrigado"
             Ok(ActivityClassification {
-                is_activity,
-                reason: if is_activity { 
-                    "Palavras-chave de atividade detectadas".to_string() 
-                } else { 
-                    "Sem indicadores de atividade".to_string() 
-                },
+                is_activity: false,
+                reason: "⚠️ Classificação AI indisponível - não é possível classificar com segurança. \
+                         Configure OPENAI_API_KEY ou Vertex AI para análise adequada.".to_string(),
                 activity_type: None,
                 category: None,
                 subtasks: Vec::new(),
