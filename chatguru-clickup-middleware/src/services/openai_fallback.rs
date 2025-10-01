@@ -1,5 +1,6 @@
 use crate::utils::{AppError, AppResult};
 use crate::utils::logging::*;
+use crate::services::secret_manager::SecretManagerService;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -20,10 +21,32 @@ pub struct OpenAIClassification {
 }
 
 impl OpenAIService {
-    pub fn new(api_key: Option<String>) -> Option<Self> {
-        // Usar API key da env var ou config
-        let key = api_key.or_else(|| std::env::var("OPENAI_API_KEY").ok())?;
-        
+    /// Cria uma nova instância do OpenAIService
+    /// Busca a API key através do SecretManagerService
+    pub async fn new(api_key: Option<String>) -> Option<Self> {
+        let key = if let Some(k) = api_key {
+            k
+        } else {
+            // Buscar através do SecretManagerService
+            match SecretManagerService::new().await {
+                Ok(secret_mgr) => {
+                    match secret_mgr.get_openai_api_key().await {
+                        Ok(k) => k,
+                        Err(e) => {
+                            log_error(&format!("Failed to get OpenAI API key: {}", e));
+                            return None;
+                        }
+                    }
+                }
+                Err(e) => {
+                    log_error(&format!("Failed to initialize SecretManagerService: {}", e));
+                    return None;
+                }
+            }
+        };
+
+        log_info("OpenAI service initialized successfully");
+
         Some(Self {
             client: Client::new(),
             api_key: key,
@@ -112,6 +135,84 @@ Responda SEMPRE em JSON com este formato:
             let error_text = response.text().await.unwrap_or_default();
             log_error(&format!("OpenAI API error: {}", error_text));
             Err(AppError::InternalError(format!("OpenAI API error: {}", error_text)))
+        }
+    }
+
+    /// Transcreve áudio usando OpenAI Whisper API
+    pub async fn transcribe_audio(&self, audio_bytes: &[u8]) -> AppResult<String> {
+        log_info("Using OpenAI Whisper for audio transcription");
+
+        let url = "https://api.openai.com/v1/audio/transcriptions";
+
+        // Criar multipart form com o arquivo de áudio
+        let part = reqwest::multipart::Part::bytes(audio_bytes.to_vec())
+            .file_name("audio.mp3")
+            .mime_str("audio/mpeg")
+            .map_err(|e| AppError::InternalError(format!("Failed to create audio part: {}", e)))?;
+
+        let form = reqwest::multipart::Form::new()
+            .part("file", part)
+            .text("model", "whisper-1")
+            .text("language", "pt")
+            .text("response_format", "text");
+
+        let response = self.client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .multipart(form)
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            let transcription = response.text().await?;
+            log_info(&format!("Whisper transcription completed: {} chars", transcription.len()));
+            Ok(transcription)
+        } else {
+            let error_text = response.text().await.unwrap_or_default();
+            log_error(&format!("Whisper API error: {}", error_text));
+            Err(AppError::InternalError(format!("Whisper API error: {}", error_text)))
+        }
+    }
+
+    /// Gera embeddings para um texto usando OpenAI
+    pub async fn get_embedding(&self, text: &str) -> AppResult<Vec<f32>> {
+        log_info("Generating embedding with OpenAI");
+
+        let url = "https://api.openai.com/v1/embeddings";
+
+        let request_body = json!({
+            "model": "text-embedding-3-small", // Modelo mais barato e rápido
+            "input": text,
+            "encoding_format": "float"
+        });
+
+        let response = self.client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .json(&request_body)
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            let json_response: Value = response.json().await?;
+
+            let embedding = json_response
+                .get("data")
+                .and_then(|d| d.get(0))
+                .and_then(|item| item.get("embedding"))
+                .and_then(|e| e.as_array())
+                .ok_or_else(|| AppError::InternalError("Invalid embedding response format".to_string()))?
+                .iter()
+                .filter_map(|v| v.as_f64().map(|f| f as f32))
+                .collect::<Vec<f32>>();
+
+            log_info(&format!("Embedding generated: {} dimensions", embedding.len()));
+            Ok(embedding)
+        } else {
+            let error_text = response.text().await.unwrap_or_default();
+            log_error(&format!("OpenAI Embedding API error: {}", error_text));
+            Err(AppError::InternalError(format!("Embedding API error: {}", error_text)))
         }
     }
 }

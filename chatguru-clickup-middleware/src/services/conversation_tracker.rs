@@ -31,6 +31,7 @@ pub struct MessageRecord {
     pub timestamp: DateTime<Utc>,
     pub content: String,
     pub was_activity: bool,
+    pub embedding: Option<Vec<f32>>,  // Embedding para análise semântica
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,6 +46,56 @@ impl ConversationTracker {
         Self {
             conversations: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// Calcula similaridade coseno entre dois embeddings
+    #[allow(dead_code)]
+    fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+        if a.len() != b.len() {
+            return 0.0;
+        }
+
+        let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+        let magnitude_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let magnitude_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+
+        if magnitude_a == 0.0 || magnitude_b == 0.0 {
+            return 0.0;
+        }
+
+        dot_product / (magnitude_a * magnitude_b)
+    }
+
+    /// Verifica se uma mensagem é muito curta para ter contexto suficiente
+    pub fn is_short_message(message: &str) -> bool {
+        let words: Vec<&str> = message.split_whitespace().collect();
+        words.len() <= 3  // 3 palavras ou menos = mensagem curta
+    }
+
+    /// Agrega mensagens curtas recentes para formar contexto
+    pub async fn aggregate_recent_context(&self, phone: &str, current_message: &str, max_messages: usize) -> String {
+        let conversations = self.conversations.read().await;
+
+        if let Some(history) = conversations.get(phone) {
+            // Pegar últimas N mensagens
+            let recent_messages: Vec<String> = history.messages
+                .iter()
+                .rev()
+                .take(max_messages)
+                .rev()
+                .map(|m| m.content.clone())
+                .collect();
+
+            if !recent_messages.is_empty() {
+                // Combinar mensagens recentes + mensagem atual
+                let mut full_context = recent_messages.join(" ");
+                full_context.push_str(" ");
+                full_context.push_str(current_message);
+                return full_context;
+            }
+        }
+
+        current_message.to_string()
     }
     
     /// Analisa se deve criar nova tarefa ou atualizar existente
@@ -70,11 +121,12 @@ impl ConversationTracker {
             }
         });
         
-        // Adicionar mensagem ao histórico
+        // Adicionar mensagem ao histórico (embedding será adicionado depois se disponível)
         history.messages.push(MessageRecord {
             timestamp: Utc::now(),
             content: message.to_string(),
             was_activity: is_activity,
+            embedding: None,  // Será preenchido externamente se necessário
         });
         
         // Manter apenas últimas 20 mensagens
@@ -118,6 +170,17 @@ impl ConversationTracker {
         TaskAction::CreateNew
     }
     
+    /// Adiciona embedding à última mensagem de um usuário
+    pub async fn add_embedding_to_last_message(&self, phone: &str, embedding: Vec<f32>) {
+        let mut conversations = self.conversations.write().await;
+        if let Some(history) = conversations.get_mut(phone) {
+            if let Some(last_msg) = history.messages.last_mut() {
+                last_msg.embedding = Some(embedding);
+                log_info(&format!("Embedding added to last message for {}", phone));
+            }
+        }
+    }
+
     /// Registra uma tarefa criada
     pub async fn register_task(&self, phone: &str, task_id: String, title: String) {
         let mut conversations = self.conversations.write().await;
@@ -134,7 +197,62 @@ impl ConversationTracker {
         }
     }
     
-    /// Detecta se é uma modificação
+    /// Analisa se a mensagem é uma modificação usando embeddings (quando disponíveis)
+    #[allow(dead_code)]
+    pub async fn analyze_with_embeddings(
+        &self,
+        phone: &str,
+        current_embedding: &[f32],
+        message: &str,
+    ) -> (bool, f32) {
+        let conversations = self.conversations.read().await;
+
+        if let Some(history) = conversations.get(phone) {
+            // Encontrar a última atividade com embedding
+            for msg in history.messages.iter().rev() {
+                if msg.was_activity {
+                    if let Some(ref prev_embedding) = msg.embedding {
+                        let similarity = Self::cosine_similarity(current_embedding, prev_embedding);
+
+                        log_info(&format!(
+                            "Similarity with previous activity: {:.3} (threshold: 0.7 for modification)",
+                            similarity
+                        ));
+
+                        // Alta similaridade (>0.7) = provavelmente continuação/modificação
+                        // Baixa similaridade (<0.5) = provavelmente nova atividade
+                        if similarity > 0.7 {
+                            // Verificar se há palavras de modificação para confirmar
+                            let has_modification_words = self.has_modification_keywords(message);
+                            return (has_modification_words, similarity);
+                        }
+
+                        // Similaridade média - usar keywords como critério final
+                        return (self.is_modification(message, history), similarity);
+                    }
+                }
+            }
+        }
+
+        // Sem embeddings disponíveis - usar método baseado em keywords
+        (false, 0.0)
+    }
+
+    /// Verifica se tem palavras-chave de modificação
+    #[allow(dead_code)]
+    fn has_modification_keywords(&self, message: &str) -> bool {
+        let message_lower = message.to_lowercase();
+        let modification_keywords = vec![
+            "não", "espera", "muda", "troca", "ao invés", "melhor",
+            "prefiro", "corrige", "altera", "substitui", "esquece",
+            "na verdade", "mudei de ideia", "pensando melhor", "afinal",
+            "cancela", "remove", "tira",
+        ];
+
+        modification_keywords.iter().any(|word| message_lower.contains(word))
+    }
+
+    /// Detecta se é uma modificação (método baseado em keywords - fallback)
     fn is_modification(&self, message: &str, history: &ConversationHistory) -> bool {
         let message_lower = message.to_lowercase();
         

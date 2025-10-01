@@ -13,7 +13,7 @@ tower = { version = "0.4", features = ["full"] }
 tower-http = { version = "0.5", features = ["cors", "trace"] }
 
 # HTTP client
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", features = ["json", "multipart"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -55,10 +55,7 @@ google-cloud-pubsub = "0.30"
 google-cloud-googleapis = { version = "0.16", features = ["pubsub"] }
 google-cloud-auth = "0.17"  # Para autenticação com Vertex AI
 google-cloud-token = "0.1"  # Token provider para Vertex AI
-
-# Secret Manager - aguardando versão compatível com Rust 1.82
-# TODO: Adicionar quando disponível versão compatível
-# google-cloud-secretmanager-v1 = "0.x.x"
+google-cloud-secretmanager-v1 = "1.0"  # Secret Manager
 
 # Database (opcional)
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid"], optional = true }

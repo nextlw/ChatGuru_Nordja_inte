@@ -69,8 +69,8 @@ impl VertexAIService {
         }
         
         // Configurar OpenAI como fallback
-        let openai_fallback = OpenAIService::new(None);
-        
+        let openai_fallback = OpenAIService::new(None).await;
+
         if access_token.is_none() && openai_fallback.is_none() {
             log_warning("Neither Vertex AI nor OpenAI are configured. AI classification will be disabled.");
         }
@@ -189,11 +189,29 @@ impl VertexAIService {
             .map_err(|e| AppError::InternalError(format!("Erro ao ler bytes da mídia: {}", e)))
     }
     
-    /// Transcreve áudio usando Gemini multimodal
+    /// Transcreve áudio usando Gemini multimodal ou fallback para Whisper
     async fn transcribe_audio(&self, audio_bytes: &[u8]) -> AppResult<String> {
-        // Verificar token de acesso
-        let token = self.access_token.as_ref()
-            .ok_or_else(|| AppError::ConfigError("Vertex AI access token not configured".to_string()))?;
+        // Tentar Vertex AI primeiro
+        if let Some(token) = &self.access_token {
+            match self.transcribe_audio_with_vertex(audio_bytes, token).await {
+                Ok(transcription) => return Ok(transcription),
+                Err(e) => {
+                    log_warning(&format!("Vertex AI transcription failed: {}. Trying OpenAI Whisper fallback...", e));
+                }
+            }
+        }
+
+        // Fallback para OpenAI Whisper
+        if let Some(ref openai) = self.openai_fallback {
+            log_info("Using OpenAI Whisper as fallback for audio transcription");
+            return openai.transcribe_audio(audio_bytes).await;
+        }
+
+        Err(AppError::ConfigError("No audio transcription service available".to_string()))
+    }
+
+    /// Transcreve áudio usando Vertex AI Gemini
+    async fn transcribe_audio_with_vertex(&self, audio_bytes: &[u8], token: &str) -> AppResult<String> {
         
         // Usar Gemini 2.0 que suporta áudio
         let model = "gemini-2.0-flash-exp";
@@ -218,7 +236,7 @@ impl VertexAIService {
                         }
                     },
                     {
-                        "text": "Transcreva este áudio em português brasileiro. Retorne apenas o texto transcrito, sem formatação adicional."
+                        "text": "Você é um transcritor de áudio. Seu trabalho é converter o áudio em texto exatamente como foi falado, palavra por palavra. IMPORTANTE: Retorne SOMENTE a transcrição literal do áudio, sem adicionar interpretações, resumos ou descrições. Apenas transcreva o que foi dito."
                     }
                 ]
             }],
@@ -349,8 +367,19 @@ impl VertexAIService {
     /// Classifica se o payload representa uma atividade válida usando Vertex AI
     pub async fn classify_activity(&mut self, payload: &WebhookPayload) -> AppResult<ActivityClassification> {
         // Extrair contexto (já processa mídia se houver)
-        let context = self.extract_context(payload).await;
-        
+        let mut context = self.extract_context(payload).await;
+
+        // Agregar contexto se mensagem for muito curta
+        if let WebhookPayload::ChatGuru(p) = payload {
+            use crate::services::conversation_tracker::ConversationTracker;
+
+            if ConversationTracker::is_short_message(&context) {
+                log_info(&format!("Short message detected ('{}'), aggregating recent context", context));
+                context = self.conversation_tracker.aggregate_recent_context(&p.celular, &context, 5).await;
+                log_info(&format!("Aggregated context: '{}'", context));
+            }
+        }
+
         // Incrementar contador de requisições
         self.cache.increment_request_count().await;
         
@@ -421,13 +450,29 @@ impl VertexAIService {
             0.95  // Alta confiança para respostas do AI
         ).await;
         
-        // 5. Log estatísticas do cache
+        // 5. Gerar embedding se OpenAI disponível e for atividade
+        if classification.is_activity {
+            if let (Some(ref openai), WebhookPayload::ChatGuru(p)) = (&self.openai_fallback, payload) {
+                match openai.get_embedding(&context).await {
+                    Ok(embedding) => {
+                        // Armazenar embedding no histórico de conversação
+                        self.conversation_tracker.add_embedding_to_last_message(&p.celular, embedding).await;
+                        log_info("Embedding generated and stored for activity");
+                    }
+                    Err(e) => {
+                        log_warning(&format!("Failed to generate embedding: {}", e));
+                    }
+                }
+            }
+        }
+
+        // 6. Log estatísticas do cache
         let stats = self.cache.get_stats().await;
         log_info(&stats);
-        
-        log_info(&format!("Activity classification result: is_activity={}, reason={}", 
+
+        log_info(&format!("Activity classification result: is_activity={}, reason={}",
             classification.is_activity, classification.reason));
-        
+
         Ok(classification)
     }
 
