@@ -1,16 +1,12 @@
 # Use Rust 1.90 which supports edition2024 (required by google-cloud-gax-1.0.0)
 FROM rust:1.90-slim as builder
 
-# Install system dependencies including musl for static linking
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
     ca-certificates \
-    musl-tools \
     && rm -rf /var/lib/apt/lists/*
-
-# Add musl target for static compilation
-RUN rustup target add x86_64-unknown-linux-musl
 
 # Create app directory
 WORKDIR /app
@@ -22,11 +18,11 @@ COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY config ./config
 
-# Build with musl for static binary (no GLIBC dependency issues)
-RUN cargo build --release --target x86_64-unknown-linux-musl
+# Build normally (Rust 1.90 debian has compatible GLIBC)
+RUN cargo build --release
 
-# Runtime stage
-FROM debian:bookworm-slim
+# Runtime stage - usar mesma base Debian que o builder para compatibilidade GLIBC
+FROM rust:1.90-slim
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \
@@ -41,8 +37,8 @@ RUN useradd -r -u 1000 app
 WORKDIR /app
 RUN chown app:app /app
 
-# Copy binary from builder stage (musl target)
-COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/chatguru-clickup-middleware .
+# Copy binary from builder stage
+COPY --from=builder /app/target/release/chatguru-clickup-middleware .
 COPY --from=builder /app/config ./config
 
 # Change to app user
