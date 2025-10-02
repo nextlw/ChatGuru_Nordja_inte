@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use once_cell::sync::Lazy;
 use serde::{Serialize, Deserialize};
-use tracing::{info, error};
+use tracing::info;
 
 /// Padrão aprendido serializable
 #[derive(Debug, Clone, Serialize, Deserialize)]

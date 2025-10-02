@@ -402,13 +402,16 @@ impl VertexAIService {
             });
         }
         
-        // 2. Tentar classificar por padrões aprendidos
+        // 2. DESABILITADO TEMPORARIAMENTE: Pattern matching não fornece categorização completa
+        // O pattern matching só determina se é atividade ou não, mas não categoriza
+        // Vamos sempre chamar AI para obter categorização completa
+        /*
         if let Some((is_activity, reason)) = self.cache.classify_by_pattern(&context).await {
             log_info(&format!("Pattern MATCH: is_activity={}, reason={}", is_activity, reason));
-            
+
             // Armazenar no cache para futuras consultas
             self.cache.store_classification(&context, is_activity, &reason, 0.85).await;
-            
+
             return Ok(ActivityClassification {
                 is_activity,
                 reason,
@@ -422,6 +425,7 @@ impl VertexAIService {
                 status_back_office: None,
             });
         }
+        */
         
         // 3. Se não encontrou no cache/padrões, chamar AI (Vertex ou OpenAI)
         log_info(&format!("Cache MISS - Calling AI for: {}", context));
