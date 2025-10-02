@@ -87,9 +87,11 @@ impl VertexAIService {
                     activity_types: vec![],
                     status_options: vec![],
                     category_mappings: std::collections::HashMap::new(),
+                    subcategory_mappings: std::collections::HashMap::new(),
                     subcategory_examples: std::collections::HashMap::new(),
                     rules: vec![],
                     response_format: "Responda em JSON.".to_string(),
+                    field_ids: None,
                 }
             });
         

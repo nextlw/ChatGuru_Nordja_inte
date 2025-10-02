@@ -5,6 +5,14 @@ edition = "2021"
 authors = ["eLai Integration Team"]
 description = "Middleware para integração ChatGuru-ClickUp com Google Cloud Pub/Sub"
 
+[lib]
+name = "chatguru_clickup_middleware"
+path = "src/lib.rs"
+
+[[bin]]
+name = "chatguru-clickup-middleware"
+path = "src/main.rs"
+
 [dependencies]
 # Web framework
 axum = { version = "0.7", features = ["json", "macros", "tokio"] }
@@ -46,6 +54,11 @@ base64 = "0.22"
 
 # Regex for pattern matching
 regex = "1.10"
+
+# NLP e Text Processing
+rust-stemmers = "1.2"  # Stemming em português
+aho-corasick = "1.1"   # Multi-pattern matching ultrarrápido
+# stop-words = "0.8"   # Opcional: remover stop words
 
 # URL encoding
 urlencoding = "2.1"

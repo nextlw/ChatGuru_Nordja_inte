@@ -8,10 +8,10 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::time::Instant;
 
-use crate::models::WebhookPayload;
-use crate::utils::{AppResult, AppError};
-use crate::utils::logging::*;
-use crate::AppState;
+use chatguru_clickup_middleware::models::WebhookPayload;
+use chatguru_clickup_middleware::utils::{AppResult, AppError};
+use chatguru_clickup_middleware::utils::logging::*;
+use chatguru_clickup_middleware::AppState;
 
 pub async fn handle_webhook_flexible(
     State(state): State<Arc<AppState>>,

@@ -12,9 +12,14 @@ pub struct AiPromptConfig {
     pub activity_types: Vec<ActivityType>,
     pub status_options: Vec<StatusOption>,
     pub category_mappings: HashMap<String, CategoryMapping>,
+    #[serde(default)]
+    pub subcategory_mappings: HashMap<String, Vec<SubcategoryMapping>>,
+    #[serde(default)]
     pub subcategory_examples: HashMap<String, Vec<String>>,
     pub rules: Vec<String>,
     pub response_format: String,
+    #[serde(default)]
+    pub field_ids: Option<FieldIds>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -33,6 +38,21 @@ pub struct StatusOption {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CategoryMapping {
     pub id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SubcategoryMapping {
+    pub name: String,
+    pub id: String,
+    pub stars: u8,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FieldIds {
+    pub category_field_id: String,
+    pub subcategory_field_id: String,
+    pub activity_type_field_id: String,
+    pub status_field_id: String,
 }
 
 impl AiPromptConfig {
@@ -125,14 +145,28 @@ impl AiPromptConfig {
         }
         prompt.push_str("\n");
         
-        // Subcategory examples
-        prompt.push_str("EXEMPLOS DE SUB-CATEGORIAS POR CATEGORIA:\n");
-        for (category, examples) in &self.subcategory_examples {
-            let examples_str = examples.iter()
-                .map(|e| format!("\"{}\"", e))
-                .collect::<Vec<_>>()
-                .join(", ");
-            prompt.push_str(&format!("- {} → {}\n", category, examples_str));
+        // Subcategories - usar mapeamentos completos com IDs e estrelas
+        prompt.push_str("SUBCATEGORIAS DISPONÍVEIS (por categoria):\n");
+        if !self.subcategory_mappings.is_empty() {
+            for (category, subcats) in &self.subcategory_mappings {
+                prompt.push_str(&format!("\n{}:\n", category));
+                for subcat in subcats {
+                    prompt.push_str(&format!("  - {} ({} estrela{})\n",
+                        subcat.name,
+                        subcat.stars,
+                        if subcat.stars > 1 { "s" } else { "" }
+                    ));
+                }
+            }
+        } else if !self.subcategory_examples.is_empty() {
+            // Fallback para exemplos antigos se subcategory_mappings não estiver disponível
+            for (category, examples) in &self.subcategory_examples {
+                let examples_str = examples.iter()
+                    .map(|e| format!("\"{}\"", e))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                prompt.push_str(&format!("- {} → {}\n", category, examples_str));
+            }
         }
         prompt.push_str("\n");
         
@@ -160,6 +194,68 @@ impl AiPromptConfig {
         self.status_options.iter()
             .find(|so| so.name == name)
             .map(|so| so.id.clone())
+    }
+
+    /// Obtém o ID da subcategoria pelo nome e categoria (busca case-insensitive)
+    pub fn get_subcategory_id(&self, category: &str, subcategory: &str) -> Option<String> {
+        let category_normalized = category.trim();
+        let subcategory_normalized = subcategory.trim().to_lowercase();
+
+        self.subcategory_mappings.get(category_normalized)
+            .and_then(|subcats| {
+                subcats.iter()
+                    .find(|sc| sc.name.to_lowercase() == subcategory_normalized)
+                    .map(|sc| sc.id.clone())
+            })
+    }
+
+    /// Obtém o número de estrelas de uma subcategoria (busca case-insensitive)
+    pub fn get_subcategory_stars(&self, category: &str, subcategory: &str) -> Option<u8> {
+        let category_normalized = category.trim();
+        let subcategory_normalized = subcategory.trim().to_lowercase();
+
+        self.subcategory_mappings.get(category_normalized)
+            .and_then(|subcats| {
+                subcats.iter()
+                    .find(|sc| sc.name.to_lowercase() == subcategory_normalized)
+                    .map(|sc| sc.stars)
+            })
+    }
+
+    /// Obtém todas as subcategorias de uma categoria
+    pub fn get_subcategories_for_category(&self, category: &str) -> Vec<String> {
+        let category_normalized = category.trim();
+
+        self.subcategory_mappings.get(category_normalized)
+            .map(|subcats| {
+                subcats.iter()
+                    .map(|sc| sc.name.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Obtém os IDs dos campos customizados
+    pub fn get_field_ids(&self) -> Option<&FieldIds> {
+        self.field_ids.as_ref()
+    }
+
+    /// Valida se uma subcategoria pertence à categoria especificada
+    pub fn validate_subcategory(&self, category: &str, subcategory: &str) -> bool {
+        self.get_subcategory_id(category, subcategory).is_some()
+    }
+
+    /// Obtém informações completas de uma subcategoria
+    pub fn get_subcategory_info(&self, category: &str, subcategory: &str) -> Option<SubcategoryMapping> {
+        let category_normalized = category.trim();
+        let subcategory_normalized = subcategory.trim().to_lowercase();
+
+        self.subcategory_mappings.get(category_normalized)
+            .and_then(|subcats| {
+                subcats.iter()
+                    .find(|sc| sc.name.to_lowercase() == subcategory_normalized)
+                    .cloned()
+            })
     }
 }
 

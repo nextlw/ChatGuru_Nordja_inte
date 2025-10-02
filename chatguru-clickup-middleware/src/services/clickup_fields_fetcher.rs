@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Utc, Local, Datelike};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomField {
@@ -43,45 +43,84 @@ pub struct ClickUpFieldsFetcher {
     token: String,
     list_id: String,
     cache: Arc<RwLock<Option<FieldsCache>>>,
-    cache_duration_minutes: i64,
+    /// Cache válido até o fim do dia (primeira requisição do dia busca da API)
+    daily_cache: bool,
 }
 
 impl ClickUpFieldsFetcher {
+    /// Cria novo fetcher com cache diário (padrão)
     pub fn new(token: String, list_id: String) -> Self {
         Self {
             client: Client::new(),
             token,
             list_id,
             cache: Arc::new(RwLock::new(None)),
-            cache_duration_minutes: 15, // Cache por 15 minutos
+            daily_cache: true,
+        }
+    }
+
+    /// Cria novo fetcher com cache customizado (para testes)
+    #[allow(dead_code)]
+    pub fn with_custom_cache(token: String, list_id: String, daily: bool) -> Self {
+        Self {
+            client: Client::new(),
+            token,
+            list_id,
+            cache: Arc::new(RwLock::new(None)),
+            daily_cache: daily,
         }
     }
     
-    /// Busca os campos customizados do ClickUp (com cache)
+    /// Busca os campos customizados do ClickUp (com cache diário)
     pub async fn get_custom_fields(&self) -> AppResult<Vec<CustomField>> {
         // Verificar cache primeiro
         let cache_guard = self.cache.read().await;
         if let Some(ref cached) = *cache_guard {
-            let age = Utc::now() - cached.last_updated;
-            if age < Duration::minutes(self.cache_duration_minutes) {
-                log_info(&format!("Using cached ClickUp fields (age: {} minutes)", age.num_minutes()));
+            if self.is_cache_valid(cached.last_updated) {
+                let age = Utc::now() - cached.last_updated;
+                log_info(&format!(
+                    "✅ Using cached ClickUp fields (cached {} hours ago)",
+                    age.num_hours()
+                ));
                 return Ok(cached.fields.clone());
             }
         }
         drop(cache_guard);
-        
+
         // Cache expirado ou não existe, buscar novos dados
-        log_info("Fetching fresh ClickUp custom fields from API");
+        log_info("🔄 Fetching fresh ClickUp custom fields from API (first request of the day)");
         let fields = self.fetch_fields_from_api().await?;
-        
+
         // Atualizar cache
         let mut cache_guard = self.cache.write().await;
         *cache_guard = Some(FieldsCache {
             fields: fields.clone(),
             last_updated: Utc::now(),
         });
-        
+
+        log_info("✅ ClickUp fields cached successfully for today");
+
         Ok(fields)
+    }
+
+    /// Verifica se o cache ainda é válido
+    fn is_cache_valid(&self, last_updated: DateTime<Utc>) -> bool {
+        if self.daily_cache {
+            // Cache válido se foi atualizado no mesmo dia (timezone local)
+            let now_local = Local::now();
+            let cached_local = last_updated.with_timezone(&Local::now().timezone());
+
+            // Verificar se é o mesmo dia
+            let same_day = now_local.year() == cached_local.year()
+                && now_local.month() == cached_local.month()
+                && now_local.day() == cached_local.day();
+
+            same_day
+        } else {
+            // Fallback: cache válido por 15 minutos (apenas para testes)
+            let age = Utc::now() - last_updated;
+            age.num_minutes() < 15
+        }
     }
     
     /// Busca campos diretamente da API do ClickUp

@@ -1,0 +1,22 @@
+{
+  "preciso de 10 caixas de papel a4": {
+    "is_activity": true,
+    "confidence": 0.95,
+    "times_seen": 5
+  },
+  "oi bom dia": {
+    "is_activity": false,
+    "confidence": 0.92,
+    "times_seen": 12
+  },
+  "quero comprar 5 metros de cabo": {
+    "is_activity": true,
+    "confidence": 0.88,
+    "times_seen": 3
+  },
+  "obrigado pela atenção": {
+    "is_activity": false,
+    "confidence": 0.97,
+    "times_seen": 8
+  }
+}

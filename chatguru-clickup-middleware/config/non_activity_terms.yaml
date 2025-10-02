@@ -1,0 +1,48 @@
+# Termos que indicam NÃO-atividade (saudações, confirmações, etc)
+# Formato: termo: peso (0-10, maior = mais forte indicador)
+
+# Saudações
+oi: 10.0
+olá: 10.0
+bom: 9.0  # "bom dia", "boa tarde"
+boa: 9.0
+dia: 8.0
+tarde: 8.0
+noite: 8.0
+tchau: 9.5
+até: 8.0  # "até logo"
+abraço: 9.0
+
+# Agradecimentos
+obrigado: 10.0
+obrigada: 10.0
+agradeço: 9.5
+valeu: 9.0
+grato: 9.0
+
+# Confirmações simples
+ok: 9.0
+certo: 8.5
+entendi: 9.0
+entendido: 9.0
+sim: 7.0
+não: 7.0
+talvez: 7.5
+beleza: 8.5
+
+# Perguntas genéricas
+como: 6.0  # "como está?"
+tudo: 6.5  # "tudo bem?"
+bem: 6.0
+vai: 5.5
+
+# Conversação casual
+legal: 7.0
+bacana: 7.0
+show: 7.0
+massa: 7.0
+
+# Stems
+obrigad: 10.0  # Pega "obrigado", "obrigada"
+agradec: 9.5   # Pega "agradeço", "agradecimento"
+entend: 9.0    # Pega "entendi", "entendido"

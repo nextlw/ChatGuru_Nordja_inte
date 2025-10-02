@@ -6,8 +6,8 @@ use axum::{
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use crate::utils::logging::*;
-use crate::AppState;
+use chatguru_clickup_middleware::utils::logging::*;
+use chatguru_clickup_middleware::AppState;
 
 pub async fn health_check() -> Json<Value> {
     log_health_check();

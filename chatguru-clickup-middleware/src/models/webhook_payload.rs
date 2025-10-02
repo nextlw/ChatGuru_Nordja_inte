@@ -242,41 +242,8 @@ impl WebhookPayload {
 
         // ===== CATEGORIZAÇÃO AUTOMÁTICA BASEADA EM PALAVRAS-CHAVE =====
         // Tentar categorizar automaticamente baseado no nome da tarefa e mensagem
-        let texto_para_categorizar = format!("{} {}",
-            payload.nome,
-            payload.texto_mensagem
-        );
-
-        if let Some(cat) = crate::services::task_categorizer::categorize_task(&texto_para_categorizar) {
-            use crate::services::task_categorizer::{FIELD_CATEGORIA, FIELD_SUBCATEGORIA, FIELD_ESTRELAS};
-
-            // Buscar IDs das opções de categoria e subcategoria do ClickUp
-            // Por enquanto, adicionar como valor string e deixar o ClickUp resolver
-            // TODO: Implementar cache de IDs de opções para performance
-
-            tracing::info!(
-                "Categorização automática: {} > {} ({}⭐)",
-                cat.categoria,
-                cat.subcategoria,
-                cat.estrelas
-            );
-
-            // Adicionar campos de categorização
-            custom_fields.push(serde_json::json!({
-                "id": FIELD_CATEGORIA,
-                "value": cat.categoria  // ClickUp aceita nome da opção
-            }));
-
-            custom_fields.push(serde_json::json!({
-                "id": FIELD_SUBCATEGORIA,
-                "value": cat.subcategoria
-            }));
-
-            custom_fields.push(serde_json::json!({
-                "id": FIELD_ESTRELAS,
-                "value": cat.estrelas
-            }));
-        }
+        // task_categorizer foi deprecado - agora usamos apenas a classificação da AI
+        // que é mais precisa e dinâmica
 
         // Nome da tarefa - usar título profissional se temos AI classification
         let task_name = if let Some(ai) = ai_classification {
@@ -322,73 +289,94 @@ impl WebhookPayload {
             // Por enquanto usar os IDs hardcoded, mas idealmente isso viria do prompt_config
             // TODO: Passar o prompt_config como parâmetro ou carregá-lo aqui
             
-            // Tipo de Atividade (dropdown)
+            // Tipo de Atividade (dropdown) - OTIMIZADO: usar YAML como única fonte
             if let Some(ref tipo) = ai.tipo_atividade {
-                let tipo_id = match tipo.as_str() {
-                    "Rotineira" => "64f034f3-c5db-46e5-80e5-f515f11e2131",
-                    "Especifica" => "e85a4dc7-82d8-4f63-89ee-462232f50f31",
-                    "Dedicada" => "6c810e95-f5e8-4e8f-ba23-808cf555046f",
-                    _ => "64f034f3-c5db-46e5-80e5-f515f11e2131", // Default Rotineira
-                };
-                custom_fields.push(serde_json::json!({
-                    "id": "f1259ffb-7be8-49ff-92f8-5ff9882888d0",
-                    "value": tipo_id
-                }));
+                if let Ok(config) = AiPromptConfig::load_default() {
+                    // Buscar ID do tipo de atividade
+                    if let Some(activity_type) = config.activity_types.iter().find(|at| at.name == *tipo) {
+                        let field_id = config.get_field_ids()
+                            .map(|ids| ids.activity_type_field_id.clone())
+                            .unwrap_or_else(|| "f1259ffb-7be8-49ff-92f8-5ff9882888d0".to_string());
+
+                        custom_fields.push(serde_json::json!({
+                            "id": field_id,
+                            "value": activity_type.id
+                        }));
+                    } else {
+                        tracing::warn!("Tipo de atividade '{}' não encontrado no YAML config", tipo);
+                    }
+                }
             }
             
-            // Categoria (dropdown)
+            // Categoria (dropdown) - OTIMIZADO: usar YAML como única fonte
             if let Some(ref category) = ai.category {
-                // Tentar carregar a configuração para obter os IDs
-                let cat_id = if let Ok(config) = AiPromptConfig::load_default() {
-                    config.get_category_id(category)
-                        .unwrap_or_else(|| "80ad2f74-7074-4eec-a4fd-8fc92d0fe0dd".to_string())
+                if let Ok(config) = AiPromptConfig::load_default() {
+                    // Obter ID da categoria do YAML
+                    if let Some(cat_id) = config.get_category_id(category) {
+                        // Obter ID do campo categoria do YAML
+                        let field_id = config.get_field_ids()
+                            .map(|ids| ids.category_field_id.clone())
+                            .unwrap_or_else(|| "c19b4f95-1ff7-4966-b201-02905d33cec6".to_string());
+
+                        custom_fields.push(serde_json::json!({
+                            "id": field_id,
+                            "value": cat_id
+                        }));
+                    } else {
+                        tracing::warn!("Categoria '{}' não encontrada no YAML config", category);
+                    }
                 } else {
-                    // Fallback para mapeamento hardcoded
-                    match category.as_str() {
-                        "ADM" => "a4a4e85c-4eb5-44f9-9175-f98594da5c70",
-                        "Agendamento" => "25102629-2b4f-4863-847c-51468e484362",
-                        "Atividades Corporativas" => "e0b80ba4-3b2e-47bc-9a4f-d322045d6480",
-                        "Atividades Pessoais / Domésticas" => "1b61be8c-6eaa-4cd4-959d-c48f8b78ca3e",
-                        "Compras" => "4799d43c-c1be-478e-ad58-57fdfa95b292",
-                        "Documentos" => "e57a5888-49cc-4c3a-bb4a-e235c8c58e77",
-                        "Educação / Academia" => "4232858d-8052-4fdc-9ce9-628f34d2edac",
-                        "Eventos Corporativos" => "07c402c5-1f0b-4ae0-b38e-349553fd7a81",
-                        "Lazer" => "68539506-88b8-44a5-bac8-0496b2b2f148",
-                        "Logistica" => "a1bc0a49-2a9d-41bd-a91a-a6b4af7677b4",
-                        "Festas / Reuniões / Recepção" => "18c2c60c-cfd0-4ef8-af94-7542bd9b30c7",
-                        "Pagamentos" => "b64b9e80-fdc4-4521-8975-45e335109b49",
-                        "Pesquisas / Orçamentos" => "80ad2f74-7074-4eec-a4fd-8fc92d0fe0dd",
-                        "Plano de Saúde" => "3496ba6c-9d7f-495f-951e-6017dfdbd55b",
-                        "Viagens" => "2aebf637-6534-487c-bd35-d28334c8d685",
-                        "Controle Interno" => "16c6bd8a-05d3-4bd7-8fd9-906ef3e8b2d2",
-                        _ => "80ad2f74-7074-4eec-a4fd-8fc92d0fe0dd", // Default Pesquisas
-                    }.to_string()
-                };
-                
-                custom_fields.push(serde_json::json!({
-                    "id": "c19b4f95-1ff7-4966-b201-02905d33cec6",
-                    "value": cat_id
-                }));
+                    tracing::error!("Falha ao carregar ai_prompt.yaml para obter ID da categoria");
+                }
+            }
+
+            // Subcategoria (dropdown) - OTIMIZADO: usar mapeamento com IDs e estrelas
+            if let Some(ref sub_categoria) = ai.sub_categoria {
+                if let Some(ref category) = ai.category {
+                    if let Ok(config) = AiPromptConfig::load_default() {
+                        if let Some(subcat_id) = config.get_subcategory_id(category, sub_categoria) {
+                            let field_id = config.get_field_ids()
+                                .map(|ids| ids.subcategory_field_id.clone())
+                                .unwrap_or_else(|| "330d635b-b0be-4a4a-960c-3ff974d597c3".to_string());
+
+                            custom_fields.push(serde_json::json!({
+                                "id": field_id,
+                                "value": subcat_id
+                            }));
+
+                            // Log das estrelas para métricas
+                            if let Some(stars) = config.get_subcategory_stars(category, sub_categoria) {
+                                tracing::info!(
+                                    "✨ Tarefa classificada: '{}' > '{}' ({} estrela{})",
+                                    category, sub_categoria, stars, if stars > 1 { "s" } else { "" }
+                                );
+                            }
+                        } else {
+                            tracing::warn!(
+                                "⚠️ Subcategoria '{}' não encontrada para categoria '{}'",
+                                sub_categoria, category
+                            );
+                        }
+                    }
+                }
             }
             
-            // Status Back Office (dropdown)
+            // Status Back Office (dropdown) - OTIMIZADO: usar YAML como única fonte
             if let Some(ref status) = ai.status_back_office {
-                let status_id = if let Ok(config) = AiPromptConfig::load_default() {
-                    config.get_status_id(status)
-                        .unwrap_or_else(|| "7889796f-033f-450d-97dd-6fee2a44f1b1".to_string())
-                } else {
-                    match status.as_str() {
-                        "Concluido" => "db544ddc-a07d-47a9-8737-40c6be25f7ec",
-                        "Aguardando instruções" => "dd9d1b1b-f842-4777-984d-c05ec6b6d8a3",
-                        "Executar" => "7889796f-033f-450d-97dd-6fee2a44f1b1",
-                        _ => "7889796f-033f-450d-97dd-6fee2a44f1b1", // Default Executar
-                    }.to_string()
-                };
-                
-                custom_fields.push(serde_json::json!({
-                    "id": "6abbfe79-f80b-4b55-9b4b-9bd7f65b6458",
-                    "value": status_id
-                }));
+                if let Ok(config) = AiPromptConfig::load_default() {
+                    if let Some(status_id) = config.get_status_id(status) {
+                        let field_id = config.get_field_ids()
+                            .map(|ids| ids.status_field_id.clone())
+                            .unwrap_or_else(|| "6abbfe79-f80b-4b55-9b4b-9bd7f65b6458".to_string());
+
+                        custom_fields.push(serde_json::json!({
+                            "id": field_id,
+                            "value": status_id
+                        }));
+                    } else {
+                        tracing::warn!("Status '{}' não encontrado no YAML config", status);
+                    }
+                }
             }
         }
         

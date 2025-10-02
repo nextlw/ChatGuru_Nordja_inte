@@ -49,3 +49,6 @@ scripts/node_modules/
 
 # Temporary HTML files with potential secrets
 api_webclinic.html
+
+# Auto-generated ML patterns (learned dynamically)
+config/learned_patterns.json

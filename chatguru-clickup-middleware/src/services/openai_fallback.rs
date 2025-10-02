@@ -1,6 +1,7 @@
 use crate::utils::{AppError, AppResult};
 use crate::utils::logging::*;
 use crate::services::secret_manager::SecretManagerService;
+use crate::services::ai_prompt_loader::AiPromptConfig;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -16,8 +17,11 @@ pub struct OpenAIService {
 pub struct OpenAIClassification {
     pub is_activity: bool,
     pub reason: String,
-    pub confidence: f32,
+    pub tipo_atividade: Option<String>,
     pub category: Option<String>,
+    pub sub_categoria: Option<String>,
+    pub subtasks: Vec<String>,
+    pub status_back_office: Option<String>,
 }
 
 impl OpenAIService {
@@ -53,49 +57,29 @@ impl OpenAIService {
         })
     }
     
-    /// Classifica atividade usando OpenAI (fallback)
+    /// Classifica atividade usando OpenAI (fallback) com prompt configurável
     pub async fn classify_activity_fallback(&self, context: &str) -> AppResult<OpenAIClassification> {
         log_info("Using OpenAI fallback for classification");
-        
+
         let url = "https://api.openai.com/v1/chat/completions";
-        
-        // Prompt similar ao que o sistema legado usava
-        let system_prompt = r#"
-Você é um assistente que classifica mensagens de WhatsApp para identificar se representam atividades de trabalho válidas.
 
-Atividades válidas incluem:
-- Pedidos de produtos ou serviços
-- Solicitações de orçamento
-- Requisições de reparo ou manutenção
-- Compras ou encomendas
-- Qualquer solicitação que necessite ação da empresa
+        // Carregar prompt do YAML (mesma fonte que o Vertex AI)
+        let prompt_config = AiPromptConfig::load_default()
+            .unwrap_or_else(|e| {
+                log_error(&format!("Failed to load AI prompt config, using fallback: {}", e));
+                self.get_fallback_config()
+            });
 
-NÃO são atividades:
-- Saudações (oi, olá, bom dia, etc.)
-- Agradecimentos
-- Confirmações simples (ok, certo, sim)
-- Perguntas genéricas sem pedido específico
-- Conversas casuais
+        // Gerar prompt usando a mesma lógica do Vertex AI
+        let full_prompt = prompt_config.generate_prompt(context);
 
-Responda SEMPRE em JSON com este formato:
-{
-  "is_activity": true ou false,
-  "reason": "explicação breve",
-  "confidence": 0.0 a 1.0,
-  "category": "pedido|orcamento|reparo|consulta|outro" (opcional)
-}
-"#;
-        
-        let user_prompt = format!("Classifique esta mensagem:\n{}", context);
-        
         let request_body = json!({
-            "model": "gpt-3.5-turbo", // Mais barato e rápido
+            "model": "gpt-4o-mini", // Modelo mais recente e barato
             "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
+                {"role": "user", "content": full_prompt}
             ],
             "temperature": 0.1,
-            "max_tokens": 150,
+            "max_tokens": 500,
             "response_format": { "type": "json_object" }
         });
         
@@ -124,9 +108,10 @@ Responda SEMPRE em JSON com este formato:
                 .map_err(|e| AppError::InternalError(format!("Failed to parse OpenAI response: {}", e)))?;
             
             log_info(&format!(
-                "OpenAI classification: is_activity={}, confidence={}, reason={}", 
+                "OpenAI classification: is_activity={}, category={:?}, subcategory={:?}, reason={}",
                 classification.is_activity,
-                classification.confidence,
+                classification.category,
+                classification.sub_categoria,
                 classification.reason
             ));
             
@@ -213,6 +198,61 @@ Responda SEMPRE em JSON com este formato:
             let error_text = response.text().await.unwrap_or_default();
             log_error(&format!("OpenAI Embedding API error: {}", error_text));
             Err(AppError::InternalError(format!("Embedding API error: {}", error_text)))
+        }
+    }
+
+    /// Retorna configuração de fallback caso o YAML não possa ser carregado
+    fn get_fallback_config(&self) -> AiPromptConfig {
+        use std::collections::HashMap;
+        use crate::services::ai_prompt_loader::{ActivityType, StatusOption};
+
+        AiPromptConfig {
+            system_role: "Você é um assistente especializado em classificar solicitações e mapear campos para o sistema ClickUp.".to_string(),
+            task_description: "Classifique se é uma atividade de trabalho válida e determine os campos apropriados.".to_string(),
+            categories: vec![
+                "Agendamentos".to_string(),
+                "Compras".to_string(),
+                "Documentos".to_string(),
+                "Lazer".to_string(),
+                "Logística".to_string(),
+                "Viagens".to_string(),
+            ],
+            activity_types: vec![
+                ActivityType {
+                    name: "Rotineira".to_string(),
+                    description: "tarefas recorrentes e do dia a dia".to_string(),
+                    id: "64f034f3-c5db-46e5-80e5-f515f11e2131".to_string(),
+                },
+                ActivityType {
+                    name: "Especifica".to_string(),
+                    description: "tarefas pontuais com propósito específico".to_string(),
+                    id: "e85a4dc7-82d8-4f63-89ee-462232f50f31".to_string(),
+                },
+            ],
+            status_options: vec![
+                StatusOption {
+                    name: "Executar".to_string(),
+                    id: "7889796f-033f-450d-97dd-6fee2a44f1b1".to_string(),
+                },
+            ],
+            category_mappings: HashMap::new(),
+            subcategory_mappings: HashMap::new(),
+            subcategory_examples: HashMap::new(),
+            rules: vec![
+                "Sempre escolha valores EXATOS das listas fornecidas".to_string(),
+                "Se não houver certeza, classifique como false".to_string(),
+            ],
+            response_format: r#"Responda APENAS com JSON válido:
+{
+  "is_activity": true/false,
+  "reason": "título curto e profissional (máximo 5 palavras)",
+  "tipo_atividade": "tipo da atividade",
+  "category": "categoria",
+  "sub_categoria": "subcategoria ou null",
+  "subtasks": [],
+  "status_back_office": "status"
+}"#.to_string(),
+            field_ids: None,
         }
     }
 }

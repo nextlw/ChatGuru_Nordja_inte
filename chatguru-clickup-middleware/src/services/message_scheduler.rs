@@ -333,6 +333,8 @@ impl MessageScheduler {
                     });
                     
                     // Classificar com Vertex AI com suporte a campos dinâmicos do ClickUp
+                    let mut classification_success = false;
+
                     if let Ok(mut vertex_service) = VertexAIService::new_with_clickup(
                         settings.gcp.project_id.clone(),
                         Some(settings.clickup.token.clone()),
@@ -341,21 +343,186 @@ impl MessageScheduler {
                         if let Ok(classification) = vertex_service.classify_activity(&payload).await {
                             annotation = vertex_service.build_chatguru_annotation(&classification);
                             should_create_task = classification.is_activity;
-                            
+                            classification_success = true;
+
                             // Log como o legado
                             if classification.is_activity {
-                                log_info(&format!("Atividade identificada para {}: {}", 
+                                log_info(&format!("✅ Atividade identificada via Vertex AI para {}: {}",
                                     conversation.nome, classification.reason));
-                                
+
                                 // Guardar classificação para usar ao criar tarefa
                                 ai_classification = Some(classification);
                             }
+                        } else {
+                            log_warning("⚠️ Vertex AI classification failed, trying OpenAI fallback...");
+                        }
+                    } else {
+                        log_warning("⚠️ Failed to initialize Vertex AI service, trying OpenAI fallback...");
+                    }
+
+                    // Fallback para OpenAI se Vertex falhar
+                    if !classification_success {
+                        use crate::services::openai_fallback::OpenAIService;
+
+                        if let Some(openai_service) = OpenAIService::new(None).await {
+                            // Criar contexto para OpenAI
+                            let context = format!(
+                                "Campanha: {}\nOrigem: {}\nNome: {}\nMensagem: {}\nTags: []",
+                                "WhatsApp", "whatsapp", conversation.nome, message.message
+                            );
+
+                            match openai_service.classify_activity_fallback(&context).await {
+                                Ok(classification) => {
+                                    annotation = format!("Tarefa: {}", classification.reason);
+                                    should_create_task = classification.is_activity;
+                                    classification_success = true;
+
+                                    if classification.is_activity {
+                                        log_info(&format!("✅ Atividade identificada via OpenAI para {}: {}",
+                                            conversation.nome, classification.reason));
+
+                                        // Converter para ActivityClassification do Vertex
+                                        let vertex_classification = crate::services::vertex_ai::ActivityClassification {
+                                            is_activity: classification.is_activity,
+                                            activity_type: classification.tipo_atividade.clone(),
+                                            category: classification.category.clone(),
+                                            subtasks: classification.subtasks.clone(),
+                                            priority: None,
+                                            reason: classification.reason.clone(),
+                                            cliente_solicitante_id: None,
+                                            tipo_atividade: classification.tipo_atividade.clone(),
+                                            sub_categoria: classification.sub_categoria.clone(),
+                                            status_back_office: classification.status_back_office.clone(),
+                                        };
+                                        ai_classification = Some(vertex_classification);
+                                    }
+                                }
+                                Err(e) => {
+                                    log_error(&format!("❌ OpenAI fallback failed: {}", e));
+                                }
+                            }
+                        } else {
+                            log_warning("⚠️ OpenAI service not available (no API key configured)");
+                        }
+                    }
+
+                    // Fallback final: classificação por SmartClassifier com arquivos YAML
+                    if !classification_success {
+                        log_warning("⚠️ All AI services failed, using SmartClassifier with YAML terms");
+
+                        use crate::services::smart_classifier::SmartClassifier;
+
+                        let classifier = SmartClassifier::new();
+                        let (is_activity, confidence) = classifier.classify(&message.message);
+
+                        log_info(&format!("📊 SmartClassifier result - Activity: {}, Confidence: {:.2}",
+                            is_activity, confidence));
+
+                        // Considerar atividade se classificador tem confiança razoável (>0.5)
+                        if is_activity && confidence > 0.5 {
+                            annotation = format!("Tarefa: Atividade Identificada: {}",
+                                message.message.chars().take(50).collect::<String>());
+                            should_create_task = true;
+                            log_info(&format!("📝 Atividade identificada por SmartClassifier para {} (confidence: {:.2})",
+                                conversation.nome, confidence));
+                        } else if !is_activity {
+                            log_info(&format!("❌ SmartClassifier: Não é atividade (confidence: {:.2})",
+                                confidence));
+                        } else {
+                            log_info(&format!("⚠️ SmartClassifier: Baixa confiança, não criando tarefa (confidence: {:.2})",
+                                confidence));
                         }
                     }
                 }
             }
             
-            // 2. Criar tarefa no ClickUp se for atividade
+            // 2. Decidir se deve criar nova tarefa ou atualizar existente
+            if should_create_task {
+                // Analisar contexto da conversa para detectar modificações
+                use crate::services::conversation_tracker::TaskAction;
+                let task_action = if let Ok(vertex_service) = VertexAIService::new_with_clickup(
+                    settings.gcp.project_id.clone(),
+                    Some(settings.clickup.token.clone()),
+                    Some(settings.clickup.list_id.clone())
+                ).await {
+                    vertex_service.analyze_conversation_context(
+                        &conversation.phone,
+                        &message.message,
+                        true // is_activity
+                    ).await
+                } else {
+                    TaskAction::CreateNew
+                };
+
+                // Processar de acordo com a ação decidida
+                match task_action {
+                    TaskAction::UpdateExisting { task_id, changes } => {
+                        // Atualizar tarefa existente com comentário
+                        log_info(&format!("🔄 Updating existing task {} with changes: {:?}", task_id, changes));
+
+                        // Adicionar comentário com as mudanças
+                        let comment_text = format!(
+                            "📝 Modificação solicitada por {}:\n\n{}",
+                            conversation.nome,
+                            changes.join("\n")
+                        );
+
+                        {
+                            let clickup = ClickUpService::new(&settings);
+                            match clickup.add_comment_to_task(&task_id, &comment_text).await {
+                                Ok(_) => {
+                                    log_info(&format!("✅ Comment added to task {}", task_id));
+
+                                    // Enviar confirmação ao usuário
+                                    let has_real_chat_id = !conversation.chat_id.starts_with("generic_") &&
+                                                           !conversation.chat_id.starts_with("event_") &&
+                                                           !conversation.chat_id.chars().all(|c| c.is_numeric() || c == '+');
+
+                                    if has_real_chat_id {
+                                        if let Some(chatguru_token) = &settings.chatguru.api_token {
+                                            let api_endpoint = settings.chatguru.api_endpoint.as_ref()
+                                                .map(|s| s.clone())
+                                                .unwrap_or_else(|| "https://s15.chatguru.app".to_string());
+                                            let account_id = settings.chatguru.account_id.as_ref()
+                                                .map(|s| s.clone())
+                                                .unwrap_or_else(|| "625584ce6fdcb7bda7d94aa8".to_string());
+
+                                            let chatguru_service = ChatGuruApiService::new(
+                                                chatguru_token.clone(),
+                                                api_endpoint,
+                                                account_id
+                                            );
+
+                                            match chatguru_service.send_confirmation_message(&conversation.chat_id, Some("62558780e2923cc4705beee1"), "Entendido! Atualizei sua solicitação. 📝").await {
+                                                Ok(_) => log_info("Confirmation message sent via ChatGuru"),
+                                                Err(e) => log_error(&format!("Failed to send confirmation: {}", e)),
+                                            }
+                                        }
+                                    }
+                                },
+                                Err(e) => {
+                                    log_error(&format!("Failed to add comment to task {}: {}", task_id, e));
+                                    // Se falhar ao atualizar, criar nova tarefa como fallback
+                                    log_info("Falling back to creating new task");
+                                }
+                            }
+                        }
+
+                        // Não criar nova tarefa - já atualizamos
+                        should_create_task = false;
+                    },
+                    TaskAction::NoAction => {
+                        log_info("No action needed for this message");
+                        should_create_task = false;
+                    },
+                    TaskAction::CreateNew => {
+                        log_info("Creating new task for this activity");
+                        // Continua com o fluxo normal de criação
+                    }
+                }
+            }
+
+            // 3. Criar tarefa no ClickUp se necessário
             if should_create_task {
                 // Criar payload para ClickUp IDÊNTICO AO LEGADO
                 // Mas preservar campos personalizados Info_1 e Info_2 se existirem

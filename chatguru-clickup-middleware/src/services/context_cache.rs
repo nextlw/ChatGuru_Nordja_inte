@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use chrono::{DateTime, Utc, Duration};
 use serde::{Serialize, Deserialize};
+use crate::services::smart_classifier::SmartClassifier;
 
 /// Cache de contexto para reduzir custos com Vertex AI
 /// Armazena classificações recentes e padrões identificados
@@ -10,10 +11,10 @@ use serde::{Serialize, Deserialize};
 pub struct ContextCache {
     /// Cache de mensagens já classificadas (hash da mensagem -> classificação)
     message_cache: Arc<RwLock<HashMap<String, CachedClassification>>>,
-    
-    /// Padrões aprendidos (palavras-chave -> é atividade)
-    patterns: Arc<RwLock<PatternMatcher>>,
-    
+
+    /// Classificador inteligente (TF-IDF + Stemming)
+    smart_classifier: Arc<RwLock<SmartClassifier>>,
+
     /// Estatísticas para otimização
     stats: Arc<RwLock<CacheStats>>,
 }
@@ -27,17 +28,6 @@ struct CachedClassification {
     ttl_minutes: i64,
 }
 
-#[derive(Debug, Clone)]
-struct PatternMatcher {
-    /// Palavras que indicam atividade
-    activity_keywords: Vec<String>,
-    
-    /// Palavras que indicam NÃO atividade
-    non_activity_keywords: Vec<String>,
-    
-    /// Frases exatas já classificadas
-    exact_matches: HashMap<String, bool>,
-}
 
 #[derive(Debug, Clone, Default)]
 struct CacheStats {
@@ -52,7 +42,7 @@ impl ContextCache {
     pub fn new() -> Self {
         Self {
             message_cache: Arc::new(RwLock::new(HashMap::new())),
-            patterns: Arc::new(RwLock::new(PatternMatcher::default())),
+            smart_classifier: Arc::new(RwLock::new(SmartClassifier::new())),
             stats: Arc::new(RwLock::new(CacheStats::default())),
         }
     }
@@ -78,53 +68,28 @@ impl ContextCache {
         None
     }
     
-    /// Tenta classificar usando padrões aprendidos (sem chamar AI)
+    /// Tenta classificar usando SmartClassifier (TF-IDF + Stemming)
     pub async fn classify_by_pattern(&self, message: &str) -> Option<(bool, String)> {
-        let patterns = self.patterns.read().await;
-        let message_lower = message.to_lowercase();
-        
-        // 1. Verificar correspondência exata
-        if let Some(&is_activity) = patterns.exact_matches.get(&message_lower) {
+        let classifier = self.smart_classifier.read().await;
+
+        let (is_activity, confidence) = classifier.classify(message);
+
+        // Só retornar se confiança >= 0.7
+        if confidence >= 0.7 {
             let mut stats = self.stats.write().await;
             stats.pattern_hits += 1;
             stats.total_saved += 0.0000075;
-            
+
             let reason = if is_activity {
-                "Mensagem idêntica já classificada como atividade"
+                format!("Classificação TF-IDF: atividade (confiança: {:.2})", confidence)
             } else {
-                "Mensagem idêntica já classificada como não-atividade"
+                format!("Classificação TF-IDF: não-atividade (confiança: {:.2})", confidence)
             };
-            return Some((is_activity, reason.to_string()));
+
+            return Some((is_activity, reason));
         }
-        
-        // 2. Verificar palavras-chave com alta confiança
-        let activity_score: i32 = patterns.activity_keywords
-            .iter()
-            .filter(|kw| message_lower.contains(kw.as_str()))
-            .count() as i32;
-            
-        let non_activity_score: i32 = patterns.non_activity_keywords
-            .iter()
-            .filter(|kw| message_lower.contains(kw.as_str()))
-            .count() as i32;
-        
-        // Se há forte indicação baseada em padrões
-        if activity_score > 0 && non_activity_score == 0 {
-            let mut stats = self.stats.write().await;
-            stats.pattern_hits += 1;
-            stats.total_saved += 0.0000075;
-            
-            return Some((true, format!("Contém palavras-chave de atividade: {}", activity_score)));
-        }
-        
-        if non_activity_score > 0 && activity_score == 0 {
-            let mut stats = self.stats.write().await;
-            stats.pattern_hits += 1;
-            stats.total_saved += 0.0000075;
-            
-            return Some((false, format!("Contém palavras-chave de não-atividade: {}", non_activity_score)));
-        }
-        
+
+        // Se confiança < 0.7, deixar para AI decidir
         None
     }
     
@@ -139,7 +104,7 @@ impl ContextCache {
         // 1. Adicionar ao cache
         let hash = self.hash_message(message);
         let mut cache = self.message_cache.write().await;
-        
+
         // TTL baseado na confiança (maior confiança = TTL mais longo)
         let ttl_minutes = if confidence > 0.9 {
             60  // 1 hora para alta confiança
@@ -148,7 +113,7 @@ impl ContextCache {
         } else {
             15  // 15 minutos para baixa confiança
         };
-        
+
         cache.insert(hash, CachedClassification {
             is_activity,
             reason: reason.to_string(),
@@ -156,52 +121,45 @@ impl ContextCache {
             timestamp: Utc::now(),
             ttl_minutes,
         });
-        
-        // 2. Aprender padrões
-        let mut patterns = self.patterns.write().await;
-        let message_lower = message.to_lowercase();
-        
-        // Se a mensagem é curta, adicionar como correspondência exata
-        if message.len() < 100 {
-            patterns.exact_matches.insert(message_lower.clone(), is_activity);
-        }
-        
-        // Extrair e aprender palavras-chave
-        self.learn_keywords(&mut patterns, &message_lower, is_activity).await;
-        
-        // 3. Limpar cache antigo (manter últimas 1000 entradas)
+
+        // 2. Fazer SmartClassifier aprender com esta classificação
+        let mut classifier = self.smart_classifier.write().await;
+        classifier.learn(message, is_activity, confidence);
+
+        // 3. Auto-save padrões aprendidos a cada 50 classificações
+        drop(classifier);  // Liberar lock antes de chamar auto_save
+        self.auto_save_if_needed().await;
+
+        // 4. Limpar cache antigo (manter últimas 1000 entradas)
         if cache.len() > 1000 {
             self.cleanup_old_cache(&mut cache).await;
         }
     }
-    
-    /// Aprende palavras-chave das mensagens classificadas
-    async fn learn_keywords(&self, patterns: &mut PatternMatcher, message: &str, is_activity: bool) {
-        // Palavras-chave comuns para atividades
-        let activity_indicators = vec![
-            "preciso", "quero", "necessito", "comprar", "orçamento",
-            "pedido", "encomenda", "urgente", "favor", "solicito",
-            "peças", "material", "produto", "serviço", "reparo",
-            "caixas", "unidades", "metros", "quilos", "litros",
-        ];
-        
-        // Palavras-chave comuns para NÃO atividades
-        let non_activity_indicators = vec![
-            "oi", "olá", "bom dia", "boa tarde", "boa noite",
-            "tudo bem", "como está", "obrigado", "abraço", "tchau",
-            "ok", "certo", "entendi", "sim", "não", "talvez",
-        ];
-        
-        if is_activity {
-            for word in &activity_indicators {
-                if message.contains(word) && !patterns.activity_keywords.contains(&word.to_string()) {
-                    patterns.activity_keywords.push(word.to_string());
-                }
-            }
-        } else {
-            for word in &non_activity_indicators {
-                if message.contains(word) && !patterns.non_activity_keywords.contains(&word.to_string()) {
-                    patterns.non_activity_keywords.push(word.to_string());
+
+    /// Auto-save de padrões aprendidos periodicamente
+    async fn auto_save_if_needed(&self) {
+        let stats = self.stats.read().await;
+
+        // Auto-save a cada 50 requisições (ajustável)
+        let should_save = stats.total_requests % 50 == 0 && stats.total_requests > 0;
+        let total_requests = stats.total_requests;
+
+        if should_save {
+            drop(stats);  // Liberar lock antes de salvar
+
+            let classifier = self.smart_classifier.read().await;
+
+            if classifier.learned_patterns_count() > 0 {
+                if let Err(e) = classifier.save_to_file("config/learned_patterns.json") {
+                    use crate::utils::logging::log_error;
+                    log_error(&format!("Failed to auto-save learned patterns: {}", e));
+                } else {
+                    use crate::utils::logging::log_info;
+                    log_info(&format!(
+                        "💾 Auto-saved {} learned patterns (after {} requests)",
+                        classifier.learned_patterns_count(),
+                        total_requests
+                    ));
                 }
             }
         }
@@ -255,26 +213,28 @@ impl ContextCache {
         let mut stats = self.stats.write().await;
         stats.ai_calls += 1;
     }
-}
 
-impl Default for PatternMatcher {
-    fn default() -> Self {
-        Self {
-            activity_keywords: vec![
-                "preciso".to_string(),
-                "quero".to_string(),
-                "pedido".to_string(),
-                "orçamento".to_string(),
-                "comprar".to_string(),
-            ],
-            non_activity_keywords: vec![
-                "oi".to_string(),
-                "olá".to_string(),
-                "bom dia".to_string(),
-                "boa tarde".to_string(),
-                "tudo bem".to_string(),
-            ],
-            exact_matches: HashMap::new(),
+    /// Força o save de padrões aprendidos (útil para shutdown graceful)
+    pub async fn force_save_patterns(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let classifier = self.smart_classifier.read().await;
+
+        if classifier.learned_patterns_count() > 0 {
+            classifier.save_to_file("config/learned_patterns.json")?;
+
+            use crate::utils::logging::log_info;
+            log_info(&format!(
+                "💾 Force-saved {} learned patterns on shutdown",
+                classifier.learned_patterns_count()
+            ));
         }
+
+        Ok(())
+    }
+
+    /// Executa limpeza de padrões fracos
+    pub async fn cleanup_weak_patterns(&self) {
+        let mut classifier = self.smart_classifier.write().await;
+        classifier.cleanup_weak_patterns();
     }
 }
+

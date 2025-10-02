@@ -5,11 +5,10 @@ use axum::{
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
-mod config;
+// Importar módulos da biblioteca
+use chatguru_clickup_middleware::{AppState, config, services, utils};
+
 mod handlers;
-mod models;
-mod services;
-mod utils;
 
 use config::Settings;
 use handlers::{
@@ -19,14 +18,6 @@ use handlers::{
 };
 use services::{ClickUpService, MessageScheduler};
 use utils::{AppError, logging::*};
-
-#[derive(Clone)]
-pub struct AppState {
-    pub settings: Settings,
-    pub clickup_client: reqwest::Client,
-    pub clickup: ClickUpService,
-    pub scheduler: MessageScheduler,
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

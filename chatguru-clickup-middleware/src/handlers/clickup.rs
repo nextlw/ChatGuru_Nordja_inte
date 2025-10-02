@@ -5,9 +5,9 @@ use axum::{
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use crate::utils::AppError;
-use crate::utils::logging::*;
-use crate::AppState;
+use chatguru_clickup_middleware::utils::AppError;
+use chatguru_clickup_middleware::utils::logging::*;
+use chatguru_clickup_middleware::AppState;
 
 pub async fn list_clickup_tasks(State(state): State<Arc<AppState>>) -> Result<Json<Value>, AppError> {
     log_request_received("/clickup/tasks", "GET");

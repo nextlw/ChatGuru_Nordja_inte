@@ -10,7 +10,8 @@ pub mod conversation_tracker;
 pub mod message_scheduler;
 pub mod ai_prompt_loader;
 pub mod clickup_fields_fetcher;
-pub mod task_categorizer;
+pub mod smart_classifier;
+// task_categorizer foi deprecado - usar ai_prompt_loader
 
 pub use clickup::*;
 pub use vertex_ai::*;
