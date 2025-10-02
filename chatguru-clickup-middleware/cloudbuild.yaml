@@ -4,7 +4,7 @@
 steps:
   # Step 1: Build Docker image
   - name: 'gcr.io/cloud-builders/docker'
-    args: 
+    args:
       - 'build'
       - '-t'
       - 'gcr.io/$PROJECT_ID/chatguru-clickup-middleware:$COMMIT_SHA'
@@ -13,7 +13,6 @@ steps:
       - '-f'
       - 'Dockerfile'
       - '.'
-    dir: 'chatguru-clickup-middleware'
 
   # Step 2: Push image to Container Registry
   - name: 'gcr.io/cloud-builders/docker'
@@ -51,19 +50,9 @@ steps:
       - '--set-env-vars'
       - |
         RUST_LOG=info,
-        RUN_MODE=production,
-        PORT=8080
-      - '--set-secrets'
-      - |
-        CLICKUP_API_TOKEN=clickup-api-token:latest,
-        CLICKUP_LIST_ID=clickup-list-id:latest,
-        GCP_PROJECT_ID=gcp-project-id:latest,
-        OPENAI_API_KEY=OPENAI_API_KEY:latest
-
-# Define substitutions for flexibility
-substitutions:
-  _REGION: southamerica-east1
-  _SERVICE_NAME: chatguru-clickup-middleware
+        RUN_MODE=production
+      - '--update-secrets'
+      - 'OPENAI_API_KEY=OPENAI_API_KEY:latest'
 
 # Build timeout
 timeout: 1200s

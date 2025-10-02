@@ -1,0 +1,9 @@
+name: chatguru-clickup-auto-deploy
+description: Auto deploy ChatGuru-ClickUp middleware on push to main
+github:
+  name: nextlw-ChatGuru_Nordja_inte
+  push:
+    branch: main
+filename: chatguru-clickup-middleware/cloudbuild.yaml
+includedFiles:
+  - chatguru-clickup-middleware/**
