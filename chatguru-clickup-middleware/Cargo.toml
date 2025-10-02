@@ -50,6 +50,9 @@ regex = "1.10"
 # URL encoding
 urlencoding = "2.1"
 
+# Lazy static initialization
+once_cell = "1.19"
+
 # Google Cloud
 google-cloud-pubsub = "0.30"
 google-cloud-googleapis = { version = "0.16", features = ["pubsub"] }

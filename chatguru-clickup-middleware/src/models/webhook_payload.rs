@@ -26,7 +26,7 @@ pub struct ChatGuruPayload {
     pub nome: String,
     #[serde(default)]
     pub tags: Vec<String>,
-    #[serde(default)]
+    #[serde(default, alias = "mensagem", alias = "message", alias = "text")]
     pub texto_mensagem: String,
     #[serde(default)]
     pub media_url: Option<String>,  // URL do áudio ou mídia anexada
@@ -170,29 +170,35 @@ impl WebhookPayload {
     
     /// Converte payload ChatGuru para ClickUp com classificação AI
     fn chatguru_to_clickup_with_ai(
-        &self, 
+        &self,
         payload: &ChatGuruPayload,
         ai_classification: Option<&crate::services::vertex_ai::ActivityClassification>
     ) -> serde_json::Value {
-        // FORMATO EXATO DO SISTEMA LEGADO
+        // NOVO FORMATO: descrição focada na mensagem
         let mut description = String::new();
-        
-        // Dados do Contato - FORMATO LEGADO
-        description.push_str("**Dados do Contato**\n\n");
-        description.push_str(&format!("- Nome: {}\n", payload.nome));
-        description.push_str(&format!("- Email: {}\n", 
-            if !payload.email.is_empty() { &payload.email } else { &payload.celular }
-        ));
-        description.push_str(&format!("- Celular: {}\n", payload.celular));
-        description.push_str(&format!("- Campanha: {}\n", payload.campanha_nome));
-        description.push_str(&format!("- Origem: {}\n", 
-            if !payload.origem.is_empty() { &payload.origem } else { "scheduler" }
-        ));
-        
-        // Mensagem - FORMATO LEGADO
+
+        // Mensagem principal (mais importante)
         if !payload.texto_mensagem.is_empty() {
-            description.push_str("\n**Mensagem**\n");
             description.push_str(&payload.texto_mensagem);
+            description.push_str("\n\n");
+        }
+
+        // Adicionar contexto adicional se houver
+        if let Some(ai) = ai_classification {
+            if let Some(ref category) = ai.category {
+                description.push_str(&format!("**Categoria**: {}\n", category));
+            }
+            if let Some(ref tipo) = ai.tipo_atividade {
+                description.push_str(&format!("**Tipo**: {}\n", tipo));
+            }
+        }
+
+        // Dados de contato (menos ênfase que antes)
+        description.push_str(&format!("\n**Contato**: {} ({})\n", payload.nome, payload.celular));
+
+        // Link para o chat
+        if !payload.link_chat.is_empty() {
+            description.push_str(&format!("\n[Ver conversa completa]({})", payload.link_chat));
         }
         
         // Adicionar mídia anexada se houver
@@ -217,20 +223,75 @@ impl WebhookPayload {
         
         // Preparar campos personalizados do ClickUp
         let mut custom_fields = Vec::new();
-        
+
+        // ===== CATEGORIZAÇÃO AUTOMÁTICA BASEADA EM PALAVRAS-CHAVE =====
+        // Tentar categorizar automaticamente baseado no nome da tarefa e mensagem
+        let texto_para_categorizar = format!("{} {}",
+            payload.nome,
+            payload.texto_mensagem
+        );
+
+        if let Some(cat) = crate::services::task_categorizer::categorize_task(&texto_para_categorizar) {
+            use crate::services::task_categorizer::{FIELD_CATEGORIA, FIELD_SUBCATEGORIA, FIELD_ESTRELAS};
+
+            // Buscar IDs das opções de categoria e subcategoria do ClickUp
+            // Por enquanto, adicionar como valor string e deixar o ClickUp resolver
+            // TODO: Implementar cache de IDs de opções para performance
+
+            tracing::info!(
+                "Categorização automática: {} > {} ({}⭐)",
+                cat.categoria,
+                cat.subcategoria,
+                cat.estrelas
+            );
+
+            // Adicionar campos de categorização
+            custom_fields.push(serde_json::json!({
+                "id": FIELD_CATEGORIA,
+                "value": cat.categoria  // ClickUp aceita nome da opção
+            }));
+
+            custom_fields.push(serde_json::json!({
+                "id": FIELD_SUBCATEGORIA,
+                "value": cat.subcategoria
+            }));
+
+            custom_fields.push(serde_json::json!({
+                "id": FIELD_ESTRELAS,
+                "value": cat.estrelas
+            }));
+        }
+
         // Nome da tarefa - usar título profissional se temos AI classification
         let task_name = if let Some(ai) = ai_classification {
             if ai.is_activity {
-                // Extrair título profissional da reason
-                let titulo = extract_professional_title(&ai.reason);
-                if !titulo.is_empty() && titulo.len() > 5 {
+                // Se o reason vem do pattern matching (começa com "Contém palavras-chave")
+                // usar a mensagem original como título ao invés do reason genérico
+                if ai.reason.starts_with("Contém palavras-chave") {
+                    // Usar a mensagem original como título (limitando a 80 caracteres)
+                    let titulo = if payload.texto_mensagem.len() > 80 {
+                        format!("{}...", &payload.texto_mensagem[..77])
+                    } else {
+                        payload.texto_mensagem.clone()
+                    };
                     format!("[ChatGuru] {}", titulo)
-                } else if let Some(ref tipo) = ai.tipo_atividade {
-                    // Fallback: usar tipo de atividade + contexto
-                    format!("[ChatGuru] {} - {}", tipo, payload.nome)
                 } else {
-                    // Fallback final
-                    format!("[ChatGuru] {}", payload.nome)
+                    // Para classificação via IA, extrair título profissional da reason
+                    let titulo = extract_professional_title(&ai.reason);
+                    if !titulo.is_empty() && titulo.len() > 5 {
+                        format!("[ChatGuru] {}", titulo)
+                    } else if let Some(ref tipo) = ai.tipo_atividade {
+                        // Fallback: usar tipo de atividade + contexto
+                        format!("[ChatGuru] {} - {}", tipo, payload.nome)
+                    } else {
+                        // Fallback final: usar mensagem original
+                        let titulo = if payload.texto_mensagem.len() > 80 {
+                            format!("{}...", &payload.texto_mensagem[..77])
+                        } else {
+                            payload.texto_mensagem.clone()
+                        };
+                        format!("[ChatGuru] {}", titulo)
+                    }
                 }
             } else {
                 format!("[ChatGuru] {}", payload.nome)
@@ -325,17 +386,35 @@ impl WebhookPayload {
                 }));
             }
         }
-        
+
+        // Adicionar dados de contato como campos personalizados
+        // Nome do solicitante
+        if !payload.nome.is_empty() {
+            custom_fields.push(serde_json::json!({
+                "id": "bf24f5b1-e909-473e-b864-75bf22edf67e",  // Campo "Solicitante (Info_1)"
+                "value": payload.nome
+            }));
+        }
+
+        // Celular como campo de texto
+        if !payload.celular.is_empty() {
+            // Usar o campo "Conta cliente" para o celular
+            custom_fields.push(serde_json::json!({
+                "id": "0cd1d510-1906-4484-ba66-06ccdd659768",  // Campo "Conta cliente"
+                "value": payload.celular
+            }));
+        }
+
         if let Some(info_1) = payload.campos_personalizados.get("Info_1") {
             if let Some(info_1_str) = info_1.as_str() {
-                // Info_1 vai para o campo "Conta cliente"
+                // Info_1 adicional (se vier nos campos personalizados, sobrescreve)
                 custom_fields.push(serde_json::json!({
                     "id": "0cd1d510-1906-4484-ba66-06ccdd659768",  // Campo Conta cliente
                     "value": info_1_str
                 }));
             }
         }
-        
+
         serde_json::json!({
             "name": task_name,
             "description": description.trim(),
