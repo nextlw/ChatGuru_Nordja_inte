@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use crate::services::ai_prompt_loader::AiPromptConfig;
+use crate::services::prompts::AiPromptConfig;
 
 /// Estrutura flexível que aceita múltiplos formatos de webhook
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -169,7 +169,7 @@ impl WebhookPayload {
     /// Converte payload para dados do ClickUp com classificação AI
     pub fn to_clickup_task_data_with_ai(
         &self, 
-        ai_classification: Option<&crate::services::vertex_ai::ActivityClassification>
+        ai_classification: Option<&crate::services::openai::OpenAIClassification>
     ) -> serde_json::Value {
         match self {
             WebhookPayload::ChatGuru(payload) => {
@@ -188,7 +188,7 @@ impl WebhookPayload {
     fn chatguru_to_clickup_with_ai(
         &self,
         payload: &ChatGuruPayload,
-        ai_classification: Option<&crate::services::vertex_ai::ActivityClassification>
+        ai_classification: Option<&crate::services::openai::OpenAIClassification>
     ) -> serde_json::Value {
         // NOVO FORMATO: descrição focada na mensagem
         let mut description = String::new();

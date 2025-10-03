@@ -24,7 +24,7 @@ mod handlers;
 use config::Settings;
 use handlers::{
     health_check, ready_check, status_check,
-    handle_webhook_raw,
+    handle_webhook,
     handle_worker,
     list_clickup_tasks, get_clickup_list_info, test_clickup_connection,
 };
@@ -64,7 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/status", get(status_check))
 
         // Webhook ChatGuru: Envia RAW para Pub/Sub
-        .route("/webhooks/chatguru", post(handle_webhook_raw))
+        .route("/webhooks/chatguru", post(handle_webhook))
 
         // Worker: Processa mensagens do Pub/Sub
         .route("/worker/process", post(handle_worker))

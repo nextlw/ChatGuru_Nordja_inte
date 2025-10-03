@@ -25,8 +25,8 @@ use chatguru_clickup_middleware::models::WebhookPayload;
 use chatguru_clickup_middleware::utils::{AppResult, AppError};
 use chatguru_clickup_middleware::utils::logging::*;
 use chatguru_clickup_middleware::AppState;
-use chatguru_clickup_middleware::services::openai_fallback::OpenAIService;
-use chatguru_clickup_middleware::services::chatguru_api::ChatGuruApiService;
+use chatguru_clickup_middleware::services::openai::OpenAIService;
+use chatguru_clickup_middleware::services::chatguru::ChatGuruApiService;
 
 /// Handler do worker
 /// Retorna 200 OK se processado com sucesso
@@ -87,7 +87,7 @@ pub async fn handle_worker(
     };
 
     // Parsear payload do ChatGuru
-    let webhook_payload: WebhookPayload = match serde_json::from_str(raw_payload_str) {
+    let payload: WebhookPayload = match serde_json::from_str(raw_payload_str) {
         Ok(p) => p,
         Err(e) => {
             log_error(&format!("Failed to parse ChatGuru payload: {}", e));
@@ -100,7 +100,7 @@ pub async fn handle_worker(
     };
 
     // Processar mensagem
-    match process_message(&state, &webhook_payload).await {
+    match process_message(&state, &payload).await {
         Ok(result) => {
             let processing_time = start_time.elapsed().as_millis() as u64;
             log_request_processed("/worker/process", 200, processing_time);
@@ -204,7 +204,7 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload) -> App
 async fn create_clickup_task(
     state: &Arc<AppState>,
     payload: &WebhookPayload,
-    classification: &chatguru_clickup_middleware::services::openai_fallback::OpenAIClassification,
+    classification: &chatguru_clickup_middleware::services::openai::OpenAIClassification,
     nome: &str,
     message: &str,
 ) -> AppResult<Value> {

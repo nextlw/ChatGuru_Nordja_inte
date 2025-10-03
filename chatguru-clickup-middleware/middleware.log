@@ -1,5 +1,0 @@
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.60s
-     Running `target/debug/chatguru-clickup-middleware`
-[2m2025-09-23T21:25:34.212837Z[0m [31mERROR[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m ClickUp API error: https://api.clickup.com/api/v2/list/901300373349/task - Status: Some(400) - Error: {"err":"Status not found","ECODE":"CRTSK_001"}
-[2m2025-09-23T21:25:34.213045Z[0m [31mERROR[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m ClickUp API error: process_task - Status: None - Error: ClickUp API error: Failed to create task: {"err":"Status not found","ECODE":"CRTSK_001"}
-[2m2025-09-23T21:25:34.213069Z[0m [31mERROR[0m [2mchatguru_clickup_middleware::utils::logging[0m[2m:[0m Webhook processing error: Internal error: ClickUp integration failed

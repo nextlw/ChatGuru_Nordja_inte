@@ -26,7 +26,7 @@ use chatguru_clickup_middleware::AppState;
 
 /// Handler principal do webhook
 /// Retorna Success imediatamente após enviar para Pub/Sub
-pub async fn handle_webhook_raw(
+pub async fn handle_webhook(
     State(state): State<Arc<AppState>>,
     request: Request<Body>,
 ) -> Result<Json<Value>, AppError> {

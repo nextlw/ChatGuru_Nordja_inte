@@ -126,7 +126,7 @@ pub async fn status_check(State(state): State<Arc<AppState>>) -> Json<Value> {
         "integrations": {
             "clickup": clickup_info,
             "pubsub": pubsub_info,
-            "vertex_ai": {
+            "openai": {
                 "enabled": ai_enabled,
                 "region": "us-central1",  // Gemini só está disponível em us-central1
                 "project_id": state.settings.gcp.project_id.clone()
