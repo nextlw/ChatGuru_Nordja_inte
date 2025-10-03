@@ -28,6 +28,7 @@ pub struct GcpSettings {
     pub project_id: String,
     pub topic_name: String,
     pub subscription_name: String,
+    pub pubsub_topic: Option<String>,  // Tópico para envio de webhooks RAW
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

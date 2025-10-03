@@ -11,6 +11,7 @@ list_id = ""
 project_id = "buzzlightear"
 topic_name = "chatguru-events"
 subscription_name = "chatguru-events-subscription"
+pubsub_topic = "chatguru-webhook-raw"
 
 [chatguru]
 validate_signature = false

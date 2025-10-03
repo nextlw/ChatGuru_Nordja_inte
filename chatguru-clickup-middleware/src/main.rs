@@ -1,3 +1,14 @@
+/// Main Application: Event-Driven Architecture com Pub/Sub
+///
+/// Arquitetura:
+/// - Webhook recebe payload e envia RAW para Pub/Sub (ACK <100ms)
+/// - Worker processa mensagens do Pub/Sub de forma assíncrona
+/// - OpenAI classifica atividades
+/// - ClickUp recebe tarefas criadas
+///
+/// SEM scheduler, SEM agrupamento de mensagens em memória
+/// Processamento 100% event-driven via Pub/Sub
+
 use axum::{
     routing::{get, post},
     Router,
@@ -12,11 +23,12 @@ mod handlers;
 
 use config::Settings;
 use handlers::{
-    health_check, ready_check, status_check, scheduler_status,
-    handle_webhook_flexible,
+    health_check, ready_check, status_check,
+    handle_webhook_raw,
+    handle_worker,
     list_clickup_tasks, get_clickup_list_info, test_clickup_connection,
 };
-use services::{ClickUpService, MessageScheduler};
+use services::ClickUpService;
 use utils::{AppError, logging::*};
 
 #[tokio::main]
@@ -27,47 +39,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Carregar configurações
     let settings = Settings::new()
         .map_err(|e| AppError::ConfigError(format!("Failed to load settings: {}", e)))?;
-    
+
     log_config_loaded(&std::env::var("RUST_ENV").unwrap_or_else(|_| "development".to_string()));
 
     // Inicializar serviços
     let clickup_service = ClickUpService::new(&settings);
-    
-    // Inicializar scheduler com intervalos otimizados para performance
-    // Redução de 100s para 10s em produção = melhoria de 90% no tempo de resposta
-    let is_development = cfg!(debug_assertions) || 
-        std::env::var("RUST_ENV").unwrap_or_default() == "development";
-    
-    let interval = if is_development { 
-        5  // 5s em desenvolvimento para testes rápidos
-    } else { 
-        10 // 10s em produção (era 100s - redução de 90%)
-    };
-    
-    log_info(&format!("Scheduler interval configured: {}s ({})", 
-        interval, 
-        if is_development { "development" } else { "production" }
-    ));
-    
-    let mut scheduler = MessageScheduler::new(interval);
-    scheduler.configure(settings.clone(), clickup_service.clone());
-    
-    // PubSub é opcional - se falhar, apenas log warning
-    // if let Err(e) = PubSubService::new(&settings).await {
-    //     tracing::warn!("PubSub service not available: {}. Running without PubSub.", e);
-    // }
 
-    // Inicializar estado da aplicação
+    log_info("ClickUp service initialized");
+
+    // Inicializar estado da aplicação (SEM scheduler)
     let app_state = Arc::new(AppState {
         clickup_client: reqwest::Client::new(),
         clickup: clickup_service,
-        scheduler: scheduler.clone(),
         settings: settings.clone(),
     });
-    
-    // Iniciar o scheduler (como no legado)
-    scheduler.start().await;
-    log_info("Scheduler started - verificar_e_enviar_mensagens job enabled");
+
+    log_info("Event-driven architecture - No scheduler needed");
 
     // Configurar rotas
     let app = Router::new()
@@ -75,16 +62,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/health", get(health_check))
         .route("/ready", get(ready_check))
         .route("/status", get(status_check))
-        .route("/scheduler/status", get(scheduler_status))
-        
-        // Webhooks ChatGuru (aceita múltiplos formatos)
-        .route("/webhooks/chatguru", post(handle_webhook_flexible))
-        
-        // ClickUp endpoints
+
+        // Webhook ChatGuru: Envia RAW para Pub/Sub
+        .route("/webhooks/chatguru", post(handle_webhook_raw))
+
+        // Worker: Processa mensagens do Pub/Sub
+        .route("/worker/process", post(handle_worker))
+
+        // ClickUp endpoints (debug/admin)
         .route("/clickup/tasks", get(list_clickup_tasks))
         .route("/clickup/list", get(get_clickup_list_info))
         .route("/clickup/test", get(test_clickup_connection))
-        
+
         .with_state(app_state);
 
     // Iniciar servidor
@@ -94,7 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|p| p.parse::<u16>().ok())
         .unwrap_or(settings.server.port);
     let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
-    
+
     log_server_startup(port);
     log_server_ready(port);
 
