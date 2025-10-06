@@ -59,16 +59,8 @@ pub async fn ready_check(State(state): State<Arc<AppState>>) -> Result<Json<Valu
     }
 }
 
-pub async fn scheduler_status(State(state): State<Arc<AppState>>) -> Json<Value> {
-    let queue_status = state.scheduler.get_status().await;
-    
-    Json(json!({
-        "scheduler": "running",
-        "interval_seconds": 100,
-        "queued_conversations": queue_status,
-        "timestamp": chrono::Utc::now().to_rfc3339()
-    }))
-}
+// Scheduler removido na arquitetura event-driven
+// pub async fn scheduler_status() - DEPRECATED
 
 pub async fn status_check(State(state): State<Arc<AppState>>) -> Json<Value> {
     log_integration_status_check();
@@ -134,7 +126,7 @@ pub async fn status_check(State(state): State<Arc<AppState>>) -> Json<Value> {
         "integrations": {
             "clickup": clickup_info,
             "pubsub": pubsub_info,
-            "vertex_ai": {
+            "openai": {
                 "enabled": ai_enabled,
                 "region": "us-central1",  // Gemini só está disponível em us-central1
                 "project_id": state.settings.gcp.project_id.clone()

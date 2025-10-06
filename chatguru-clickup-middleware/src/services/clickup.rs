@@ -1,6 +1,6 @@
 use crate::config::Settings;
 use crate::models::WebhookPayload;
-use crate::services::secret_manager::SecretManagerService;
+use crate::services::secrets::SecretManagerService;
 use crate::utils::{AppError, AppResult};
 use crate::utils::logging::*;
 use reqwest::Client;
@@ -33,7 +33,7 @@ impl ClickUpService {
     }
     
     /// Cria uma nova instância usando Secret Manager com fallback para env vars
-    pub async fn new_with_secret_manager() -> AppResult<Self> {
+    pub async fn new_with_secrets() -> AppResult<Self> {
         let secret_service = SecretManagerService::new().await
             .map_err(|e| AppError::ConfigError(format!("Erro ao inicializar Secret Manager: {}", e)))?;
         
@@ -207,15 +207,15 @@ impl ClickUpService {
     /// 1. Verifica se já existe tarefa com mesmo título
     /// 2. Se existir, adiciona comentário com histórico e atualiza tarefa
     /// 3. Se não existir, cria tarefa nova
-    pub async fn process_webhook_payload(&self, payload: &WebhookPayload) -> AppResult<Value> {
-        self.process_webhook_payload_with_ai(payload, None).await
+    pub async fn process_payload(&self, payload: &WebhookPayload) -> AppResult<Value> {
+        self.process_payload_with_ai(payload, None).await
     }
     
     /// Processa webhook payload com classificação AI opcional
-    pub async fn process_webhook_payload_with_ai(
+    pub async fn process_payload_with_ai(
         &self, 
         payload: &WebhookPayload,
-        ai_classification: Option<&crate::services::vertex_ai::ActivityClassification>
+        ai_classification: Option<&crate::services::openai::OpenAIClassification>
     ) -> AppResult<Value> {
         // Extrair título e dados da tarefa
         let task_title = payload.get_task_title();

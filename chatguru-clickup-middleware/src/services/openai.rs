@@ -1,7 +1,7 @@
 use crate::utils::{AppError, AppResult};
 use crate::utils::logging::*;
-use crate::services::secret_manager::SecretManagerService;
-use crate::services::ai_prompt_loader::AiPromptConfig;
+use crate::services::secrets::SecretManagerService;
+use crate::services::prompts::AiPromptConfig;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -204,7 +204,7 @@ impl OpenAIService {
     /// Retorna configuração de fallback caso o YAML não possa ser carregado
     fn get_fallback_config(&self) -> AiPromptConfig {
         use std::collections::HashMap;
-        use crate::services::ai_prompt_loader::{ActivityType, StatusOption};
+        use crate::services::prompts::{ActivityType, StatusOption};
 
         AiPromptConfig {
             system_role: "Você é um assistente especializado em classificar solicitações e mapear campos para o sistema ClickUp.".to_string(),

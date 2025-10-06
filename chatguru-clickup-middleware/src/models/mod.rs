@@ -1,3 +1,3 @@
-pub mod webhook_payload;
+pub mod payload;
 
-pub use webhook_payload::*;
+pub use payload::*;

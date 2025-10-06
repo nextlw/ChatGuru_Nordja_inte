@@ -1,21 +1,11 @@
+// Serviços necessários para arquitetura event-driven
 pub mod clickup;
-#[allow(dead_code)]
-pub mod secret_manager;
-pub mod pubsub;
-pub mod vertex_ai;
-pub mod chatguru_api;
-pub mod context_cache;
-pub mod openai_fallback;
-pub mod conversation_tracker;
-pub mod message_scheduler;
-pub mod ai_prompt_loader;
-pub mod clickup_fields_fetcher;
-pub mod smart_classifier;
-// task_categorizer foi deprecado - usar ai_prompt_loader
+pub mod chatguru;
+pub mod openai;
+pub mod secrets;
+pub mod prompts;
 
+// Re-exports
 pub use clickup::*;
-pub use vertex_ai::*;
-pub use chatguru_api::*;
-// pub use conversation_tracker::TaskAction;
-pub use message_scheduler::MessageScheduler;
-// pub use pubsub::*; // Comentado temporariamente até ser utilizado
+pub use chatguru::*;
+pub use openai::*;
