@@ -134,7 +134,7 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload) -> App
     let nome = extract_nome_from_payload(payload);
     let message = extract_message_from_payload(payload);
     let phone = extract_phone_from_payload(payload);
-    let chat_id = extract_chat_id_from_payload(payload);
+    let _chat_id = extract_chat_id_from_payload(payload);
 
     log_info(&format!(
         "💬 Processando mensagem de {}: {}",
@@ -308,5 +308,254 @@ fn extract_chat_id_from_payload(payload: &WebhookPayload) -> Option<String> {
         WebhookPayload::ChatGuru(p) => p.chat_id.clone(),
         WebhookPayload::EventType(_) => None,  // EventType não tem chat_id direto
         WebhookPayload::Generic(_) => None,
+    }
+}
+
+// ============================================================================
+// Funções para campos personalizados - Categoria*, SubCategoria e Estrelas
+// ============================================================================
+
+/// Prepara campos personalizados para criação da tarefa
+/// Inclui automaticamente os campos obrigatórios: Categoria*, SubCategoria e Estrelas
+fn prepare_custom_fields(
+    payload: &WebhookPayload,
+    classification: &chatguru_clickup_middleware::services::openai::OpenAIClassification,
+    _nome: &str,
+) -> Vec<Value> {
+    let mut custom_fields = Vec::new();
+
+    // IDs reais dos campos personalizados (do script categorize_tasks.js)
+    
+    // 1. Campo: Categoria* (dropdown) - ID real do ClickUp
+    if let Some(category) = &classification.category {
+        custom_fields.push(json!({
+            "id": "eac5bbd3-4ff6-41ac-aa93-0a13a5a2c75a", // ID real do campo Categoria*
+            "value": category // Categoria determinada pela classificação IA
+        }));
+    }
+
+    // 2. Campo: SubCategoria (dropdown) - ID real do ClickUp
+    if let Some(subcategory) = determine_subcategoria(classification) {
+        custom_fields.push(json!({
+            "id": "5333c095-eb40-4a5a-b0c2-76bfba4b1094", // ID real do campo SubCategoria
+            "value": subcategory
+        }));
+    }
+
+    // 3. Campo: Estrelas (rating) - ID real do ClickUp
+    let stars = determine_estrelas(classification, payload);
+    custom_fields.push(json!({
+        "id": "83afcb8c-2866-498f-9c62-8ea9666b104b", // ID real do campo Estrelas
+        "value": stars // Valor numérico de 1 a 4
+    }));
+
+    custom_fields
+}
+
+/// Determina a SubCategoria baseada na Categoria principal
+/// Implementa EXATAMENTE a hierarquia definida em categorize_tasks.js - KEYWORD_MAPPING
+fn determine_subcategoria(classification: &chatguru_clickup_middleware::services::openai::OpenAIClassification) -> Option<String> {
+    // Análise de palavras-chave da mensagem/descrição para determinar subcategoria
+    let message_text = classification.reason.to_lowercase();
+    
+    // MAPEAMENTO EXATO do categorize_tasks.js - KEYWORD_MAPPING
+    // Logística
+    if message_text.contains("motoboy") || message_text.contains("entrega") || message_text.contains("retirada") {
+        Some("Corrida de motoboy".to_string())
+    } else if message_text.contains("sedex") || message_text.contains("correio") {
+        Some("Motoboy + Correios e envios internacionais".to_string())
+    } else if message_text.contains("lalamove") {
+        Some("Lalamove".to_string())
+    } else if message_text.contains("uber") || message_text.contains("99") {
+        Some("Transporte Urbano (Uber/99)".to_string())
+    } else if message_text.contains("taxista") {
+        Some("Corridas com Taxistas".to_string())
+    }
+    // Plano de Saúde
+    else if message_text.contains("reembolso") || message_text.contains("bradesco saúde") || message_text.contains("plano de saúde") {
+        Some("Reembolso Médico".to_string())
+    }
+    // Compras
+    else if message_text.contains("mercado") {
+        Some("Mercados".to_string())
+    } else if message_text.contains("farmácia") {
+        Some("Farmácia".to_string())
+    } else if message_text.contains("presente") {
+        Some("Presentes".to_string())
+    } else if message_text.contains("shopper") {
+        Some("Shopper".to_string())
+    } else if message_text.contains("papelaria") {
+        Some("Papelaria".to_string())
+    } else if message_text.contains("petshop") {
+        Some("Petshop".to_string())
+    } else if message_text.contains("ingresso") {
+        Some("Ingressos".to_string())
+    }
+    // Assuntos Pessoais
+    else if message_text.contains("troca") {
+        Some("Troca de titularidade".to_string())
+    } else if message_text.contains("internet") {
+        Some("Internet e TV por Assinatura".to_string())
+    } else if message_text.contains("telefone") {
+        Some("Telefone".to_string())
+    } else if message_text.contains("conserto") {
+        Some("Consertos na Casa".to_string())
+    } else if message_text.contains("assistência") {
+        Some("Assistência Técnica".to_string())
+    }
+    // Financeiro
+    else if message_text.contains("pagamento") {
+        Some("Rotina de Pagamentos".to_string())
+    } else if message_text.contains("boleto") {
+        Some("Emissão de boletos".to_string())
+    } else if message_text.contains("nota fiscal") {
+        Some("Emissão de NF".to_string())
+    }
+    // Viagens
+    else if message_text.contains("passagem") {
+        Some("Passagens Aéreas".to_string())
+    } else if message_text.contains("hospedagem") || message_text.contains("hotel") {
+        Some("Hospedagens".to_string())
+    } else if message_text.contains("check in") {
+        Some("Checkins (Early/Late)".to_string())
+    } else if message_text.contains("bagagem") {
+        Some("Extravio de Bagagens".to_string())
+    }
+    // Agendamentos
+    else if message_text.contains("consulta") {
+        Some("Consultas".to_string())
+    } else if message_text.contains("exame") {
+        Some("Exames".to_string())
+    } else if message_text.contains("vacina") {
+        Some("Vacinas".to_string())
+    } else if message_text.contains("manicure") {
+        Some("Manicure".to_string())
+    } else if message_text.contains("cabeleireiro") {
+        Some("Cabeleleiro".to_string())
+    }
+    // Lazer
+    else if message_text.contains("restaurante") || message_text.contains("reserva") {
+        Some("Reserva de restaurantes/bares".to_string())
+    } else if message_text.contains("festa") {
+        Some("Planejamento de festas".to_string())
+    }
+    // Documentos
+    else if message_text.contains("passaporte") {
+        Some("Passaporte".to_string())
+    } else if message_text.contains("cnh") {
+        Some("CNH".to_string())
+    } else if message_text.contains("cidadania") {
+        Some("Cidadanias".to_string())
+    } else if message_text.contains("visto") {
+        Some("Vistos e Vistos Eletrônicos".to_string())
+    } else if message_text.contains("certidão") {
+        Some("Certidões".to_string())
+    } else if message_text.contains("contrato") {
+        Some("Contratos/Procurações".to_string())
+    }
+    // Fallback: usar categoria padrão
+    else if let Some(category) = &classification.category {
+        match category.as_str() {
+            "Logística" => Some("Corrida de motoboy".to_string()),
+            "Plano de Saúde" => Some("Reembolso Médico".to_string()),
+            "Compras" => Some("Mercados".to_string()),
+            "Agendamentos" => Some("Consultas".to_string()),
+            "Lazer" => Some("Reserva de restaurantes/bares".to_string()),
+            "Viagens" => Some("Passagens Aéreas".to_string()),
+            "Financeiro" => Some("Rotina de Pagamentos".to_string()),
+            "Documentos" => Some("Passaporte".to_string()),
+            "Assuntos Pessoais" => Some("Telefone".to_string()),
+            _ => Some("Consultas".to_string()) // Padrão geral
+        }
+    } else {
+        None
+    }
+}
+
+/// Determina o número de Estrelas baseado na SubCategoria
+/// Mapeamento EXATO do categorize_tasks.js - SUBCATEGORIA_ESTRELAS
+fn determine_estrelas(
+    classification: &chatguru_clickup_middleware::services::openai::OpenAIClassification,
+    _payload: &WebhookPayload,
+) -> i32 {
+    // Usar a subcategoria determinada para mapear as estrelas
+    if let Some(subcategory) = determine_subcategoria(classification) {
+        // MAPEAMENTO EXATO do categorize_tasks.js - SUBCATEGORIA_ESTRELAS
+        match subcategory.as_str() {
+            // 1 estrela - Agendamentos
+            "Consultas" | "Exames" | "Veterinário/Petshop (Consultas/Exames/Banhos/Tosas)" |
+            "Vacinas" | "Manicure" | "Cabeleleiro" => 1,
+            
+            // Compras - Variado
+            "Mercados" | "Presentes" | "Petshop" | "Papelaria" => 1,
+            "Shopper" | "Farmácia" | "Ingressos" | "Móveis e Eletros" | "Itens pessoais e da casa" => 2,
+            
+            // Documentos - Variado
+            "CIN" | "Documento de Vacinação (BR/Iternacional)" | "Assinatura Digital" |
+            "Contratos/Procurações" | "Passaporte" | "CNH" | "Averbações" | "Certidões" => 1,
+            "Certificado Digital" | "Seguros Carro/Casa/Viagem (anual)" |
+            "Vistos e Vistos Eletrônicos" => 2,
+            "Cidadanias" => 4,
+            
+            // Lazer - Variado
+            "Reserva de restaurantes/bares" => 1,
+            "Fornecedores no exterior (passeios, fotógrafos)" => 2,
+            "Pesquisa de passeios/eventos (BR)" => 3,
+            "Planejamento de festas" => 4,
+            
+            // Logística - Todas 1 estrela
+            "Corrida de motoboy" | "Motoboy + Correios e envios internacionais" |
+            "Lalamove" | "Corridas com Taxistas" | "Transporte Urbano (Uber/99)" => 1,
+            
+            // Viagens - Variado
+            "Compra de Assentos e Bagagens" | "Passagens de Ônibus" | "Checkins (Early/Late)" |
+            "Seguro Viagem (Temporário)" | "Programa de Milhagem" | "Gestão de Contas (CIAs Aereas)" => 1,
+            "Passagens Aéreas" | "Hospedagens" | "Passagens de Trem" | "Extravio de Bagagens" |
+            "Transfer" | "Aluguel de Carro/Ônibus e Vans" => 2,
+            "Roteiro de Viagens" => 3,
+            
+            // Plano de Saúde - Variado
+            "Extrato para IR" | "Prévia de Reembolso" | "Contestações" | "Autorizações" => 1,
+            "Reembolso Médico" | "Contratações/Cancelamentos" => 2,
+            
+            // Agenda - Todas 1 estrela
+            "Gestão de Agenda" | "Criação e envio de invites" => 1,
+            
+            // Financeiro - Variado
+            "Emissão de NF" | "Rotina de Pagamentos" | "Emissão de boletos" |
+            "Imposto de Renda" | "Emissão de Guias de Imposto (DARF, DAS, DIRF, GPS)" => 1,
+            "Conciliação Bancária" | "Encerramento e Abertura de CNPJ" => 2,
+            "Planilha de Gastos/Pagamentos" => 4,
+            
+            // Assuntos Pessoais - Variado
+            "Troca de titularidade" | "Assuntos do Carro/Moto" | "Internet e TV por Assinatura" |
+            "Contas de Consumo" | "Assuntos Escolares e Professores Particulares" |
+            "Academia e Cursos Livres" | "Telefone" | "Assistência Técnica" | "Consertos na Casa" => 1,
+            "Mudanças" | "Anúncio de Vendas Online (Itens, eletros. móveis)" => 3,
+            
+            // Atividades Corporativas - Variado
+            "Financeiro/Contábil" | "Atendimento ao Cliente" | "Documentos/Contratos e Assinaturas" |
+            "Gestão de Agenda (Corporativa)" | "Recursos Humanos" | "Gestão de Estoque" | "Compras/vendas" => 1,
+            "Fornecedores" => 2,
+            "Gestão de Planilhas e Emails" => 4,
+            
+            // Gestão de Funcionário - Todas 1 estrela
+            "eSocial" | "Contratações e Desligamentos" | "DIRF" | "Férias" => 1,
+            
+            // Padrão para subcategorias não mapeadas
+            _ => 1
+        }
+    } else {
+        // Fallback: usar categoria se não conseguir determinar subcategoria
+        if let Some(category) = &classification.category {
+            match category.as_str() {
+                "Logística" | "Agendamentos" => 1,
+                "Compras" | "Plano de Saúde" | "Financeiro" | "Viagens" => 2,
+                "Lazer" | "Documentos" | "Assuntos Pessoais" => 2,
+                _ => 1
+            }
+        } else {
+            1
+        }
     }
 }

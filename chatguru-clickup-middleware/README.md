@@ -321,6 +321,66 @@ gcloud pubsub subscriptions pull chatguru-webhook-subscription \
 - Verificar list_id correto
 - Testar endpoint: `curl https://your-service.run.app/clickup/test`
 
-## 📝 Licença
+## 📋 Campos Personalizados (Custom Fields)
+
+O middleware suporta campos personalizados na criação de tarefas. Para configurar:
+
+### 1. Descobrir IDs dos Campos
+```bash
+# Via endpoint do middleware (mais fácil)
+curl http://localhost:8080/clickup/fields
+
+# Via API REST direta
+curl -H "Authorization: $CLICKUP_API_TOKEN" \
+  https://api.clickup.com/api/v2/list/901300373349/field
+
+# Via script automatizado
+cd scripts && node discover_custom_fields.js
+```
+
+### 2. Configurar Campos no Código
+Edite `src/handlers/worker.rs` na função `prepare_custom_fields()`:
+- Descomente os campos necessários
+- Substitua os IDs pelos valores reais descobertos
+- Configure valores dinâmicos baseados nos dados recebidos
+
+### 3. Tipos de Campo Suportados
+- **text**: Campos de texto simples
+- **number**: Campos numéricos
+- **dropdown**: Seleção (valores devem existir nas opções)
+- **date**: Data/hora (timestamp em milliseconds)
+- **email**: Campos de email
+- **phone**: Campos de telefone
+
+### 4. Exemplo de Implementação
+```rust
+// Campo: Nome do Cliente (text)
+custom_fields.push(json!({
+    "id": "12345678-1234-1234-1234-123456789012",
+    "value": nome
+}));
+
+// Campo: Categoria (dropdown)
+if let Some(category) = &classification.category {
+    custom_fields.push(json!({
+        "id": "87654321-4321-4321-4321-210987654321",
+        "value": category // Deve existir nas opções
+    }));
+}
+```
+
+### 5. Campos Disponíveis para Configuração
+- **Origem da campanha** (WhatsApp)
+- **Nome do cliente** (extraído do payload)
+- **Telefone** (extraído do payload)
+- **Categoria** (classificação IA)
+- **Score de confiança** (classificação IA)
+- **Data de criação** (timestamp automático)
+- **Prioridade** (configurável)
+- **Status da campanha** (configurável)
+
+**Importante**: Campos dropdown devem usar valores exatos que existem nas opções configuradas no ClickUp.
+
+## � Licença
 
 Proprietary - Nordja/Buzzlightear
