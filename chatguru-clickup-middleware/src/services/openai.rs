@@ -127,16 +127,54 @@ impl OpenAIService {
         }
     }
 
+    /// Baixa áudio de uma URL
+    pub async fn download_audio(&self, url: &str) -> AppResult<Vec<u8>> {
+        log_info(&format!("Downloading audio from: {}", url));
+
+        let response = self.client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| AppError::InternalError(format!("Failed to download audio: {}", e)))?;
+
+        if !response.status().is_success() {
+            return Err(AppError::InternalError(format!(
+                "Failed to download audio: HTTP {}",
+                response.status()
+            )));
+        }
+
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|e| AppError::InternalError(format!("Failed to read audio bytes: {}", e)))?;
+
+        log_info(&format!("Audio downloaded: {} bytes", bytes.len()));
+        Ok(bytes.to_vec())
+    }
+
     /// Transcreve áudio usando OpenAI Whisper API
-    pub async fn transcribe_audio(&self, audio_bytes: &[u8]) -> AppResult<String> {
+    pub async fn transcribe_audio(&self, audio_bytes: &[u8], file_extension: &str) -> AppResult<String> {
         log_info("Using OpenAI Whisper for audio transcription");
 
         let url = "https://api.openai.com/v1/audio/transcriptions";
 
+        // Determinar MIME type baseado na extensão
+        let mime_type = match file_extension.to_lowercase().as_str() {
+            "ogg" => "audio/ogg",
+            "mp3" => "audio/mpeg",
+            "m4a" => "audio/mp4",
+            "wav" => "audio/wav",
+            "webm" => "audio/webm",
+            _ => "audio/mpeg", // Default
+        };
+
+        let filename = format!("audio.{}", file_extension);
+
         // Criar multipart form com o arquivo de áudio
         let part = reqwest::multipart::Part::bytes(audio_bytes.to_vec())
-            .file_name("audio.mp3")
-            .mime_str("audio/mpeg")
+            .file_name(filename)
+            .mime_str(mime_type)
             .map_err(|e| AppError::InternalError(format!("Failed to create audio part: {}", e)))?;
 
         let form = reqwest::multipart::Form::new()

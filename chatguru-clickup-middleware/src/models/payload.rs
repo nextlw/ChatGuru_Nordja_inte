@@ -257,15 +257,15 @@ impl WebhookPayload {
                     } else {
                         payload.texto_mensagem.clone()
                     };
-                    format!("[ChatGuru] {}", titulo)
+                    titulo
                 } else {
                     // Para classificação via IA, extrair título profissional da reason
                     let titulo = extract_professional_title(&ai.reason);
                     if !titulo.is_empty() && titulo.len() > 5 {
-                        format!("[ChatGuru] {}", titulo)
+                        titulo
                     } else if let Some(ref tipo) = ai.tipo_atividade {
                         // Fallback: usar tipo de atividade + contexto
-                        format!("[ChatGuru] {} - {}", tipo, payload.nome)
+                        format!("{} - {}", tipo, payload.nome)
                     } else {
                         // Fallback final: usar mensagem original
                         let titulo = if payload.texto_mensagem.len() > 80 {
@@ -273,11 +273,11 @@ impl WebhookPayload {
                         } else {
                             payload.texto_mensagem.clone()
                         };
-                        format!("[ChatGuru] {}", titulo)
+                        titulo
                     }
                 }
             } else {
-                format!("[ChatGuru] {}", payload.nome)
+                payload.nome.clone()
             }
         } else {
             format!("[ChatGuru] {}", payload.nome)
@@ -484,8 +484,8 @@ impl WebhookPayload {
             }
         }
         
-        // Nome da tarefa - FORMATO LEGADO: [ChatGuru] Nome
-        let task_name = format!("[ChatGuru] {}", payload.nome);
+        // Nome da tarefa
+        let task_name = payload.nome.clone();
         
         // Preparar campos personalizados do ClickUp
         let mut custom_fields = Vec::new();
