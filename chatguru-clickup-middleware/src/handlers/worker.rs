@@ -157,8 +157,20 @@ pub async fn handle_worker(
         }
     };
 
+    // Log do payload para debug
+    log_info(&format!("📦 Payload recebido: {}",
+        serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "Failed to serialize".to_string())
+    ));
+
     // Se for áudio, transcrever usando Whisper
     if let WebhookPayload::ChatGuru(ref mut chatguru_payload) = payload {
+        // Log dos campos de mídia
+        log_info(&format!("🔍 Debug mídia - media_url: {:?}, media_type: {:?}, texto_mensagem: {:?}",
+            chatguru_payload.media_url,
+            chatguru_payload.media_type,
+            chatguru_payload.texto_mensagem
+        ));
+
         // Verificar se tem media_url e media_type indicando áudio
         if let (Some(ref media_url), Some(ref media_type)) = (&chatguru_payload.media_url, &chatguru_payload.media_type) {
             if media_type.to_lowercase().contains("audio") || media_type.to_lowercase().contains("voice") {
