@@ -445,10 +445,14 @@ response_format: |
     "category": "{{categories_exact}}",
     "sub_categoria": "{{subcategories_exact}} ou null se não aplicável",
     "subtasks": ["subtarefa 1", "subtarefa 2"] ou [],
-    "status_back_office": "{{status_exact}}"
+    "status_back_office": "{{status_exact}}",
+    "campanha": "título profissional da atividade",
+    "description": "descrição detalhada da atividade",
+    "info_1": "dados do webhook ChatGuru (campo personalizado ou payload)",
+    "info_2": "dados do webhook ChatGuru (campo personalizado ou payload)"
   }
   
-  IMPORTANTE: 
+  IMPORTANTE:
   - Use APENAS valores exatos das listas fornecidas acima
   - tipo_atividade deve ser um dos valores da lista TIPO DE ATIVIDADE
   - category deve ser um dos valores da lista CATEGORIAS

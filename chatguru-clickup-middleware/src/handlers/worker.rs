@@ -99,8 +99,11 @@ pub async fn handle_worker(
         }
     };
 
+    // Extrair force_classification se presente
+    let force_classification = envelope.get("force_classification");
+
     // Processar mensagem
-    match process_message(&state, &payload).await {
+    match process_message(&state, &payload, force_classification).await {
         Ok(result) => {
             let processing_time = start_time.elapsed().as_millis() as u64;
             log_request_processed("/worker/process", 200, processing_time);
@@ -118,7 +121,7 @@ pub async fn handle_worker(
 }
 
 /// Processa uma mensagem do ChatGuru
-async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload) -> AppResult<Value> {
+async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_classification: Option<&Value>) -> AppResult<Value> {
     // Filtrar eventos que não devem ser processados
     if let WebhookPayload::EventType(event_payload) = payload {
         if event_payload.event_type == "annotation.added" {
@@ -142,24 +145,61 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload) -> App
         message
     ));
 
-    // Classificar com OpenAI
-    let openai_service = match OpenAIService::new(None).await {
-        Some(service) => service,
-        None => {
-            return Err(AppError::InternalError("Failed to initialize OpenAI service".to_string()));
+    // Verificar se há classificação forçada (bypass OpenAI)
+    let classification = if let Some(forced) = force_classification {
+        log_info("🔧 Usando classificação forçada (bypass OpenAI)");
+
+        use crate::services::openai::OpenAIClassification;
+        OpenAIClassification {
+            reason: forced.get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Classificação manual")
+                .to_string(),
+            is_activity: forced.get("is_task_worthy")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true),
+            category: forced.get("campanha")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            campanha: forced.get("campanha")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Atendimento")
+                .to_string(),
+            description: forced.get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Classificação manual")
+                .to_string(),
+            info_1: forced.get("info_1")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            info_2: forced.get("info_2")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            tipo_atividade: None,
+            sub_categoria: None,
+            subtasks: vec![],
+            status_back_office: None,
         }
-    };
+    } else {
+        // Classificar com OpenAI
+        let openai_service = match OpenAIService::new(None).await {
+            Some(service) => service,
+            None => {
+                return Err(AppError::InternalError("Failed to initialize OpenAI service".to_string()));
+            }
+        };
 
-    let context = format!(
-        "Campanha: WhatsApp\nOrigem: whatsapp\nNome: {}\nMensagem: {}\nTelefone: {}",
-        nome, message, phone.as_deref().unwrap_or("N/A")
-    );
+        let context = format!(
+            "Campanha: WhatsApp\nOrigem: whatsapp\nNome: {}\nMensagem: {}\nTelefone: {}",
+            nome, message, phone.as_deref().unwrap_or("N/A")
+        );
 
-    let classification = match openai_service.classify_activity_fallback(&context).await {
-        Ok(c) => c,
-        Err(e) => {
-            log_error(&format!("❌ Erro na classificação OpenAI: {}", e));
-            return Err(AppError::InternalError(format!("OpenAI classification failed: {}", e)));
+        match openai_service.classify_activity_fallback(&context).await {
+            Ok(c) => c,
+            Err(e) => {
+                log_error(&format!("❌ Erro na classificação OpenAI: {}", e));
+                return Err(AppError::InternalError(format!("OpenAI classification failed: {}", e)));
+            }
         }
     };
 
@@ -169,8 +209,8 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload) -> App
     if is_activity {
         log_info(&format!("✅ Atividade identificada: {}", classification.reason));
 
-        // Criar tarefa no ClickUp
-        let task_result = create_clickup_task(state, payload, &classification, &nome, &message).await?;
+        // Criar tarefa no ClickUp usando process_payload do serviço ClickUp
+        let task_result = state.clickup.process_payload_with_ai(payload, Some(&classification)).await?;
 
         // Enviar anotação ao ChatGuru
         if let Err(e) = send_annotation_to_chatguru(state, payload, &annotation).await {
@@ -200,46 +240,23 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload) -> App
     }
 }
 
-/// Cria tarefa no ClickUp
+/// FUNÇÃO OBSOLETA - NÃO MAIS UTILIZADA
+///
+/// Esta função foi substituída por chamada direta a:
+/// `state.clickup.process_payload_with_ai()` na linha 173
+///
+/// NOVA IMPLEMENTAÇÃO: src/services/clickup.rs:215-262
+/// A lógica de criação de tarefas agora está centralizada no ClickUpService
+#[allow(dead_code)]
 async fn create_clickup_task(
     state: &Arc<AppState>,
     payload: &WebhookPayload,
     classification: &chatguru_clickup_middleware::services::openai::OpenAIClassification,
-    nome: &str,
-    message: &str,
+    _nome: &str,
+    _message: &str,
 ) -> AppResult<Value> {
-    let clickup = &state.clickup;
-
-    // Montar dados da tarefa
-    let task_title = format!("[Campanha] {}", nome);
-    let task_description = format!(
-        "**Campanha:** WhatsApp\n**Origem:** whatsapp\n\n**Cliente:** {}\n**Telefone:** {}\n\n**Mensagem:**\n{}\n\n**Classificação:** {}\n**Categoria:** {}",
-        nome,
-        extract_phone_from_payload(payload).as_deref().unwrap_or("N/A"),
-        message,
-        classification.reason,
-        classification.category.as_deref().unwrap_or("Não especificada")
-    );
-
-    let task_data = json!({
-        "name": task_title,
-        "description": task_description,
-        "status": "pendente",
-        "priority": 3,  // Prioridade padrão
-    });
-
-    match clickup.create_task_from_json(&task_data).await {
-        Ok(response) => {
-            if let Some(task_id) = response.get("id").and_then(|v| v.as_str()) {
-                log_info(&format!("✅ Tarefa criada no ClickUp: {}", task_id));
-            }
-            Ok(response)
-        }
-        Err(e) => {
-            log_error(&format!("❌ Erro ao criar tarefa no ClickUp: {}", e));
-            Err(AppError::InternalError(format!("Failed to create ClickUp task: {}", e)))
-        }
-    }
+    // Usar o método público process_payload_with_ai do serviço ClickUp
+    state.clickup.process_payload_with_ai(payload, Some(classification)).await
 }
 
 /// Envia anotação de volta ao ChatGuru
@@ -312,11 +329,30 @@ fn extract_chat_id_from_payload(payload: &WebhookPayload) -> Option<String> {
 }
 
 // ============================================================================
-// Funções para campos personalizados - Categoria*, SubCategoria e Estrelas
+// FUNÇÕES OBSOLETAS - MIGRADAS PARA src/models/payload.rs
+// ============================================================================
+//
+// NOVA IMPLEMENTAÇÃO:
+// - Subcategorias e Estrelas: src/models/payload.rs:333-362 (função chatguru_to_clickup_with_ai)
+// - Usa configuração YAML: config/ai_prompt.yaml
+// - Mapeamento via AiPromptConfig::load_default()
+// - Log de estrelas: payload.rs:348-353
+//
+// FLUXO ATUAL:
+// 1. OpenAI Service → classifica mensagem (category, sub_categoria)
+// 2. ClickUp Service → chama payload.to_clickup_task_data_with_ai()
+// 3. Payload.rs → mapeia subcategorias/estrelas via YAML
+// 4. ClickUp Service → envia para API via create_task_from_json()
+//
+// As funções abaixo foram mantidas para referência histórica
 // ============================================================================
 
-/// Prepara campos personalizados para criação da tarefa
-/// Inclui automaticamente os campos obrigatórios: Categoria*, SubCategoria e Estrelas
+/// FUNÇÃO OBSOLETA - NÃO MAIS UTILIZADA
+///
+/// NOVA IMPLEMENTAÇÃO: src/models/payload.rs:240-441 (custom_fields)
+/// A preparação de campos personalizados agora usa configuração YAML
+/// e está integrada diretamente na conversão do payload
+#[allow(dead_code)]
 fn prepare_custom_fields(
     payload: &WebhookPayload,
     classification: &chatguru_clickup_middleware::services::openai::OpenAIClassification,
@@ -352,8 +388,16 @@ fn prepare_custom_fields(
     custom_fields
 }
 
-/// Determina a SubCategoria baseada na Categoria principal
-/// Implementa EXATAMENTE a hierarquia definida em categorize_tasks.js - KEYWORD_MAPPING
+/// FUNÇÃO OBSOLETA - NÃO MAIS UTILIZADA
+///
+/// NOVA IMPLEMENTAÇÃO:
+/// - OpenAI Service já retorna `sub_categoria` classificada
+/// - Mapeamento de IDs via config/ai_prompt.yaml
+/// - Processamento em src/models/payload.rs:333-362
+///
+/// A determinação de subcategorias agora é feita pela IA e mapeada via YAML,
+/// não mais por palavra-chave hardcoded
+#[allow(dead_code)]
 fn determine_subcategoria(classification: &chatguru_clickup_middleware::services::openai::OpenAIClassification) -> Option<String> {
     // Análise de palavras-chave da mensagem/descrição para determinar subcategoria
     let message_text = classification.reason.to_lowercase();
@@ -472,8 +516,16 @@ fn determine_subcategoria(classification: &chatguru_clickup_middleware::services
     }
 }
 
-/// Determina o número de Estrelas baseado na SubCategoria
-/// Mapeamento EXATO do categorize_tasks.js - SUBCATEGORIA_ESTRELAS
+/// FUNÇÃO OBSOLETA - NÃO MAIS UTILIZADA
+///
+/// NOVA IMPLEMENTAÇÃO:
+/// - Mapeamento de estrelas via config/ai_prompt.yaml
+/// - Processamento em src/models/payload.rs:348-353
+/// - Log automático: "✨ Tarefa classificada: 'categoria' > 'subcategoria' (X estrela(s))"
+///
+/// As estrelas agora são determinadas pela configuração YAML baseada na
+/// subcategoria retornada pela classificação IA
+#[allow(dead_code)]
 fn determine_estrelas(
     classification: &chatguru_clickup_middleware::services::openai::OpenAIClassification,
     _payload: &WebhookPayload,

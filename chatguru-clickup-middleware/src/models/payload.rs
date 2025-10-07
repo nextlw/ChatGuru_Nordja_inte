@@ -389,8 +389,14 @@ impl WebhookPayload {
                     "value": info_2_str
                 }));
             }
+        } else if let Some(responsavel_nome) = &payload.responsavel_nome {
+            // Se não tiver Info_2, usar responsavel_nome
+            custom_fields.push(serde_json::json!({
+                "id": "bf24f5b1-e909-473e-b864-75bf22edf67e",
+                "value": responsavel_nome
+            }));
         }
-
+        
         // Adicionar dados de contato como campos personalizados
         // Nome do solicitante
         if !payload.nome.is_empty() {
@@ -399,7 +405,7 @@ impl WebhookPayload {
                 "value": payload.nome
             }));
         }
-
+        
         // Celular como campo de texto
         if !payload.celular.is_empty() {
             // Usar o campo "Conta cliente" para o celular
@@ -408,7 +414,7 @@ impl WebhookPayload {
                 "value": payload.celular
             }));
         }
-
+        
         if let Some(info_1) = payload.campos_personalizados.get("Info_1") {
             if let Some(info_1_str) = info_1.as_str() {
                 // Info_1 adicional (se vier nos campos personalizados, sobrescreve)
@@ -417,6 +423,12 @@ impl WebhookPayload {
                     "value": info_1_str
                 }));
             }
+        } else if !payload.celular.is_empty() {
+            // Se não tiver Info_1, usar celular
+            custom_fields.push(serde_json::json!({
+                "id": "0cd1d510-1906-4484-ba66-06ccdd659768",
+                "value": payload.celular
+            }));
         }
 
         serde_json::json!({

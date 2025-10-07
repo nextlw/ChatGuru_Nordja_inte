@@ -16,14 +16,14 @@ pub struct ClickUpService {
 
 impl ClickUpService {
     pub fn new(settings: &Settings) -> Self {
-        // OTIMIZAÇÃO FASE 1: Cliente HTTP com timeout padrão de 10s
+        // OTIMIZAÇÃO FASE 1: Cliente HTTP com timeout padrão de 30s
         let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(30))
             .connect_timeout(std::time::Duration::from_secs(5))
             .build()
             .unwrap_or_else(|_| Client::new());
             
-        log_info("⚡ ClickUp client configured with 10s timeout");
+        log_info("⚡ ClickUp client configured with 30s timeout");
         
         Self {
             client,
@@ -45,9 +45,9 @@ impl ClickUpService {
         
         info!("ClickUp Service configurado - List ID: {}", list_id);
         
-        // OTIMIZAÇÃO FASE 1: Cliente HTTP com timeout padrão de 10s
+        // OTIMIZAÇÃO FASE 1: Cliente HTTP com timeout padrão de 30s
         let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(30))
             .connect_timeout(std::time::Duration::from_secs(5))
             .build()
             .unwrap_or_else(|_| Client::new());
