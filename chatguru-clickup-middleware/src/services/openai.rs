@@ -22,6 +22,10 @@ pub struct OpenAIClassification {
     pub sub_categoria: Option<String>,
     pub subtasks: Vec<String>,
     pub status_back_office: Option<String>,
+    pub campanha: String,
+    pub description: String,
+    pub info_1: Option<String>,
+    pub info_2: Option<String>,
 }
 
 impl OpenAIService {
