@@ -20,6 +20,7 @@ use axum::{
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::time::Instant;
+use base64::{Engine as _, engine::general_purpose};
 
 use chatguru_clickup_middleware::models::WebhookPayload;
 use chatguru_clickup_middleware::utils::{AppResult, AppError};
@@ -74,11 +75,68 @@ pub async fn handle_worker(
         }
     };
 
-    // Extrair payload RAW do envelope
-    let raw_payload_str = match envelope.get("raw_payload").and_then(|v| v.as_str()) {
+    // Extrair e decodificar payload do Pub/Sub
+    // Formato esperado: { "message": { "data": "base64_encoded_data" } }
+    let raw_payload_str = if let Some(message) = envelope.get("message") {
+        // Formato padrão do Pub/Sub Push
+        if let Some(data_b64) = message.get("data").and_then(|v| v.as_str()) {
+            // Decodificar base64
+            match general_purpose::STANDARD.decode(data_b64) {
+                Ok(decoded_bytes) => {
+                    match String::from_utf8(decoded_bytes) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            log_error(&format!("Invalid UTF-8 in Pub/Sub data: {}", e));
+                            return Err((
+                                StatusCode::BAD_REQUEST,
+                                Json(json!({"error": "Invalid UTF-8 in message data"}))
+                            ));
+                        }
+                    }
+                },
+                Err(e) => {
+                    log_error(&format!("Failed to decode base64: {}", e));
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error": "Invalid base64 encoding"}))
+                    ));
+                }
+            }
+        } else {
+            log_error("Missing 'data' field in Pub/Sub message");
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "Missing data in message"}))
+            ));
+        }
+    } else if let Some(raw_payload) = envelope.get("raw_payload").and_then(|v| v.as_str()) {
+        // Formato direto (para testes)
+        raw_payload.to_string()
+    } else {
+        log_error("Missing 'message' or 'raw_payload' in envelope");
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Invalid envelope format"}))
+        ));
+    };
+
+    // Parsear o envelope interno que contém o raw_payload
+    let inner_envelope: Value = match serde_json::from_str(&raw_payload_str) {
+        Ok(v) => v,
+        Err(e) => {
+            log_error(&format!("Failed to parse inner envelope: {}", e));
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "Invalid inner envelope"}))
+            ));
+        }
+    };
+
+    // Extrair o raw_payload do envelope interno
+    let raw_payload_str = match inner_envelope.get("raw_payload").and_then(|v| v.as_str()) {
         Some(s) => s,
         None => {
-            log_error("Missing raw_payload in envelope");
+            log_error("Missing raw_payload in inner envelope");
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(json!({"error": "Missing raw_payload"}))
