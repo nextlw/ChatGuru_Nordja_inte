@@ -261,7 +261,6 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
         }
     };
 
-    let annotation = format!("Tarefa: {}", classification.reason);
     let is_activity = classification.is_activity;
 
     if is_activity {
@@ -269,6 +268,29 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
 
         // Criar tarefa no ClickUp usando process_payload do serviço ClickUp
         let task_result = state.clickup.process_payload_with_ai(payload, Some(&classification)).await?;
+
+        // Montar anotação com informações da task
+        let task_id = task_result.get("id").and_then(|v| v.as_str()).unwrap_or("N/A");
+        let task_url = task_result.get("url").and_then(|v| v.as_str()).unwrap_or("");
+
+        let annotation = format!(
+            "✅ Tarefa criada no ClickUp\n\n📋 Descrição: {}\n🏷️ Categoria: {}\n📂 Subcategoria: {}\n⭐ Prioridade: {} estrela(s)\n🔗 Link: {}",
+            classification.reason,
+            classification.campanha,
+            classification.sub_categoria.as_deref().unwrap_or("N/A"),
+            // Extrair prioridade da task_result se disponível
+            task_result.get("priority")
+                .and_then(|p| p.get("orderindex"))
+                .and_then(|o| o.as_str())
+                .map(|s| match s {
+                    "1" => "4",
+                    "2" => "3",
+                    "3" => "2",
+                    _ => "1"
+                })
+                .unwrap_or("N/A"),
+            task_url
+        );
 
         // Enviar anotação ao ChatGuru
         if let Err(e) = send_annotation_to_chatguru(state, payload, &annotation).await {
@@ -279,11 +301,13 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
         Ok(json!({
             "status": "processed",
             "is_activity": true,
-            "task_id": task_result.get("id"),
+            "task_id": task_id,
             "annotation": annotation
         }))
     } else {
         log_info(&format!("❌ Não é atividade: {}", classification.reason));
+
+        let annotation = format!("❌ Não é uma tarefa: {}", classification.reason);
 
         // Apenas enviar anotação
         if let Err(e) = send_annotation_to_chatguru(state, payload, &annotation).await {
