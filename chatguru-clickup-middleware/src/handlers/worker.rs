@@ -145,7 +145,7 @@ pub async fn handle_worker(
     };
 
     // Parsear payload do ChatGuru
-    let payload: WebhookPayload = match serde_json::from_str(raw_payload_str) {
+    let mut payload: WebhookPayload = match serde_json::from_str(raw_payload_str) {
         Ok(p) => p,
         Err(e) => {
             log_error(&format!("Failed to parse ChatGuru payload: {}", e));
@@ -156,6 +156,64 @@ pub async fn handle_worker(
             ));
         }
     };
+
+    // Se for áudio, transcrever usando Whisper
+    if let WebhookPayload::ChatGuru(ref mut chatguru_payload) = payload {
+        // Verificar se tem media_url e media_type indicando áudio
+        if let (Some(ref media_url), Some(ref media_type)) = (&chatguru_payload.media_url, &chatguru_payload.media_type) {
+            if media_type.to_lowercase().contains("audio") || media_type.to_lowercase().contains("voice") {
+                log_info(&format!("🎤 Áudio detectado, iniciando transcrição: {}", media_url));
+
+                // Inicializar OpenAI service
+                match OpenAIService::new(None).await {
+                    Some(openai_service) => {
+                        // Baixar áudio
+                        match openai_service.download_audio(media_url).await {
+                            Ok(audio_bytes) => {
+                                // Extrair extensão do arquivo da URL
+                                let extension = media_url
+                                    .split('.')
+                                    .last()
+                                    .and_then(|ext| ext.split('?').next())
+                                    .unwrap_or("ogg");
+
+                                // Transcrever áudio
+                                match openai_service.transcribe_audio(&audio_bytes, extension).await {
+                                    Ok(transcription) => {
+                                        log_info(&format!("✅ Transcrição concluída: {}", transcription));
+
+                                        // Atualizar texto_mensagem com a transcrição
+                                        // Se já tinha texto, adicionar a transcrição
+                                        if !chatguru_payload.texto_mensagem.is_empty() {
+                                            chatguru_payload.texto_mensagem = format!(
+                                                "{}\n\n[Transcrição do áudio]: {}",
+                                                chatguru_payload.texto_mensagem,
+                                                transcription
+                                            );
+                                        } else {
+                                            chatguru_payload.texto_mensagem = transcription;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        log_error(&format!("❌ Erro ao transcrever áudio: {}", e));
+                                        // Continuar mesmo com erro na transcrição
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                log_error(&format!("❌ Erro ao baixar áudio: {}", e));
+                                // Continuar mesmo com erro no download
+                            }
+                        }
+                    }
+                    None => {
+                        log_error("❌ Não foi possível inicializar OpenAI service para transcrição");
+                        // Continuar mesmo sem transcrição
+                    }
+                }
+            }
+        }
+    }
 
     // Extrair force_classification se presente
     let force_classification = envelope.get("force_classification");
@@ -273,8 +331,30 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
         let task_id = task_result.get("id").and_then(|v| v.as_str()).unwrap_or("N/A");
         let task_url = task_result.get("url").and_then(|v| v.as_str()).unwrap_or("");
 
+        // Verificar se há transcrição de áudio
+        let transcription_section = if let WebhookPayload::ChatGuru(ref chatguru_payload) = payload {
+            if let (Some(_media_url), Some(ref media_type)) = (&chatguru_payload.media_url, &chatguru_payload.media_type) {
+                if (media_type.to_lowercase().contains("audio") || media_type.to_lowercase().contains("voice"))
+                    && chatguru_payload.texto_mensagem.contains("[Transcrição do áudio]:") {
+                    // Extrair apenas a transcrição
+                    let transcription = chatguru_payload.texto_mensagem
+                        .split("[Transcrição do áudio]:")
+                        .nth(1)
+                        .unwrap_or("")
+                        .trim();
+                    format!("\n🎤 Transcrição: {}", transcription)
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
         let annotation = format!(
-            "✅ Tarefa criada no ClickUp\n\n📋 Descrição: {}\n🏷️ Categoria: {}\n📂 Subcategoria: {}\n⭐ Prioridade: {} estrela(s)\n🔗 Link: {}",
+            "✅ Tarefa criada no ClickUp\n\n📋 Descrição: {}\n🏷️ Categoria: {}\n📂 Subcategoria: {}\n⭐ Prioridade: {} estrela(s)\n🔗 Link: {}{}",
             classification.reason,
             classification.campanha,
             classification.sub_categoria.as_deref().unwrap_or("N/A"),
@@ -289,7 +369,8 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
                     _ => "1"
                 })
                 .unwrap_or("N/A"),
-            task_url
+            task_url,
+            transcription_section
         );
 
         // Enviar anotação ao ChatGuru
@@ -307,7 +388,29 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
     } else {
         log_info(&format!("❌ Não é atividade: {}", classification.reason));
 
-        let annotation = format!("❌ Não é uma tarefa: {}", classification.reason);
+        // Verificar se há transcrição de áudio
+        let transcription_section = if let WebhookPayload::ChatGuru(ref chatguru_payload) = payload {
+            if let (Some(_media_url), Some(ref media_type)) = (&chatguru_payload.media_url, &chatguru_payload.media_type) {
+                if (media_type.to_lowercase().contains("audio") || media_type.to_lowercase().contains("voice"))
+                    && chatguru_payload.texto_mensagem.contains("[Transcrição do áudio]:") {
+                    // Extrair apenas a transcrição
+                    let transcription = chatguru_payload.texto_mensagem
+                        .split("[Transcrição do áudio]:")
+                        .nth(1)
+                        .unwrap_or("")
+                        .trim();
+                    format!("\n🎤 Transcrição: {}", transcription)
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
+        let annotation = format!("❌ Não é uma tarefa: {}{}", classification.reason, transcription_section);
 
         // Apenas enviar anotação
         if let Err(e) = send_annotation_to_chatguru(state, payload, &annotation).await {
