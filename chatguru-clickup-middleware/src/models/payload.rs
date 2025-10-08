@@ -18,20 +18,33 @@ pub enum WebhookPayload {
 /// Payload do ChatGuru atual
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatGuruPayload {
+    #[serde(default)]
     pub campanha_id: String,
+    #[serde(default)]
     pub campanha_nome: String,
+    #[serde(default)]
     pub origem: String,
     #[serde(default)]
     pub email: String,
+    #[serde(default)]
     pub nome: String,
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default, alias = "mensagem", alias = "message", alias = "text")]
     pub texto_mensagem: String,
+
+    // Campos de mídia - formato antigo (media_url, media_type)
     #[serde(default)]
     pub media_url: Option<String>,  // URL do áudio ou mídia anexada
     #[serde(default)]
     pub media_type: Option<String>, // Tipo da mídia (audio, image, video)
+
+    // Campos de mídia - formato novo ChatGuru (tipo_mensagem, url_arquivo)
+    #[serde(default)]
+    pub tipo_mensagem: Option<String>, // "image", "ptt" (áudio), "video", etc
+    #[serde(default, alias = "url_midia")]
+    pub url_arquivo: Option<String>, // URL do arquivo de mídia
+
     #[serde(default)]
     pub campos_personalizados: HashMap<String, Value>,
     #[serde(default)]
@@ -42,6 +55,7 @@ pub struct ChatGuruPayload {
     pub responsavel_email: Option<String>,
     #[serde(default)]
     pub link_chat: String,
+    #[serde(default)]
     pub celular: String,
     #[serde(default)]
     pub phone_id: Option<String>,
@@ -49,6 +63,36 @@ pub struct ChatGuruPayload {
     pub chat_id: Option<String>,
     #[serde(default)]
     pub chat_created: Option<String>,
+}
+
+impl ChatGuruPayload {
+    /// Normaliza os campos de mídia do ChatGuru
+    /// Converte tipo_mensagem + url_arquivo → media_type + media_url
+    pub fn normalize_media_fields(&mut self) {
+        // Se já tem media_url e media_type, não faz nada
+        if self.media_url.is_some() && self.media_type.is_some() {
+            return;
+        }
+
+        // Mapear url_arquivo → media_url
+        if self.url_arquivo.is_some() && self.media_url.is_none() {
+            self.media_url = self.url_arquivo.clone();
+        }
+
+        // Mapear tipo_mensagem → media_type
+        if let Some(ref tipo) = self.tipo_mensagem {
+            if self.media_type.is_none() {
+                self.media_type = Some(match tipo.as_str() {
+                    "image" => "image/jpeg".to_string(),
+                    "ptt" => "audio/ogg".to_string(), // ptt = push-to-talk (áudio)
+                    "audio" => "audio/ogg".to_string(),
+                    "video" => "video/mp4".to_string(),
+                    "document" => "application/pdf".to_string(),
+                    other => format!("application/{}", other),
+                });
+            }
+        }
+    }
 }
 
 /// Payload com event_type (formato antigo)

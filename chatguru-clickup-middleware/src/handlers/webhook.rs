@@ -48,6 +48,9 @@ pub async fn handle_webhook(
 
     log_info(&format!("📥 Webhook payload recebido ({} bytes)", body_str.len()));
 
+    // DEBUG: Log payload completo para investigar campos de mídia
+    log_info(&format!("🔍 DEBUG - Payload RAW do ChatGuru:\n{}", body_str));
+
     // Enviar RAW para Pub/Sub de forma assíncrona
     let state_clone = Arc::clone(&state);
     let body_clone = body_str.clone();

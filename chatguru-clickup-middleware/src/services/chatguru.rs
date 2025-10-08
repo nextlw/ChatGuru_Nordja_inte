@@ -30,12 +30,12 @@ impl ChatGuruApiService {
     pub fn new(api_token: String, api_endpoint: String, account_id: String) -> Self {
         // OTIMIZAÇÃO FASE 1: Cliente HTTP com timeout de 5s para ChatGuru
         let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(10))
             .connect_timeout(std::time::Duration::from_secs(3))
             .build()
             .unwrap_or_else(|_| Client::new());
             
-        log_info("⚡ ChatGuru client configured with 5s timeout");
+        log_info("⚡ ChatGuru client configured with 10s timeout");
         
         Self {
             client,

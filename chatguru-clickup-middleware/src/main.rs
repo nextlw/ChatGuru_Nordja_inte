@@ -44,14 +44,57 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Inicializar serviços
     let clickup_service = ClickUpService::new(&settings);
-
     log_info("ClickUp service initialized");
+
+    // Inicializar Vertex AI service se habilitado
+    let vertex_service = if let Some(ref vertex_config) = settings.vertex {
+        if vertex_config.enabled {
+            let topic_name = settings.gcp.media_processing_topic
+                .clone()
+                .unwrap_or_else(|| "media-processing-requests".to_string());
+
+            match services::VertexAIService::new(
+                vertex_config.project_id.clone(),
+                topic_name
+            ).await {
+                Ok(service) => {
+                    log_info("Vertex AI service initialized");
+                    Some(service)
+                }
+                Err(e) => {
+                    log_error(&format!("Failed to initialize Vertex AI service: {}", e));
+                    None
+                }
+            }
+        } else {
+            log_info("Vertex AI service disabled in config");
+            None
+        }
+    } else {
+        log_info("Vertex AI service not configured");
+        None
+    };
+
+    // Inicializar MediaSync service se Vertex AI estiver habilitado
+    let media_sync_service = if vertex_service.is_some() {
+        let timeout = settings.vertex.as_ref()
+            .map(|v| v.timeout_seconds)
+            .unwrap_or(30);
+
+        let service = services::MediaSyncService::new(timeout);
+        log_info("Media Sync service initialized");
+        Some(service)
+    } else {
+        None
+    };
 
     // Inicializar estado da aplicação (SEM scheduler)
     let app_state = Arc::new(AppState {
         clickup_client: reqwest::Client::new(),
         clickup: clickup_service,
         settings: settings.clone(),
+        vertex: vertex_service,
+        media_sync: media_sync_service,
     });
 
     log_info("Event-driven architecture - No scheduler needed");

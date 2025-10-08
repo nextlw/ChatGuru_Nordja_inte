@@ -55,8 +55,15 @@ impl OpenAIService {
 
         log_info("OpenAI service initialized successfully");
 
+        // Cliente HTTP com timeouts otimizados
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(20)) // Timeout total: 20s (Whisper + classificação)
+            .connect_timeout(std::time::Duration::from_secs(5)) // Conexão: 5s
+            .build()
+            .unwrap_or_else(|_| Client::new());
+
         Some(Self {
-            client: Client::new(),
+            client,
             api_key: key,
         })
     }
@@ -127,11 +134,18 @@ impl OpenAIService {
         }
     }
 
-    /// Baixa áudio de uma URL
+    /// Baixa áudio de uma URL com timeout de 10s
     pub async fn download_audio(&self, url: &str) -> AppResult<Vec<u8>> {
         log_info(&format!("Downloading audio from: {}", url));
 
-        let response = self.client
+        // Cliente separado com timeout mais curto para download
+        let download_client = Client::builder()
+            .timeout(std::time::Duration::from_secs(10)) // Download: 10s máximo
+            .connect_timeout(std::time::Duration::from_secs(3))
+            .build()
+            .unwrap_or_else(|_| Client::new());
+
+        let response = download_client
             .get(url)
             .send()
             .await
@@ -240,6 +254,107 @@ impl OpenAIService {
             let error_text = response.text().await.unwrap_or_default();
             log_error(&format!("OpenAI Embedding API error: {}", error_text));
             Err(AppError::InternalError(format!("Embedding API error: {}", error_text)))
+        }
+    }
+
+    /// Baixa imagem de uma URL com timeout de 10s
+    pub async fn download_image(&self, url: &str) -> AppResult<Vec<u8>> {
+        log_info(&format!("Downloading image from: {}", url));
+
+        // Cliente separado com timeout mais curto para download
+        let download_client = Client::builder()
+            .timeout(std::time::Duration::from_secs(10)) // Download: 10s máximo
+            .connect_timeout(std::time::Duration::from_secs(3))
+            .build()
+            .unwrap_or_else(|_| Client::new());
+
+        let response = download_client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| {
+                log_error(&format!("Failed to download image: {}", e));
+                AppError::InternalError(format!("Download failed: {}", e))
+            })?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            log_error(&format!("Image download failed with status: {}", status));
+            return Err(AppError::InternalError(format!("HTTP {}", status)));
+        }
+
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|e| {
+                log_error(&format!("Failed to read image bytes: {}", e));
+                AppError::InternalError(format!("Read failed: {}", e))
+            })?
+            .to_vec();
+
+        log_info(&format!("Image downloaded: {} bytes", bytes.len()));
+        Ok(bytes)
+    }
+
+    /// Descreve imagem usando OpenAI Vision (GPT-4 Vision)
+    pub async fn describe_image(&self, image_bytes: &[u8]) -> AppResult<String> {
+        use base64::{Engine as _, engine::general_purpose};
+
+        log_info("Describing image with OpenAI Vision");
+
+        let url = "https://api.openai.com/v1/chat/completions";
+
+        // Converter imagem para base64
+        let image_base64 = general_purpose::STANDARD.encode(image_bytes);
+
+        let request_body = json!({
+            "model": "gpt-4o-mini",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Descreva detalhadamente esta imagem em português do Brasil. Foque em elementos relevantes para contexto de atendimento ao cliente ou solicitação de serviços. Inclua: o que está visível na imagem, texto que apareça na imagem (se houver), e contexto ou situação representada. Seja objetivo e claro."
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": format!("data:image/jpeg;base64,{}", image_base64)
+                            }
+                        }
+                    ]
+                }
+            ],
+            "max_tokens": 500
+        });
+
+        let response = self.client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .json(&request_body)
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            let json_response: Value = response.json().await?;
+
+            let description = json_response
+                .get("choices")
+                .and_then(|c| c.get(0))
+                .and_then(|choice| choice.get("message"))
+                .and_then(|msg| msg.get("content"))
+                .and_then(|content| content.as_str())
+                .ok_or_else(|| AppError::InternalError("Invalid vision response format".to_string()))?
+                .to_string();
+
+            log_info(&format!("Image description completed: {} characters", description.len()));
+            Ok(description)
+        } else {
+            let error_text = response.text().await.unwrap_or_default();
+            log_error(&format!("OpenAI Vision API error: {}", error_text));
+            Err(AppError::InternalError(format!("Vision API error: {}", error_text)))
         }
     }
 

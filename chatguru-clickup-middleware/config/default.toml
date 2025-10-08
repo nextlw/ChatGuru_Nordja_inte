@@ -12,6 +12,9 @@ project_id = "buzzlightear"
 topic_name = "chatguru-events"
 subscription_name = "chatguru-events-subscription"
 pubsub_topic = "chatguru-webhook-raw"
+media_processing_topic = "media-processing-requests"
+media_results_topic = "media-processing-results"
+media_results_subscription = "media-results-sub"
 
 [chatguru]
 validate_signature = false
@@ -27,3 +30,9 @@ phone_ids = [
 [ai]
 enabled = true  # Sempre usar Vertex AI para classificação de atividades
 # No Cloud Run, Vertex AI usa automaticamente a service account configurada
+
+[vertex]
+enabled = true
+timeout_seconds = 30  # Timeout de 30s para processamento de mídia (fail-fast para fallback OpenAI)
+project_id = "buzzlightear"
+location = "us-central1"

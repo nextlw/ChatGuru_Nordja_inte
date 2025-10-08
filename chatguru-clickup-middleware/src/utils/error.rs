@@ -12,6 +12,7 @@ pub enum AppError {
     HttpError(reqwest::Error),
     ValidationError(String),
     InternalError(String),
+    Timeout(String),
 }
 
 impl fmt::Display for AppError {
@@ -24,6 +25,7 @@ impl fmt::Display for AppError {
             AppError::HttpError(err) => write!(f, "HTTP error: {}", err),
             AppError::ValidationError(msg) => write!(f, "Validation error: {}", msg),
             AppError::InternalError(msg) => write!(f, "Internal error: {}", msg),
+            AppError::Timeout(msg) => write!(f, "Timeout error: {}", msg),
         }
     }
 }
@@ -52,6 +54,7 @@ impl IntoResponse for AppError {
             AppError::HttpError(err) => (StatusCode::BAD_GATEWAY, err.to_string()),
             AppError::ValidationError(msg) => (StatusCode::BAD_REQUEST, msg),
             AppError::InternalError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
+            AppError::Timeout(msg) => (StatusCode::GATEWAY_TIMEOUT, msg),
         };
 
         let body = json!({

@@ -76,7 +76,42 @@ pub async fn handle_worker(
     };
 
     // Extrair e decodificar payload do Pub/Sub
-    // Formato esperado: { "message": { "data": "base64_encoded_data" } }
+    // Formato completo do payload vindo do ChatGuru (via Pub/Sub):
+    // {
+    //   "message": {
+    //     "data": "base64_encoded_json",
+    //     "messageId": "12345678",
+    //     "publishTime": "2025-01-01T00:00:00.000Z"
+    //   },
+    //   "subscription": "projects/PROJECT_ID/subscriptions/SUBSCRIPTION_NAME"
+    // }
+    //
+    // Onde "data" (decodificado) contém envelope interno:
+    // {
+    //   "raw_payload": "{\"id_chatguru\":\"...\",\"texto_mensagem\":\"...\",\"celular\":\"...\",\"nome\":\"...\",\"media_url\":\"...\",\"media_type\":\"...\",...}"
+    // }
+    //
+    // E raw_payload (decodificado) contém o payload real do ChatGuru:
+    // {
+    //   "campanha_id": "123",
+    //   "campanha_nome": "WhatsApp",
+    //   "origem": "whatsapp",
+    //   "email": "cliente@example.com",
+    //   "nome": "João Silva",
+    //   "tags": ["tag1", "tag2"],
+    //   "texto_mensagem": "Preciso de um motoboy",
+    //   "media_url": "https://...",
+    //   "media_type": "audio/ogg",
+    //   "campos_personalizados": {},
+    //   "bot_context": { "ChatGuru": true },
+    //   "responsavel_nome": "Atendente",
+    //   "responsavel_email": "atendente@example.com",
+    //   "link_chat": "https://...",
+    //   "celular": "5511999999999",
+    //   "phone_id": "phone123",
+    //   "chat_id": "chat123",
+    //   "chat_created": "2025-01-01T00:00:00Z"
+    // }
     let raw_payload_str = if let Some(message) = envelope.get("message") {
         // Formato padrão do Pub/Sub Push
         if let Some(data_b64) = message.get("data").and_then(|v| v.as_str()) {
@@ -162,66 +197,151 @@ pub async fn handle_worker(
         serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "Failed to serialize".to_string())
     ));
 
-    // Se for áudio, transcrever usando Whisper
+    // Processar mídia (áudio/imagem) se houver
     if let WebhookPayload::ChatGuru(ref mut chatguru_payload) = payload {
-        // Log dos campos de mídia
-        log_info(&format!("🔍 Debug mídia - media_url: {:?}, media_type: {:?}, texto_mensagem: {:?}",
+        // IMPORTANTE: Normalizar campos de mídia do ChatGuru
+        // Converte tipo_mensagem + url_arquivo → media_type + media_url
+        chatguru_payload.normalize_media_fields();
+
+        // Log dos campos de mídia (após normalização)
+        log_info(&format!("🔍 Debug mídia - media_url: {:?}, media_type: {:?}, tipo_mensagem: {:?}, url_arquivo: {:?}, texto_mensagem: {:?}",
             chatguru_payload.media_url,
             chatguru_payload.media_type,
+            chatguru_payload.tipo_mensagem,
+            chatguru_payload.url_arquivo,
             chatguru_payload.texto_mensagem
         ));
 
-        // Verificar se tem media_url e media_type indicando áudio
+        // Verificar se tem media_url e media_type
         if let (Some(ref media_url), Some(ref media_type)) = (&chatguru_payload.media_url, &chatguru_payload.media_type) {
-            if media_type.to_lowercase().contains("audio") || media_type.to_lowercase().contains("voice") {
-                log_info(&format!("🎤 Áudio detectado, iniciando transcrição: {}", media_url));
+            // Verificar se é tipo de mídia suportado
+            if crate::services::VertexAIService::is_supported_media_type(media_type) {
+                let processing_type = crate::services::VertexAIService::get_processing_type(media_type);
+                log_info(&format!("📎 Mídia detectada ({}: {}), iniciando processamento: {}",
+                    processing_type, media_type, media_url));
 
-                // Inicializar OpenAI service
-                match OpenAIService::new(None).await {
-                    Some(openai_service) => {
-                        // Baixar áudio
-                        match openai_service.download_audio(media_url).await {
-                            Ok(audio_bytes) => {
-                                // Extrair extensão do arquivo da URL
-                                let extension = media_url
-                                    .split('.')
-                                    .last()
-                                    .and_then(|ext| ext.split('?').next())
-                                    .unwrap_or("ogg");
+                // Tentar usar Vertex AI primeiro, fallback para OpenAI
+                let media_result = if let (Some(ref vertex_service), Some(ref media_sync)) =
+                    (&state.vertex, &state.media_sync) {
 
-                                // Transcrever áudio
-                                match openai_service.transcribe_audio(&audio_bytes, extension).await {
-                                    Ok(transcription) => {
-                                        log_info(&format!("✅ Transcrição concluída: {}", transcription));
+                    log_info("🤖 Usando Vertex AI para processamento de mídia");
 
-                                        // Atualizar texto_mensagem com a transcrição
-                                        // Se já tinha texto, adicionar a transcrição
-                                        if !chatguru_payload.texto_mensagem.is_empty() {
-                                            chatguru_payload.texto_mensagem = format!(
-                                                "{}\n\n[Transcrição do áudio]: {}",
-                                                chatguru_payload.texto_mensagem,
-                                                transcription
-                                            );
-                                        } else {
-                                            chatguru_payload.texto_mensagem = transcription;
+                    // Publicar requisição no Pub/Sub
+                    match vertex_service.process_media_async(
+                        media_url,
+                        media_type,
+                        chatguru_payload.chat_id.clone()
+                    ).await {
+                        Ok(correlation_id) => {
+                            log_info(&format!("📤 Requisição publicada: {}", correlation_id));
+
+                            // Aguardar resultado com timeout
+                            match media_sync.wait_for_result(correlation_id.clone()).await {
+                                Ok(result) => {
+                                    log_info(&format!("✅ Resultado recebido via Vertex AI: {} caracteres",
+                                        result.result.len()));
+                                    Some(result.result)
+                                }
+                                Err(e) => {
+                                    log_warning(&format!("⚠️ Erro/timeout Vertex AI: {}", e));
+                                    None
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            log_error(&format!("❌ Erro ao publicar requisição Vertex AI: {}", e));
+                            None
+                        }
+                    }
+                } else {
+                    log_info("ℹ️ Vertex AI não configurado, usando OpenAI Whisper");
+                    None
+                };
+
+                // Fallback para OpenAI se Vertex AI falhar
+                let final_result = if media_result.is_none() {
+                    match OpenAIService::new(None).await {
+                        Some(openai_service) => {
+                            if processing_type == "audio" {
+                                log_info("🔄 Fallback para OpenAI Whisper");
+                                match openai_service.download_audio(media_url).await {
+                                    Ok(audio_bytes) => {
+                                        let extension = media_url
+                                            .split('.')
+                                            .last()
+                                            .and_then(|ext| ext.split('?').next())
+                                            .unwrap_or("ogg");
+
+                                        match openai_service.transcribe_audio(&audio_bytes, extension).await {
+                                            Ok(transcription) => {
+                                                log_info(&format!("✅ Transcrição OpenAI concluída: {}", transcription));
+                                                Some(transcription)
+                                            }
+                                            Err(e) => {
+                                                log_error(&format!("❌ Erro OpenAI Whisper: {}", e));
+                                                None
+                                            }
                                         }
                                     }
                                     Err(e) => {
-                                        log_error(&format!("❌ Erro ao transcrever áudio: {}", e));
-                                        // Continuar mesmo com erro na transcrição
+                                        log_error(&format!("❌ Erro ao baixar áudio: {}", e));
+                                        None
+                                    }
+                                }
+                            } else {
+                                // Fallback para OpenAI Vision (imagem)
+                                log_info("🔄 Fallback para OpenAI Vision");
+                                match openai_service.download_image(media_url).await {
+                                    Ok(image_bytes) => {
+                                        match openai_service.describe_image(&image_bytes).await {
+                                            Ok(description) => {
+                                                log_info(&format!("✅ Descrição OpenAI concluída: {}", description));
+                                                Some(description)
+                                            }
+                                            Err(e) => {
+                                                log_error(&format!("❌ Erro OpenAI Vision: {}", e));
+                                                None
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        log_error(&format!("❌ Erro ao baixar imagem: {}", e));
+                                        None
                                     }
                                 }
                             }
-                            Err(e) => {
-                                log_error(&format!("❌ Erro ao baixar áudio: {}", e));
-                                // Continuar mesmo com erro no download
-                            }
+                        }
+                        None => {
+                            log_error("❌ Não foi possível inicializar OpenAI service");
+                            None
                         }
                     }
-                    None => {
-                        log_error("❌ Não foi possível inicializar OpenAI service para transcrição");
-                        // Continuar mesmo sem transcrição
+                } else {
+                    media_result
+                };
+
+                // Atualizar payload com resultado
+                if let Some(result_text) = final_result {
+                    let label = if processing_type == "audio" {
+                        "Transcrição do áudio"
+                    } else {
+                        "Descrição da imagem"
+                    };
+
+                    if !chatguru_payload.texto_mensagem.is_empty() {
+                        chatguru_payload.texto_mensagem = format!(
+                            "{}\n\n[{}]: {}",
+                            chatguru_payload.texto_mensagem,
+                            label,
+                            result_text
+                        );
+                    } else {
+                        chatguru_payload.texto_mensagem = result_text;
                     }
+
+                    log_info(&format!("📝 Payload enriquecido com {}", label));
+                } else {
+                    log_warning("⚠️ Nenhum resultado de processamento de mídia disponível");
                 }
             }
         }
@@ -727,84 +847,30 @@ fn determine_estrelas(
     classification: &chatguru_clickup_middleware::services::openai::OpenAIClassification,
     _payload: &WebhookPayload,
 ) -> i32 {
-    // Usar a subcategoria determinada para mapear as estrelas
-    if let Some(subcategory) = determine_subcategoria(classification) {
-        // MAPEAMENTO EXATO do categorize_tasks.js - SUBCATEGORIA_ESTRELAS
-        match subcategory.as_str() {
-            // 1 estrela - Agendamentos
-            "Consultas" | "Exames" | "Veterinário/Petshop (Consultas/Exames/Banhos/Tosas)" |
-            "Vacinas" | "Manicure" | "Cabeleleiro" => 1,
-            
-            // Compras - Variado
-            "Mercados" | "Presentes" | "Petshop" | "Papelaria" => 1,
-            "Shopper" | "Farmácia" | "Ingressos" | "Móveis e Eletros" | "Itens pessoais e da casa" => 2,
-            
-            // Documentos - Variado
-            "CIN" | "Documento de Vacinação (BR/Iternacional)" | "Assinatura Digital" |
-            "Contratos/Procurações" | "Passaporte" | "CNH" | "Averbações" | "Certidões" => 1,
-            "Certificado Digital" | "Seguros Carro/Casa/Viagem (anual)" |
-            "Vistos e Vistos Eletrônicos" => 2,
-            "Cidadanias" => 4,
-            
-            // Lazer - Variado
-            "Reserva de restaurantes/bares" => 1,
-            "Fornecedores no exterior (passeios, fotógrafos)" => 2,
-            "Pesquisa de passeios/eventos (BR)" => 3,
-            "Planejamento de festas" => 4,
-            
-            // Logística - Todas 1 estrela
-            "Corrida de motoboy" | "Motoboy + Correios e envios internacionais" |
-            "Lalamove" | "Corridas com Taxistas" | "Transporte Urbano (Uber/99)" => 1,
-            
-            // Viagens - Variado
-            "Compra de Assentos e Bagagens" | "Passagens de Ônibus" | "Checkins (Early/Late)" |
-            "Seguro Viagem (Temporário)" | "Programa de Milhagem" | "Gestão de Contas (CIAs Aereas)" => 1,
-            "Passagens Aéreas" | "Hospedagens" | "Passagens de Trem" | "Extravio de Bagagens" |
-            "Transfer" | "Aluguel de Carro/Ônibus e Vans" => 2,
-            "Roteiro de Viagens" => 3,
-            
-            // Plano de Saúde - Variado
-            "Extrato para IR" | "Prévia de Reembolso" | "Contestações" | "Autorizações" => 1,
-            "Reembolso Médico" | "Contratações/Cancelamentos" => 2,
-            
-            // Agenda - Todas 1 estrela
-            "Gestão de Agenda" | "Criação e envio de invites" => 1,
-            
-            // Financeiro - Variado
-            "Emissão de NF" | "Rotina de Pagamentos" | "Emissão de boletos" |
-            "Imposto de Renda" | "Emissão de Guias de Imposto (DARF, DAS, DIRF, GPS)" => 1,
-            "Conciliação Bancária" | "Encerramento e Abertura de CNPJ" => 2,
-            "Planilha de Gastos/Pagamentos" => 4,
-            
-            // Assuntos Pessoais - Variado
-            "Troca de titularidade" | "Assuntos do Carro/Moto" | "Internet e TV por Assinatura" |
-            "Contas de Consumo" | "Assuntos Escolares e Professores Particulares" |
-            "Academia e Cursos Livres" | "Telefone" | "Assistência Técnica" | "Consertos na Casa" => 1,
-            "Mudanças" | "Anúncio de Vendas Online (Itens, eletros. móveis)" => 3,
-            
-            // Atividades Corporativas - Variado
-            "Financeiro/Contábil" | "Atendimento ao Cliente" | "Documentos/Contratos e Assinaturas" |
-            "Gestão de Agenda (Corporativa)" | "Recursos Humanos" | "Gestão de Estoque" | "Compras/vendas" => 1,
-            "Fornecedores" => 2,
-            "Gestão de Planilhas e Emails" => 4,
-            
-            // Gestão de Funcionário - Todas 1 estrela
-            "eSocial" | "Contratações e Desligamentos" | "DIRF" | "Férias" => 1,
-            
-            // Padrão para subcategorias não mapeadas
-            _ => 1
+    use chatguru_clickup_middleware::services::prompts::AiPromptConfig;
+
+    // Carregar configuração do YAML
+    let config = match AiPromptConfig::load_default() {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            log_warning(&format!("Failed to load AI prompt config for stars: {}, using fallback", e));
+            return 1; // Fallback direto
         }
-    } else {
-        // Fallback: usar categoria se não conseguir determinar subcategoria
-        if let Some(category) = &classification.category {
-            match category.as_str() {
-                "Logística" | "Agendamentos" => 1,
-                "Compras" | "Plano de Saúde" | "Financeiro" | "Viagens" => 2,
-                "Lazer" | "Documentos" | "Assuntos Pessoais" => 2,
-                _ => 1
-            }
+    };
+
+    // Usar categoria e subcategoria retornadas pelo OpenAI para buscar as estrelas
+    if let (Some(category), Some(sub_categoria)) = (&classification.category, &classification.sub_categoria) {
+        if let Some(stars) = config.get_subcategory_stars(category, sub_categoria) {
+            log_info(&format!("⭐ Estrelas determinadas via YAML: {} ({}→{})",
+                stars, category, sub_categoria));
+            return stars as i32;
         } else {
-            1
+            log_warning(&format!("Subcategoria '{}' não encontrada no YAML para categoria '{}', usando fallback",
+                sub_categoria, category));
         }
     }
+
+    // Fallback: 1 estrela padrão
+    log_info("Using fallback: 1 star");
+    1
 }

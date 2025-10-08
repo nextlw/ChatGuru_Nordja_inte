@@ -378,6 +378,7 @@ subcategories_template: |
 
 # Regras fixas que sempre se aplicam
 rules:
+  - "CRÍTICO: Use SOMENTE as categorias listadas em 'CATEGORIAS DISPONÍVEIS NO CLICKUP'. NUNCA crie categorias novas ou diferentes"
   - "A subcategoria SEMPRE deve ser relacionada à categoria principal escolhida"
   - "Para agendamentos (consultas, exames, veterinário, etc): escolha a categoria Agendamentos"
   - "Para pedidos de compra (mercado, presentes, farmácia, etc): escolha a categoria Compras"
@@ -455,9 +456,10 @@ response_format: |
   IMPORTANTE:
   - Use APENAS valores exatos das listas fornecidas acima
   - tipo_atividade deve ser um dos valores da lista TIPO DE ATIVIDADE
-  - category deve ser um dos valores da lista CATEGORIAS
+  - category deve ser OBRIGATORIAMENTE um dos valores da lista CATEGORIAS DISPONÍVEIS NO CLICKUP (NUNCA invente categorias)
   - sub_categoria deve ser um dos valores da lista SUBCATEGORIAS ou null
   - status_back_office deve ser um dos valores da lista STATUS BACK OFFICE
+  - Se não encontrar uma categoria apropriada na lista, use a mais próxima ou classifique is_activity como false
 
 # Valores padrão caso a busca dinâmica falhe
 fallback_values:

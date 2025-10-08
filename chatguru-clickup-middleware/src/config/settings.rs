@@ -8,6 +8,7 @@ pub struct Settings {
     pub gcp: GcpSettings,
     pub chatguru: ChatGuruSettings,
     pub ai: Option<AISettings>,
+    pub vertex: Option<VertexSettings>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -29,6 +30,9 @@ pub struct GcpSettings {
     pub topic_name: String,
     pub subscription_name: String,
     pub pubsub_topic: Option<String>,  // Tópico para envio de webhooks RAW
+    pub media_processing_topic: Option<String>,  // Tópico para requisições de processamento de mídia
+    pub media_results_topic: Option<String>,  // Tópico para resultados de processamento
+    pub media_results_subscription: Option<String>,  // Subscription para ler resultados
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -47,6 +51,14 @@ pub struct ChatGuruSettings {
 pub struct AISettings {
     pub enabled: bool,
     // Usa sempre Vertex AI no Google Cloud (mais eficiente e integrado)
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct VertexSettings {
+    pub enabled: bool,
+    pub timeout_seconds: u64,
+    pub project_id: String,
+    pub location: String,
 }
 
 impl Settings {

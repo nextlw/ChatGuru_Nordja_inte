@@ -1,0 +1,450 @@
+{
+  "categoria_mapping": {
+    "a4a4e85c-4eb5-44f9-9175-f98594da5c70": {
+      "old_name": "ADM",
+      "new_id": "5baa7715-1dfa-4a36-8452-78d60748e193",
+      "new_name": "Atividades Corporativas",
+      "reasoning": "ADM é genérico para atividades administrativas corporativas"
+    },
+    "25102629-2b4f-4863-847c-51468e484362": {
+      "old_name": "Agendamento",
+      "new_id": "4b6cd768-fb58-48a5-a3d3-6993d2026764",
+      "new_name": "Agendamentos",
+      "reasoning": "Equivalência direta, apenas plural"
+    },
+    "e0b80ba4-3b2e-47bc-9a4f-d322045d6480": {
+      "old_name": "Atividades Corporativas",
+      "new_id": "5baa7715-1dfa-4a36-8452-78d60748e193",
+      "new_name": "Atividades Corporativas",
+      "reasoning": "Equivalência exata"
+    },
+    "1b61be8c-6eaa-4cd4-959d-c48f8b78ca3e": {
+      "old_name": "Atividades Pessoais / Domésticas",
+      "new_id": "72c6a009-bce5-41db-870f-c29d7094dbaf",
+      "new_name": "Assuntos Pessoais",
+      "reasoning": "Assuntos Pessoais engloba atividades pessoais e domésticas"
+    },
+    "4799d43c-c1be-478e-ad58-57fdfa95b292": {
+      "old_name": "Compras",
+      "new_id": "11155a3f-5b4a-46f0-a447-4753bd9c3682",
+      "new_name": "Compras",
+      "reasoning": "Equivalência exata"
+    },
+    "e57a5888-49cc-4c3a-bb4a-e235c8c58e77": {
+      "old_name": "Documentos",
+      "new_id": "60b9e5ad-7135-473c-97b2-c18d99b4a2b1",
+      "new_name": "Documentos",
+      "reasoning": "Equivalência exata"
+    },
+    "4232858d-8052-4fdc-9ce9-628f34d2edac": {
+      "old_name": "Educação / Academia",
+      "new_id": "72c6a009-bce5-41db-870f-c29d7094dbaf",
+      "new_name": "Assuntos Pessoais",
+      "reasoning": "Educação e academia são assuntos pessoais (ver subcategoria 'Academia e Cursos Livres')"
+    },
+    "07c402c5-1f0b-4ae0-b38e-349553fd7a81": {
+      "old_name": "Eventos Corporativos",
+      "new_id": "5baa7715-1dfa-4a36-8452-78d60748e193",
+      "new_name": "Atividades Corporativas",
+      "reasoning": "Eventos corporativos são atividades corporativas"
+    },
+    "2330057a-4637-4ab6-94af-905904fdb4c3": {
+      "old_name": "Gestão de Funcionário Doméstico",
+      "new_id": "b0118e0d-1ae9-4275-bda1-c7651eb8c7d0",
+      "new_name": "Gestão de Funcionário",
+      "reasoning": "Gestão de funcionário engloba funcionários domésticos"
+    },
+    "68539506-88b8-44a5-bac8-0496b2b2f148": {
+      "old_name": "Lazer",
+      "new_id": "d12372bc-b2c1-4b15-b444-7edc7e477362",
+      "new_name": "Lazer",
+      "reasoning": "Equivalência exata"
+    },
+    "a1bc0a49-2a9d-41bd-a91a-a6b4af7677b4": {
+      "old_name": "Logistica",
+      "new_id": "e94fdbaa-7442-4579-8f98-3d345a5a862b",
+      "new_name": "Logística",
+      "reasoning": "Equivalência exata (apenas acentuação)"
+    },
+    "18c2c60c-cfd0-4ef8-af94-7542bd9b30c7": {
+      "old_name": "Festas / Reuniões / Recepção",
+      "new_id": "d12372bc-b2c1-4b15-b444-7edc7e477362",
+      "new_name": "Lazer",
+      "reasoning": "Festas e reuniões são atividades de lazer (ver subcategoria 'Planejamento de festas')"
+    },
+    "b64b9e80-fdc4-4521-8975-45e335109b49": {
+      "old_name": "Pagamentos",
+      "new_id": "6c7b5c2c-1d11-4198-8a54-6a748ef750a8",
+      "new_name": "Financeiro",
+      "reasoning": "Pagamentos são atividades financeiras"
+    },
+    "80ad2f74-7074-4eec-a4fd-8fc92d0fe0dd": {
+      "old_name": "Pesquisas / Orçamentos",
+      "new_id": "6c7b5c2c-1d11-4198-8a54-6a748ef750a8",
+      "new_name": "Financeiro",
+      "reasoning": "Orçamentos são atividades financeiras; pesquisas dependem do contexto mas geralmente relacionadas a compras/finanças"
+    },
+    "2aebf637-6534-487c-bd35-d28334c8d685": {
+      "old_name": "Viagens",
+      "new_id": "632bf51e-dc85-44de-8dc7-7d5cd2cdcd5e",
+      "new_name": "Viagens",
+      "reasoning": "Equivalência exata"
+    },
+    "3496ba6c-9d7f-495f-951e-6017dfdbd55b": {
+      "old_name": "Plano de Saúde",
+      "new_id": "c99d911f-595b-45c4-bb01-15d627d5a62f",
+      "new_name": "Plano de Saúde",
+      "reasoning": "Equivalência exata"
+    },
+    "16c6bd8a-05d3-4bd7-8fd9-906ef3e8b2d2": {
+      "old_name": "Controle Interno",
+      "new_id": "5baa7715-1dfa-4a36-8452-78d60748e193",
+      "new_name": "Atividades Corporativas",
+      "reasoning": "Controle interno é uma atividade corporativa"
+    },
+    "8fb02d9e-febb-4b94-9e9e-cdf8ff5a28fb": {
+      "old_name": "Compra/Venda/Aluguel",
+      "new_id": "72c6a009-bce5-41db-870f-c29d7094dbaf",
+      "new_name": "Assuntos Pessoais",
+      "reasoning": "Compra/venda/aluguel de itens pessoais vai para Assuntos Pessoais (ver subcategoria 'Anúncio de Vendas Online')"
+    },
+    "14f5e8ff-df26-4446-8766-053e47c001c7": {
+      "old_name": "Atividade Baixada/Duplicada",
+      "new_id": "5baa7715-1dfa-4a36-8452-78d60748e193",
+      "new_name": "Atividades Corporativas",
+      "reasoning": "Controle administrativo, melhor como atividade corporativa"
+    }
+  },
+  "subcategoria_mapping": {
+    "49901a4b-2d46-429b-92a0-ee242982b030": {
+      "old_name": "ADM",
+      "new_id": "9de0acb5-2451-4531-adb5-08e0e929996e",
+      "new_name": "Financeiro/Contábil",
+      "reasoning": "ADM genérico, financeiro/contábil é o mais próximo para tarefas administrativas"
+    },
+    "b01412cd-81c6-4495-9020-6f4258b23648": {
+      "old_name": "Consultas/Exames/Vacinas/Manicure/Pet, etc",
+      "new_id": "bff3cb1c-a75c-42e3-8249-18dbe32296f7",
+      "new_name": "Consultas",
+      "reasoning": "Consultas é o primeiro item da lista agregada, mas idealmente deveria ser subdividido"
+    },
+    "0e2fa54b-048f-4d12-a0fe-2db16b030ed5": {
+      "old_name": "Atividades Financeiras / Reembolso Corporativo",
+      "new_id": "9de0acb5-2451-4531-adb5-08e0e929996e",
+      "new_name": "Financeiro/Contábil",
+      "reasoning": "Atividades financeiras corporativas"
+    },
+    "4a106fb2-a2ee-4720-8715-9dd453bf2a44": {
+      "old_name": "Atendimento ao Cliente",
+      "new_id": "5f8c3193-31da-46fc-ba67-0b67bb87fea0",
+      "new_name": "Atendimento ao Cliente",
+      "reasoning": "Equivalência exata"
+    },
+    "43004146-90d4-451e-83ea-b60dd6d0a609": {
+      "old_name": "Contratação de Fornecedores / Contratação de Funcionários",
+      "new_id": "e42cab5b-6c54-4b70-8616-1ae96bbe0568",
+      "new_name": "Fornecedores",
+      "reasoning": "Contratação de fornecedores é mais específico; funcionários vai para 'Contratações e Desligamentos'"
+    },
+    "54236c7a-6db4-4af2-bfde-0e8a6289e5bd": {
+      "old_name": "Gestão e Planilhas e Emails",
+      "new_id": "744ec6fb-7d28-43a1-a02d-fca5148993e9",
+      "new_name": "Gestão de Planilhas e Emails",
+      "reasoning": "Equivalência quase exata"
+    },
+    "e4d81fdb-9a33-4f99-bd17-83cb7a74fe70": {
+      "old_name": "Fup Documentos  / Assinatura Digital",
+      "new_id": "43d79a01-7c60-4902-a308-6a708c8ff6b0",
+      "new_name": "Documentos/Contratos e Assinaturas",
+      "reasoning": "Follow-up de documentos e assinaturas digitais"
+    },
+    "04b876ec-1ca4-4233-b839-e2264b7a95c5": {
+      "old_name": "Gestão de Agenda / Gestão de Estoque",
+      "new_id": "45f0fa60-db1c-4343-93b0-111f1db221e1",
+      "new_name": "Gestão de Agenda",
+      "reasoning": "Gestão de agenda é mais comum; estoque tem campo próprio 'Gestão de Estoque'"
+    },
+    "6071b824-b481-4892-92ee-3d1f814649d3": {
+      "old_name": "Social Media",
+      "new_id": "5f8c3193-31da-46fc-ba67-0b67bb87fea0",
+      "new_name": "Atendimento ao Cliente",
+      "reasoning": "Social media geralmente relacionado a atendimento/comunicação com clientes"
+    },
+    "614d3333-aabb-4e30-8a86-589054f5ab24": {
+      "old_name": "Planilhas/Organização Pessoal/Pet",
+      "new_id": "744ec6fb-7d28-43a1-a02d-fca5148993e9",
+      "new_name": "Gestão de Planilhas e Emails",
+      "reasoning": "Planilhas e organização pessoal"
+    },
+    "0c6e7635-5a8f-4f73-bfa3-34e26ff00290": {
+      "old_name": "Carro - Assuntos em Geral ",
+      "new_id": "c29d6435-7ed8-4324-af46-ff45eab5fa97",
+      "new_name": "Assuntos do Carro/Moto",
+      "reasoning": "Equivalência direta"
+    },
+    "f01b11d2-6432-46e7-bc1b-516588cdd853": {
+      "old_name": "Encerramento Abertura  de CC / INSS / Empresa (CNPJ)",
+      "new_id": "88eb8b12-d65b-464a-923a-7d656ea95a23",
+      "new_name": "Encerramento e Abertura de CNPJ",
+      "reasoning": "Foca no aspecto de CNPJ que é o mais relevante"
+    },
+    "05596bd0-9de2-4dec-9370-d8f5cdae27ca": {
+      "old_name": "Internet/Telefone/Tv Assinatura /Gas/Luz/Assistencia Tecnica Casa / Consertos em Geral",
+      "new_id": "dd76b9a0-18e6-41cc-ade3-23add30748a7",
+      "new_name": "Contas de Consumo",
+      "reasoning": "Internet/telefone/TV/gás/luz são contas de consumo; assistência técnica tem campo próprio"
+    },
+    "21974571-9c82-402a-99e7-bbcecf7c400e": {
+      "old_name": "Vender/Comprar - Imóvel/ Móveis / Itens de Casa",
+      "new_id": "c09ff878-ff56-401a-b51a-7a06d4af2015",
+      "new_name": "Anúncio de Vendas Online (Itens, eletros. móveis)",
+      "reasoning": "Venda de móveis e itens de casa"
+    },
+    "e047dcd7-1ad6-47d7-8634-5d0bd6ed3262": {
+      "old_name": "Presentes / Farmácia / Mercado / Marmitas / Fotos / Flores / Papelaria / Uniforme Escolar",
+      "new_id": "ff7ebf1d-e28b-4759-9601-480b67815ca4",
+      "new_name": "Presentes",
+      "reasoning": "Presentes é o primeiro; farmácia/mercado/papelaria têm campos próprios"
+    },
+    "6db21c46-d85f-46b9-aae7-a474c6509b19": {
+      "old_name": "Contratos / Procurações / Assinaturas ",
+      "new_id": "afc11da3-774f-4560-a92d-6d41c1b5eb60",
+      "new_name": "Contratos/Procurações",
+      "reasoning": "Equivalência quase exata"
+    },
+    "7a2c53d5-85de-42a3-a426-e2fffdeb17ee": {
+      "old_name": "Passaporte/ RG / CNH / Imóvel / Seguros (Carro/Casa) / Traduções / Vistos (outros)",
+      "new_id": "04cd634f-28fa-41bb-9f66-dae43c3438ca",
+      "new_name": "Passaporte",
+      "reasoning": "Passaporte é o primeiro; CNH/seguros/vistos têm campos próprios"
+    },
+    "e7e75619-6665-48be-9235-ae08e58ffd84": {
+      "old_name": "Visto Americano (Renovação) ",
+      "new_id": "b9a5bac8-e0ad-46f4-9309-9b2ee5acdcf4",
+      "new_name": "Vistos e Vistos Eletrônicos",
+      "reasoning": "Visto americano é um tipo de visto"
+    },
+    "3c190f43-db38-4a3a-8ec3-f091e7bb0144": {
+      "old_name": "Visto Americano (1 visto)",
+      "new_id": "b9a5bac8-e0ad-46f4-9309-9b2ee5acdcf4",
+      "new_name": "Vistos e Vistos Eletrônicos",
+      "reasoning": "Visto americano é um tipo de visto"
+    },
+    "3129358e-7982-4ada-8ccf-7f26abb82a13": {
+      "old_name": "Cidadania Europeia",
+      "new_id": "8fd5c543-fd90-4c07-be5e-a470f25c41a0",
+      "new_name": "Cidadanias",
+      "reasoning": "Cidadania europeia é um tipo de cidadania"
+    },
+    "afda5c39-56c0-491a-90c7-566914c56074": {
+      "old_name": "Cartório - Reconhecimento de Firma / Apostilamentos",
+      "new_id": "50447800-2557-4653-8874-79bc40473624",
+      "new_name": "Averbações",
+      "reasoning": "Reconhecimento de firma e apostilamentos são processos cartorários similares a averbações"
+    },
+    "72aa3197-f089-4231-914c-3f11e413ce6b": {
+      "old_name": "Comprar / renovar Certificado Digital ",
+      "new_id": "1ad5c593-6b54-4673-83f7-a239d981fe72",
+      "new_name": "Certificado Digital",
+      "reasoning": "Equivalência direta"
+    },
+    "8d727072-fb3b-4c2e-af0b-d8350c33b781": {
+      "old_name": "Carteira de vacinação (BR/Internacional)",
+      "new_id": "12980d4b-c4bd-4ed7-b36d-060422d023da",
+      "new_name": "Documento de Vacinação (BR/Iternacional)",
+      "reasoning": "Equivalência quase exata"
+    },
+    "1e74885f-70cd-4f12-9566-4e4027a753bc": {
+      "old_name": "Escola / Faculdade / Academia (fazer matricula / checar grade / atividades extra curriculares)",
+      "new_id": "18d4ff39-f15b-493a-9082-057b0b33ba8d",
+      "new_name": "Assuntos Escolares e Professores Particulares",
+      "reasoning": "Escola e faculdade são assuntos escolares"
+    },
+    "bbb0a731-1b9e-4f1f-aa80-80de1d3cf808": {
+      "old_name": "Evento Externo - Passagem / Hospedagem / Carro / Estrutura",
+      "new_id": "75714f82-0366-429e-9131-4e91e925cf61",
+      "new_name": "Planejamento de festas",
+      "reasoning": "Eventos externos com estrutura são planejamento de eventos/festas"
+    },
+    "f9d66477-6a02-448f-9573-7af7588bf489": {
+      "old_name": "Offsites (Espaço de eventos)",
+      "new_id": "75714f82-0366-429e-9131-4e91e925cf61",
+      "new_name": "Planejamento de festas",
+      "reasoning": "Offsites são eventos corporativos que requerem planejamento similar a festas"
+    },
+    "d94bd26e-f58e-45c8-a8ec-8f1a4d4bdaca": {
+      "old_name": "Offsites - contratar transfer (Van)",
+      "new_id": "ba110e55-104c-45f7-9302-bd8e14113c37",
+      "new_name": "Transfer",
+      "reasoning": "Equivalência direta"
+    },
+    "38e4b91f-36f6-49cf-8a21-d0a32848f623": {
+      "old_name": "Organizar Coffee Breaks / Catering",
+      "new_id": "75714f82-0366-429e-9131-4e91e925cf61",
+      "new_name": "Planejamento de festas",
+      "reasoning": "Coffee breaks e catering são parte de planejamento de eventos"
+    },
+    "dcd2a33b-86b4-4d83-91c3-ef3f9de253ea": {
+      "old_name": "ESocial (mensal / férias / 13 salario) / VT ",
+      "new_id": "26b11372-6bbc-4a36-aa5c-2b0cde733413",
+      "new_name": "eSocial",
+      "reasoning": "Equivalência direta"
+    },
+    "8fa58985-e4a8-443a-b12d-bbbd429a684f": {
+      "old_name": "Reserva de Restaurantes / Bar ",
+      "new_id": "99e3c2b5-e89f-4095-bcf5-7cdc27a36052",
+      "new_name": "Reserva de restaurantes/bares",
+      "reasoning": "Equivalência exata"
+    },
+    "bf2f1612-8e98-47fb-869a-ca143057b891": {
+      "old_name": "Organização de Festa Adulto",
+      "new_id": "75714f82-0366-429e-9131-4e91e925cf61",
+      "new_name": "Planejamento de festas",
+      "reasoning": "Festa de adulto é planejamento de festas"
+    },
+    "1c6fe740-f11a-458c-9734-063a39d7ccf0": {
+      "old_name": "Organização de Festa Infantil",
+      "new_id": "75714f82-0366-429e-9131-4e91e925cf61",
+      "new_name": "Planejamento de festas",
+      "reasoning": "Festa infantil é planejamento de festas"
+    },
+    "5a4393b9-da8d-4c99-a49f-70413f124d8b": {
+      "old_name": " Ingressos de Shows, Exposições, Eventos, Festas e Passeios",
+      "new_id": "ac4019ae-ed29-4e10-b342-203029295d54",
+      "new_name": "Ingressos",
+      "reasoning": "Equivalência direta"
+    },
+    "dfc2ce4f-568a-4397-874f-62c0bdc1e81a": {
+      "old_name": "Motoboy / Uber / Loggi / Correios",
+      "new_id": "bbb7859d-5f9a-46ac-a1dc-31a2f50c3bf8",
+      "new_name": "Corrida de motoboy",
+      "reasoning": "Motoboy é o primeiro; Uber tem campo próprio 'Transporte Urbano'; Correios tem 'Motoboy + Correios'"
+    },
+    "7f4fca82-98d9-4c12-8bd8-0f345eb38375": {
+      "old_name": "Mudança ",
+      "new_id": "b77afa16-4a74-4a09-abe6-ccb7338d5b8d",
+      "new_name": "Mudanças",
+      "reasoning": "Equivalência direta"
+    },
+    "02c0dcac-6dc9-483b-913b-2db13825ee09": {
+      "old_name": "Controle de Gastos Mensais (Planilhas)",
+      "new_id": "af184e5d-bc21-4715-b792-1310e41cef12",
+      "new_name": "Planilha de Gastos/Pagamentos",
+      "reasoning": "Equivalência direta"
+    },
+    "1e9fd3b8-1bb8-4099-8861-99b49c3d1636": {
+      "old_name": "Debito Automatico / Pagamentos Pendentes / 2 Via ",
+      "new_id": "1a84d897-b53c-4713-b526-60eb5c965aab",
+      "new_name": "Rotina de Pagamentos",
+      "reasoning": "Débito automático e pagamentos pendentes são rotina de pagamentos"
+    },
+    "dba6761c-83a7-4cd7-bfba-f550d03e2f06": {
+      "old_name": "Pagamentos via Friday / envio de codigo de barras",
+      "new_id": "1a84d897-b53c-4713-b526-60eb5c965aab",
+      "new_name": "Rotina de Pagamentos",
+      "reasoning": "Pagamentos via plataforma são rotina de pagamentos"
+    },
+    "3646d3bb-83ae-41c2-8f73-941050b702e8": {
+      "old_name": "Guias DARF (INSS) / MEI para pagamento",
+      "new_id": "c2e61adb-92c8-4562-a9b2-8629e2f4a493",
+      "new_name": "Emissão de Guias de Imposto (DARF, DAS, DIRF, GPS)",
+      "reasoning": "DARF é tipo de guia de imposto"
+    },
+    "ea8b81c8-b16e-49e5-a83d-14048b055466": {
+      "old_name": "Envio de NF para reembolso ",
+      "new_id": "76b0f31e-f8a1-4fcb-baca-7fc14bde2b30",
+      "new_name": "Reembolso Médico",
+      "reasoning": "Envio de NF para reembolso geralmente é reembolso médico (plano de saúde)"
+    },
+    "9566759c-0586-434a-9ad0-75633845c60d": {
+      "old_name": "Solicitar Autorização / Contestação / Extrato para IR / Previa de Reembolso / Reclamação",
+      "new_id": "5c805f34-4479-4ec3-8822-5dffe5489124",
+      "new_name": "Autorizações",
+      "reasoning": "Autorizações é o mais genérico; contestações tem campo próprio"
+    },
+    "59b2dad2-ec38-4a09-8810-005363808045": {
+      "old_name": "Contratação / Cancelamento",
+      "new_id": "2fdb5cc9-18a7-451d-be47-c184e537855e",
+      "new_name": "Contratações/Cancelamentos",
+      "reasoning": "Equivalência exata"
+    },
+    "4209e07f-f1d9-4f1c-96ac-f8652af7b47e": {
+      "old_name": "Documentação (Regras Sanitárias / vistos / vacinas) ",
+      "new_id": "b9a5bac8-e0ad-46f4-9309-9b2ee5acdcf4",
+      "new_name": "Vistos e Vistos Eletrônicos",
+      "reasoning": "Documentação de viagem focada em vistos; vacinas tem campo próprio"
+    },
+    "99edd737-20d9-4daa-8a80-40e52ad3c269": {
+      "old_name": "Extravio de Malas e Bagagens ",
+      "new_id": "812ae904-2273-4793-8228-eba85228b685",
+      "new_name": "Extravio de Bagagens",
+      "reasoning": "Equivalência direta"
+    },
+    "e75df77b-7837-4917-b328-cfb5235deb77": {
+      "old_name": "Fazer Check in Voos ",
+      "new_id": "d40e5677-26b9-4191-885a-f23e6c19e905",
+      "new_name": "Checkins (Early/Late)",
+      "reasoning": "Equivalência direta"
+    },
+    "9d9e22c3-9372-42db-81b2-c3112421a567": {
+      "old_name": "Hospedagem - Pesquisar / Cotar / Comprar / Cancelar",
+      "new_id": "a7b1efc0-21fb-43be-a1ce-093469a605a0",
+      "new_name": "Hospedagens",
+      "reasoning": "Equivalência direta"
+    },
+    "3ddb02a9-8013-4d4e-b1c3-1e54a76a06eb": {
+      "old_name": "Passagem de ônibus - Pesquisar / Cotar / Comprar ",
+      "new_id": "43196e32-64bf-4e18-931b-71d1f55bc1f2",
+      "new_name": "Passagens de Ônibus",
+      "reasoning": "Equivalência direta"
+    },
+    "9ff811a8-b543-489d-a90f-03220dbaccad": {
+      "old_name": "Passagem Aérea - Pesquisar / Cotar / Comprar / Cancelar",
+      "new_id": "790f6daf-a1f8-4dcb-a2fb-9b13a635af7b",
+      "new_name": "Passagens Aéreas",
+      "reasoning": "Equivalência direta"
+    },
+    "99be807b-6188-4dc9-9bf8-aae51b06631b": {
+      "old_name": "Programa de Milhagem / Cadastros e Alteração de Cadastros CIAS",
+      "new_id": "23d3e4cd-7d6d-4c0e-be26-2a771e0e8734",
+      "new_name": "Programa de Milhagem",
+      "reasoning": "Equivalência quase exata; gestão de contas tem campo próprio"
+    },
+    "563deaa4-e717-4da4-a0b1-7066a40b9986": {
+      "old_name": "Seguro Viagem - Pesquisar / Cotar / Comprar ",
+      "new_id": "775b4b9b-f9d4-4cec-bba9-df233acd1f96",
+      "new_name": "Seguro Viagem (Temporário)",
+      "reasoning": "Equivalência direta"
+    },
+    "f63a9631-d786-4564-88af-05f03b3ff54d": {
+      "old_name": "Transfer / Aluguel / Reserva de Carro / Cancelar",
+      "new_id": "ba110e55-104c-45f7-9302-bd8e14113c37",
+      "new_name": "Transfer",
+      "reasoning": "Transfer é o primeiro; aluguel de carro tem campo próprio"
+    },
+    "6ff3b9ab-c3ae-493b-94eb-b69797b7b29a": {
+      "old_name": "Pesquisas / Orçamento",
+      "new_id": "2329a8b6-3d57-4136-b62a-4668cf88a7b6",
+      "new_name": "Pesquisa de passeios/eventos (BR)",
+      "reasoning": "Pesquisas genéricas, melhor encaixe para passeios/eventos"
+    },
+    "9cf26e9e-b3c4-4b09-9dc7-f00699db84ad": {
+      "old_name": "Emissão de NF",
+      "new_id": "530e1f11-b1a1-4505-bce5-76bc873dbdb4",
+      "new_name": "Emissão de NF",
+      "reasoning": "Equivalência exata"
+    },
+    "829e9da1-e7f1-465c-988d-856ddecf3aa1": {
+      "old_name": "Controle Interno",
+      "new_id": "9de0acb5-2451-4531-adb5-08e0e929996e",
+      "new_name": "Financeiro/Contábil",
+      "reasoning": "Controle interno geralmente relacionado a atividades financeiras/contábeis"
+    },
+    "cfcc3734-81f6-4d16-92db-6b51ee95986c": {
+      "old_name": "IR/IR MEI",
+      "new_id": "db04f3c8-7d9c-4adb-8a19-c033c189a0f9",
+      "new_name": "Imposto de Renda",
+      "reasoning": "Equivalência direta"
+    }
+  }
+}

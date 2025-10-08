@@ -13,4 +13,6 @@ pub struct AppState {
     pub settings: config::Settings,
     pub clickup_client: reqwest::Client,
     pub clickup: services::ClickUpService,
+    pub vertex: Option<services::VertexAIService>,
+    pub media_sync: Option<services::MediaSyncService>,
 }
