@@ -479,7 +479,6 @@ impl WebhookPayload {
             "name": task_name,
             "description": description.trim(),
             "tags": Vec::<String>::new(),
-            "status": "pendente",
             "priority": 3,
             "custom_fields": custom_fields
         })
@@ -559,7 +558,6 @@ impl WebhookPayload {
             "name": task_name,
             "description": description.trim(),
             "tags": Vec::<String>::new(),  // Legado não usa tags
-            "status": "pendente",  // Status exato do legado
             "priority": 3,  // Prioridade normal (3) como no legado
             "custom_fields": custom_fields  // Adicionar campos personalizados
         })
@@ -626,7 +624,6 @@ impl WebhookPayload {
             "name": title,
             "description": description,
             "tags": tags,
-            "status": "pendente",
             "priority": 3
         })
     }
@@ -660,7 +657,6 @@ impl WebhookPayload {
             "name": format!("[Webhook] {}", nome),
             "description": description,
             "tags": vec!["webhook", "genérico"],
-            "status": "pendente",
             "priority": 3
         })
     }
