@@ -16,7 +16,7 @@ pub async fn list_clickup_tasks(State(state): State<Arc<AppState>>) -> Result<Js
     
     let response = state.clickup_client
         .get(&url)
-        .header("Authorization", &state.settings.clickup.token)
+        .header("Authorization", format!("Bearer {}", &state.settings.clickup.token))
         .send()
         .await?;
 

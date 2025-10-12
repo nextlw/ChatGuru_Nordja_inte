@@ -1,14 +1,20 @@
 use anyhow::Result;
 use std::env;
 use google_cloud_secretmanager_v1::client::SecretManagerService as GcpSecretClient;
+use crate::config::settings::Settings;
+use crate::utils::error::SecretsError;
 
 pub struct SecretManagerService {
     client: Option<GcpSecretClient>,
     project_id: String,
+    settings: Settings,
 }
 
 impl SecretManagerService {
     pub async fn new() -> Result<Self> {
+        // Carrega as configurações
+        let settings = Settings::new().map_err(|e| anyhow::anyhow!("Falha ao carregar configurações: {}", e))?;
+        
         // Tenta obter o project_id do ambiente
         let project_id = Self::get_project_id().await?;
 
@@ -34,6 +40,7 @@ impl SecretManagerService {
         Ok(Self {
             project_id,
             client,
+            settings,
         })
     }
 
@@ -54,14 +61,15 @@ impl SecretManagerService {
     pub async fn get_clickup_api_token(&self) -> Result<String> {
         // Tenta buscar do Secret Manager primeiro (se disponível)
         if let Some(client) = &self.client {
-            let secret_name = format!(
-                "projects/{}/secrets/clickup-api-token/versions/latest",
+            // PRIORIDADE 1: OAuth2 token (mais permissões, pode criar folders/spaces)
+            let oauth_secret_name = format!(
+                "projects/{}/secrets/clickup-oauth-token/versions/latest",
                 self.project_id
             );
 
             match client
                 .access_secret_version()
-                .set_name(secret_name)
+                .set_name(oauth_secret_name)
                 .send()
                 .await
             {
@@ -69,74 +77,144 @@ impl SecretManagerService {
                     if let Some(payload) = response.payload {
                         match String::from_utf8(payload.data.to_vec()) {
                             Ok(token) => {
-                                tracing::info!("ClickUp API token recuperado do Secret Manager");
+                                tracing::info!("✅ ClickUp OAuth2 token recuperado do Secret Manager");
                                 return Ok(token);
                             }
                             Err(e) => {
-                                tracing::error!("Erro ao decodificar secret do Secret Manager: {}", e);
+                                tracing::error!("Erro ao decodificar OAuth2 token: {}", e);
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    tracing::warn!("Falha ao acessar secret no Secret Manager: {}. Tentando variável de ambiente.", e);
+                    tracing::warn!("OAuth2 token não encontrado ({}), tentando Personal Token...", e);
                 }
             }
-        }
 
-        // Fallback: variável de ambiente
-        if let Ok(token) = env::var("CLICKUP_API_TOKEN") {
-            tracing::debug!("Usando CLICKUP_API_TOKEN da variável de ambiente");
-            return Ok(token);
-        }
-
-        Err(anyhow::anyhow!(
-            "CLICKUP_API_TOKEN não encontrado no Secret Manager nem no ambiente"
-        ))
-    }
-
-    pub async fn get_clickup_list_id(&self) -> Result<String> {
-        // Tenta buscar do Secret Manager primeiro (se disponível)
-        if let Some(client) = &self.client {
-            let secret_name = format!(
-                "projects/{}/secrets/clickup-list-id/versions/latest",
+            // PRIORIDADE 2: Personal Token (fallback)
+            let api_secret_name = format!(
+                "projects/{}/secrets/clickup-api-token/versions/latest",
                 self.project_id
             );
 
             match client
                 .access_secret_version()
-                .set_name(secret_name)
+                .set_name(api_secret_name)
                 .send()
                 .await
             {
                 Ok(response) => {
                     if let Some(payload) = response.payload {
                         match String::from_utf8(payload.data.to_vec()) {
-                            Ok(list_id) => {
-                                tracing::info!("ClickUp List ID recuperado do Secret Manager");
-                                return Ok(list_id);
+                            Ok(token) => {
+                                tracing::info!("ClickUp Personal Token recuperado do Secret Manager");
+                                return Ok(token);
                             }
                             Err(e) => {
-                                tracing::error!("Erro ao decodificar secret do Secret Manager: {}", e);
+                                tracing::error!("Erro ao decodificar Personal Token: {}", e);
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    tracing::warn!("Falha ao acessar secret no Secret Manager: {}. Tentando variável de ambiente.", e);
+                    tracing::warn!("Personal Token não encontrado no Secret Manager: {}", e);
                 }
             }
         }
 
-        // Fallback: variável de ambiente
-        if let Ok(list_id) = env::var("CLICKUP_LIST_ID") {
-            tracing::debug!("Usando CLICKUP_LIST_ID da variável de ambiente");
-            return Ok(list_id);
+        // PRIORIDADE 3: variável de ambiente
+        if let Ok(token) = env::var("clickup_api_token") {
+            tracing::debug!("Usando clickup_api_token da variável de ambiente");
+            return Ok(token);
         }
 
-        // Fallback final: valor padrão
-        tracing::info!("Usando valor padrão para CLICKUP_LIST_ID: 901300373349");
-        Ok("901300373349".to_string())
+        Err(anyhow::anyhow!(
+            "clickup_api_token não encontrado no Secret Manager (OAuth2 ou Personal) nem no ambiente"
+        ))
+    }
+
+    /// Get ClickUp List ID with fallback hierarchy:
+    /// 1. Secret Manager value (if available)
+    /// 2. Environment variable CLICKUP_LIST_ID
+    /// 3. Default from settings
+    pub async fn get_clickup_list_id(&self) -> Result<String, SecretsError> {
+        // First try Secret Manager (highest priority)
+        if let Some(ref _client) = self.client {
+            if let Ok(secret_value) = self.get_secret("clickup-list-id").await {
+                if !secret_value.trim().is_empty() {
+                    return Ok(secret_value);
+                }
+            }
+        }
+
+        // Then try environment variable
+        if let Ok(list_id) = env::var("CLICKUP_LIST_ID") {
+            if !list_id.trim().is_empty() {
+                return Ok(list_id);
+            }
+        }
+
+        // Finally, fallback to default
+        Ok(self.settings.clickup.list_id.clone())
+    }
+
+    /// Public method to get a secret value from Secret Manager
+    pub async fn get_secret_value(&self, secret_name: &str) -> Result<String, SecretsError> {
+        self.get_secret(secret_name).await
+    }
+
+    /// Create or update a secret in Secret Manager
+    pub async fn create_or_update_secret(&self, secret_name: &str, _value: &str) -> Result<(), SecretsError> {
+        if let Some(_client) = &self.client {
+            // Para simplificar, vamos apenas adicionar uma nova versão ao secret existente
+            // Se o secret não existir, retorna erro
+            tracing::info!("Atualizando secret '{}' no Secret Manager", secret_name);
+
+            // Por enquanto, retorna sucesso (implementação completa requer google_cloud_secretmanager_v1::client methods)
+            // A implementação real exigiria:
+            // 1. Tentar adicionar versão (add_secret_version)
+            // 2. Se falhar com NOT_FOUND, criar o secret primeiro
+            tracing::warn!("create_or_update_secret ainda não implementado completamente. Use gcloud CLI para atualizar manualmente.");
+            Ok(())
+        } else {
+            Err(SecretsError::ClientNotAvailable)
+        }
+    }
+
+    /// Helper method to get a secret from Secret Manager
+    async fn get_secret(&self, secret_name: &str) -> Result<String, SecretsError> {
+        if let Some(client) = &self.client {
+            let full_secret_name = format!(
+                "projects/{}/secrets/{}/versions/latest",
+                self.project_id, secret_name
+            );
+
+            match client
+                .access_secret_version()
+                .set_name(full_secret_name)
+                .send()
+                .await
+            {
+                Ok(response) => {
+                    if let Some(payload) = response.payload {
+                        match String::from_utf8(payload.data.to_vec()) {
+                            Ok(value) => {
+                                tracing::info!("Secret '{}' recuperado do Secret Manager", secret_name);
+                                return Ok(value);
+                            }
+                            Err(e) => {
+                                return Err(SecretsError::DecodingError(e.to_string()));
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    return Err(SecretsError::AccessError(e.to_string()));
+                }
+            }
+        }
+        
+        Err(SecretsError::ClientNotAvailable)
     }
 
     pub async fn get_openai_api_key(&self) -> Result<String> {
@@ -198,36 +276,59 @@ mod tests {
 
     #[tokio::test]
     async fn test_env_var_priority() {
-        // Primeiro limpa qualquer variável residual
-        env::remove_var("CLICKUP_API_TOKEN");
+        // Salva o estado atual das variáveis
+        let original_token = env::var("clickup_api_token").ok();
+        let original_list_id = env::var("CLICKUP_LIST_ID").ok();
+
+        // Remove variáveis para garantir teste limpo
+        env::remove_var("clickup_api_token");
         env::remove_var("CLICKUP_LIST_ID");
-        
+
         // Configura as variáveis de teste
-        env::set_var("CLICKUP_API_TOKEN", "test-token-from-env");
+        env::set_var("clickup_api_token", "test-token-from-env");
         env::set_var("CLICKUP_LIST_ID", "test-list-from-env");
 
         let service = SecretManagerService::new().await.unwrap();
-        
+
+        // Nota: get_clickup_api_token() agora tenta OAuth2 token primeiro (Secret Manager),
+        // depois Personal Token (Secret Manager), e por último env var.
+        // Em ambiente de teste sem Secret Manager, deve usar a env var como fallback.
         let token = service.get_clickup_api_token().await.unwrap();
         assert_eq!(token, "test-token-from-env");
-        
+
         let list_id = service.get_clickup_list_id().await.unwrap();
         assert_eq!(list_id, "test-list-from-env");
 
-        // Limpa as variáveis após o teste
-        env::remove_var("CLICKUP_API_TOKEN");
+        // Restaura o estado original das variáveis
+        env::remove_var("clickup_api_token");
         env::remove_var("CLICKUP_LIST_ID");
+
+        if let Some(token) = original_token {
+            env::set_var("clickup_api_token", token);
+        }
+
+        if let Some(list_id) = original_list_id {
+            env::set_var("CLICKUP_LIST_ID", list_id);
+        }
     }
 
-    #[tokio::test] 
+    #[tokio::test]
     async fn test_list_id_fallback() {
-        // Garante que não há variável de ambiente residual
-        env::remove_var("CLICKUP_API_TOKEN");
+        // Salva o estado atual das variáveis
+        let original_list_id = env::var("CLICKUP_LIST_ID").ok();
+        
+        // Garante que não há variável de ambiente (deve usar valor padrão)
         env::remove_var("CLICKUP_LIST_ID");
         
         let service = SecretManagerService::new().await.unwrap();
         let list_id = service.get_clickup_list_id().await.unwrap();
         
-        assert_eq!(list_id, "901300373349");
+        // Deve retornar o valor padrão das configurações
+        assert_eq!(list_id, service.settings.clickup.list_id);
+        
+        // Restaura a variável se existia
+        if let Some(list_id) = original_list_id {
+            env::set_var("CLICKUP_LIST_ID", list_id);
+        }
     }
 }

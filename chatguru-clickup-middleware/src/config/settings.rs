@@ -72,7 +72,8 @@ impl Settings {
             .add_source(File::with_name(&format!("config/{}", run_mode)).required(false));
         
         // Adicionar variáveis de ambiente específicas
-        if let Ok(token) = std::env::var("CLICKUP_API_TOKEN") {
+        if let Ok(token) = std::env::var("CLICKUP_API_TOKEN")
+            .or_else(|_| std::env::var("clickup_api_token")) {
             builder = builder.set_override("clickup.token", token)?;
         }
         if let Ok(list_id) = std::env::var("CLICKUP_LIST_ID") {

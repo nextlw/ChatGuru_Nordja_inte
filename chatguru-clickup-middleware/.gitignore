@@ -34,6 +34,8 @@ Thumbs.db
 *.old
 
 # Test files
+scripts/
+tests/
 test-*.js
 verify-*.sh
 

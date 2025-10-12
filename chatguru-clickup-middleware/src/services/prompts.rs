@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -56,18 +57,205 @@ pub struct FieldIds {
 }
 
 impl AiPromptConfig {
-    /// Carrega a configuração do prompt de um arquivo YAML
+    /// NOVO: Carrega configuração do banco de dados PostgreSQL
+    pub async fn from_database(db: &PgPool) -> AppResult<Self> {
+        // Se DB não está disponível, usa configuração padrão
+        if db.is_closed() {
+            return Self::load_default();
+        }
+
+        // Carregar configurações básicas
+        let system_role = sqlx::query_scalar::<_, String>(
+            "SELECT value FROM prompt_config WHERE key = 'system_role' AND is_active = true"
+        )
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "Você é um assistente IA especializado em categorização de tarefas.".to_string());
+
+        let task_description = sqlx::query_scalar::<_, String>(
+            "SELECT value FROM prompt_config WHERE key = 'task_description' AND is_active = true"
+        )
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "Analise a mensagem e extraia informações para criação de tarefa.".to_string());
+
+        let response_format = sqlx::query_scalar::<_, String>(
+            "SELECT value FROM prompt_config WHERE key = 'response_format' AND is_active = true"
+        )
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "JSON válido conforme especificação".to_string());
+
+        // Carregar categorias
+        let categories: Vec<String> = sqlx::query_scalar::<_, String>(
+            "SELECT name FROM categories WHERE is_active = true ORDER BY display_order"
+        )
+        .fetch_all(db)
+        .await
+        .unwrap_or_else(|_| vec!["Geral".to_string()]);
+
+        // Carregar tipos de atividade usando runtime query
+        let activity_types_rows = sqlx::query_as::<_, (String, Option<String>, String)>(
+            "SELECT name, description, clickup_field_id FROM activity_types WHERE is_active = true"
+        )
+        .fetch_all(db)
+        .await
+        .unwrap_or_default();
+
+        let activity_types: Vec<ActivityType> = activity_types_rows
+            .into_iter()
+            .map(|(name, description, clickup_field_id)| ActivityType {
+                name,
+                description: description.unwrap_or_default(),
+                id: clickup_field_id,
+            })
+            .collect();
+
+        // Carregar status usando runtime query
+        let status_rows = sqlx::query_as::<_, (String, String)>(
+            "SELECT name, clickup_field_id FROM status_options WHERE is_active = true ORDER BY display_order"
+        )
+        .fetch_all(db)
+        .await
+        .unwrap_or_default();
+
+        let status_options: Vec<StatusOption> = status_rows
+            .into_iter()
+            .map(|(name, clickup_field_id)| StatusOption {
+                name,
+                id: clickup_field_id,
+            })
+            .collect();
+
+        // Carregar mapeamentos de categorias usando runtime query
+        let category_rows = sqlx::query_as::<_, (String, String)>(
+            "SELECT name, clickup_field_id FROM categories WHERE is_active = true"
+        )
+        .fetch_all(db)
+        .await
+        .unwrap_or_default();
+
+        let mut category_mappings = HashMap::new();
+        for (name, clickup_field_id) in category_rows {
+            category_mappings.insert(
+                name.clone(),
+                CategoryMapping {
+                    id: clickup_field_id,
+                },
+            );
+        }
+
+        // Carregar subcategorias usando runtime query
+        let subcategory_rows = sqlx::query_as::<_, (String, String, String, Option<i32>)>(
+            r#"
+            SELECT c.name as category_name, s.name as sub_name, s.clickup_field_id, s.stars
+            FROM subcategories s
+            JOIN categories c ON s.category_id = c.id
+            WHERE s.is_active = true
+            ORDER BY c.display_order, s.display_order
+            "#
+        )
+        .fetch_all(db)
+        .await
+        .unwrap_or_default();
+
+        let mut subcategory_mappings: HashMap<String, Vec<SubcategoryMapping>> = HashMap::new();
+        for (category_name, sub_name, clickup_field_id, stars) in subcategory_rows {
+            let mapping = SubcategoryMapping {
+                name: sub_name,
+                id: clickup_field_id,
+                stars: stars.unwrap_or(1) as u8,
+            };
+
+            subcategory_mappings
+                .entry(category_name)
+                .or_insert_with(Vec::new)
+                .push(mapping);
+        }
+
+        // Carregar regras usando runtime query
+        let rules: Vec<String> = sqlx::query_scalar::<_, String>(
+            "SELECT rule_text FROM prompt_rules WHERE is_active = true ORDER BY display_order"
+        )
+        .fetch_all(db)
+        .await
+        .unwrap_or_default();
+
+        // Carregar field IDs usando runtime queries com fallbacks
+        let category_field_id = sqlx::query_scalar::<_, String>(
+            "SELECT value FROM prompt_config WHERE key = 'category_field_id' AND is_active = true"
+        )
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "default_category_field".to_string());
+
+        let subcategory_field_id = sqlx::query_scalar::<_, String>(
+            "SELECT value FROM prompt_config WHERE key = 'subcategory_field_id' AND is_active = true"
+        )
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "default_subcategory_field".to_string());
+
+        let activity_type_field_id = sqlx::query_scalar::<_, String>(
+            "SELECT value FROM prompt_config WHERE key = 'activity_type_field_id' AND is_active = true"
+        )
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "default_activity_field".to_string());
+
+        let status_field_id = sqlx::query_scalar::<_, String>(
+            "SELECT value FROM prompt_config WHERE key = 'status_field_id' AND is_active = true"
+        )
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "default_status_field".to_string());
+
+        Ok(AiPromptConfig {
+            system_role,
+            task_description,
+            categories,
+            activity_types,
+            status_options,
+            category_mappings,
+            subcategory_mappings,
+            subcategory_examples: HashMap::new(), // Pode ser populado depois se necessário
+            rules,
+            response_format,
+            field_ids: Some(FieldIds {
+                category_field_id,
+                subcategory_field_id,
+                activity_type_field_id,
+                status_field_id,
+            }),
+        })
+    }
+
+    /// Carrega a configuração do prompt de um arquivo YAML (fallback/legacy)
     pub fn from_file<P: AsRef<Path>>(path: P) -> AppResult<Self> {
         let contents = fs::read_to_string(path)
             .map_err(|e| AppError::ConfigError(format!("Failed to read prompt file: {}", e)))?;
-        
+
         let config: AiPromptConfig = serde_yaml::from_str(&contents)
             .map_err(|e| AppError::ConfigError(format!("Failed to parse YAML: {}", e)))?;
-        
+
         Ok(config)
     }
-    
-    /// Carrega a configuração padrão do diretório config
+
+    /// Carrega a configuração padrão do diretório config (fallback/legacy)
     pub fn load_default() -> AppResult<Self> {
         Self::from_file("config/ai_prompt.yaml")
     }

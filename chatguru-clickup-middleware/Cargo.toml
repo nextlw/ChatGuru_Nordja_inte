@@ -73,9 +73,12 @@ google-cloud-auth = "0.17"  # Para autenticação com Vertex AI
 google-cloud-token = "0.1"  # Token provider para Vertex AI
 google-cloud-secretmanager-v1 = "1.0"  # Secret Manager
 
-# Database (opcional)
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid"], optional = true }
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "sqlite", "macros"] }
+
+[dev-dependencies]
+httpmock = "0.7"
+tokio-test = "0.4"
 
 [features]
 default = []
-database = ["sqlx"]

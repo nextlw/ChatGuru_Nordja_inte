@@ -4,8 +4,14 @@ port = 8080
 
 [clickup]
 base_url = "https://api.clickup.com/api/v2"
-token = ""
+token = "pk_106092691_UC96HSQJH4ZUS3NJATYHIQ06BQQYM657"
 list_id = "901320655648"
+
+CLICKUP_AUTH_TOKEN = "106092691_5a823a64061246a2fb9498f37fecb77540478eb28423d778f37aabcafbd602b9"
+CLICKUP_CLIENT_SECRET = "BSRK67G72NT3A0MF5492QVU2WRVL149FQTVM5JNRPAJI7OQ1RWJSTD19S7KF68P2"
+CLICKUP_CLIENT_ID = "9XDEGHVIVGL55DTWH5OB4NAKILDLD1GK"
+CLICKUP_REDIRECT_URI = "https://chatguru-clickup-middleware-707444002434.southamerica-east1.run.app/auth/clickup/callback"
+
 
 [gcp]
 project_id = "buzzlightear"

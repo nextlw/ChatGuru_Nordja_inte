@@ -49,7 +49,7 @@ pub struct VertexAIService {
 impl VertexAIService {
     /// Cria nova instância do VertexAIService
     pub async fn new(project_id: String, topic_name: String) -> AppResult<Self> {
-        log_info("Initializing Vertex AI Service");
+        log_info(&format!("Initializing Vertex AI Service for project: {}", project_id));
 
         // Configurar cliente Pub/Sub
         let config = ClientConfig::default()
@@ -61,11 +61,16 @@ impl VertexAIService {
             .await
             .map_err(|e| AppError::InternalError(format!("Failed to create Pub/Sub client: {}", e)))?;
 
+        let location = std::env::var("VERTEX_AI_LOCATION")
+            .unwrap_or_else(|_| "us-central1".to_string());
+
+        log_info(&format!("Vertex AI Service configured for location: {}", location));
+
         Ok(Self {
             client: Client::new(),
             pubsub_client: Some(Arc::new(pubsub_client)),
             project_id,
-            location: "us-central1".to_string(), // Gemini Pro disponível
+            location,
             topic_name,
         })
     }
@@ -163,6 +168,26 @@ impl VertexAIService {
         } else {
             "unknown"
         }
+    }
+
+    /// Obtém o project_id configurado
+    pub fn project_id(&self) -> &str {
+        &self.project_id
+    }
+
+    /// Obtém a location configurada
+    pub fn location(&self) -> &str {
+        &self.location
+    }
+
+    /// Obtém o nome do tópico configurado
+    pub fn topic_name(&self) -> &str {
+        &self.topic_name
+    }
+
+    /// Obtém referência ao cliente HTTP
+    pub fn http_client(&self) -> &Client {
+        &self.client
     }
 }
 

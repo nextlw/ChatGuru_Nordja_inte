@@ -12,5 +12,9 @@ project_id = "buzzlightear"
 topic_name = "chatguru-events"
 subscription_name = "chatguru-events-subscription"
 
+[database]
+url = "postgresql://user:pass@/cloudsql/PROJECT:REGION:INSTANCE/dbname"
+max_connections = 10
+
 [chatguru]
 validate_signature = false

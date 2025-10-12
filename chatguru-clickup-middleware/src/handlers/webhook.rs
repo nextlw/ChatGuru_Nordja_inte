@@ -77,7 +77,7 @@ async fn send_raw_to_pubsub(state: &Arc<AppState>, raw_payload: &str) -> AppResu
     use google_cloud_pubsub::client::{Client, ClientConfig};
     use google_cloud_googleapis::pubsub::v1::PubsubMessage;
 
-    // Configurar cliente Pub/Sub
+    // Configurar cliente Pub/Sub (usa metadata server do GCP em Cloud Run)
     let config = ClientConfig::default().with_auth().await
         .map_err(|e| AppError::InternalError(format!("Failed to configure Pub/Sub client: {}", e)))?;
 

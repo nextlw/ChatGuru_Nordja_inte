@@ -8,12 +8,33 @@ pub enum AppError {
     ClickUpApi(String),
     PubSubError(String),
     ConfigError(String),
+    DatabaseError(String),
     JsonError(serde_json::Error),
     HttpError(reqwest::Error),
     ValidationError(String),
     InternalError(String),
     Timeout(String),
+    StructureNotFound(String),
 }
+
+#[derive(Debug)]
+pub enum SecretsError {
+    ClientNotAvailable,
+    AccessError(String),
+    DecodingError(String),
+}
+
+impl fmt::Display for SecretsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SecretsError::ClientNotAvailable => write!(f, "Secret Manager client not available"),
+            SecretsError::AccessError(msg) => write!(f, "Secret access error: {}", msg),
+            SecretsError::DecodingError(msg) => write!(f, "Secret decoding error: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for SecretsError {}
 
 impl fmt::Display for AppError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -21,11 +42,13 @@ impl fmt::Display for AppError {
             AppError::ClickUpApi(msg) => write!(f, "ClickUp API error: {}", msg),
             AppError::PubSubError(msg) => write!(f, "Pub/Sub error: {}", msg),
             AppError::ConfigError(msg) => write!(f, "Configuration error: {}", msg),
+            AppError::DatabaseError(msg) => write!(f, "Database error: {}", msg),
             AppError::JsonError(err) => write!(f, "JSON error: {}", err),
             AppError::HttpError(err) => write!(f, "HTTP error: {}", err),
             AppError::ValidationError(msg) => write!(f, "Validation error: {}", msg),
             AppError::InternalError(msg) => write!(f, "Internal error: {}", msg),
             AppError::Timeout(msg) => write!(f, "Timeout error: {}", msg),
+            AppError::StructureNotFound(msg) => write!(f, "Structure not found: {}", msg),
         }
     }
 }
@@ -44,17 +67,25 @@ impl From<reqwest::Error> for AppError {
     }
 }
 
+impl From<sqlx::Error> for AppError {
+    fn from(err: sqlx::Error) -> Self {
+        AppError::ConfigError(format!("Database error: {}", err))
+    }
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, error_message) = match self {
             AppError::ClickUpApi(msg) => (StatusCode::BAD_GATEWAY, msg),
             AppError::PubSubError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
             AppError::ConfigError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
+            AppError::DatabaseError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
             AppError::JsonError(err) => (StatusCode::BAD_REQUEST, err.to_string()),
             AppError::HttpError(err) => (StatusCode::BAD_GATEWAY, err.to_string()),
             AppError::ValidationError(msg) => (StatusCode::BAD_REQUEST, msg),
             AppError::InternalError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
             AppError::Timeout(msg) => (StatusCode::GATEWAY_TIMEOUT, msg),
+            AppError::StructureNotFound(msg) => (StatusCode::NOT_FOUND, msg),
         };
 
         let body = json!({

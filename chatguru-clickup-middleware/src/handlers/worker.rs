@@ -10,6 +10,7 @@
 /// Headers esperados:
 /// - X-CloudTasks-TaskName: Nome da task
 /// - X-CloudTasks-QueueName: Nome da fila
+/// - X-CloudTasks-TaskRetryCount: Número de tentativas (0-indexed)
 
 use axum::{
     extract::{Request, State},
@@ -28,17 +29,44 @@ use chatguru_clickup_middleware::utils::logging::*;
 use chatguru_clickup_middleware::AppState;
 use chatguru_clickup_middleware::services::openai::OpenAIService;
 use chatguru_clickup_middleware::services::chatguru::ChatGuruApiService;
+// use crate::services::{ClickUpService, VertexAIService};
+
+// Configuração de retry
+const MAX_RETRY_ATTEMPTS: u32 = 3;
 
 /// Handler do worker
 /// Retorna 200 OK se processado com sucesso
 /// Retorna 4xx se erro não recuperável (não faz retry)
-/// Retorna 5xx se erro recuperável (Pub/Sub faz retry)
+/// Retorna 5xx se erro recuperável (Pub/Sub faz retry até MAX_RETRY_ATTEMPTS)
 pub async fn handle_worker(
     State(state): State<Arc<AppState>>,
     request: Request<Body>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let start_time = Instant::now();
     log_request_received("/worker/process", "POST");
+
+    // Extrair número de tentativas do header do Pub/Sub
+    // Pub/Sub Push usa "googclient_deliveryattempt" ou "x-goog-delivery-attempt"
+    let retry_count = request
+        .headers()
+        .get("googclient_deliveryattempt")
+        .or_else(|| request.headers().get("x-goog-delivery-attempt"))
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(1); // Pub/Sub starts at 1, not 0
+
+    log_info(&format!("🔄 Tentativa {} de {} (header: googclient_deliveryattempt)", retry_count, MAX_RETRY_ATTEMPTS));
+
+    // Se excedeu o limite, retornar 200 para evitar loop infinito
+    if retry_count > MAX_RETRY_ATTEMPTS {
+        log_error(&format!("❌ Limite de tentativas excedido ({}/{}), descartando mensagem",
+            retry_count, MAX_RETRY_ATTEMPTS));
+        return Ok(Json(json!({
+            "status": "discarded",
+            "reason": "Max retry attempts exceeded",
+            "retry_count": retry_count
+        })));
+    }
 
     // Extrair body
     let body_bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
@@ -456,8 +484,100 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
     if is_activity {
         log_info(&format!("✅ Atividade identificada: {}", classification.reason));
 
-        // Criar tarefa no ClickUp usando process_payload do serviço ClickUp
-        let task_result = state.clickup.process_payload_with_ai(payload, Some(&classification)).await?;
+        // Extrair dados para a criação dinâmica
+        // ESTRUTURA CORRETA (confirmada nos logs):
+        // - Info_1: Nome do cliente/empresa (ex: "Nexcode")
+        // - Info_2: Nome do solicitante (ex: "William") - pessoa que fez o pedido
+        // - responsavel_nome: Atendente responsável (deveria vir do ChatGuru, mas está vazio)
+
+        let client_name = extract_info_1_from_payload(payload)
+            .unwrap_or_else(|| extract_nome_from_payload(payload));
+
+        // Tentar obter atendente do webhook (responsavel_nome)
+        let mut attendant_opt = extract_responsavel_nome_from_payload(payload)
+            .and_then(|s| if s.is_empty() { None } else { Some(s) });
+
+        // Se responsavel_nome está vazio, buscar no banco qual atendente está mapeado para este cliente
+        if attendant_opt.is_none() {
+            log_warning(&format!("⚠️ responsavel_nome vazio - buscando atendente mapeado para cliente '{}'", client_name));
+
+            // Usar EstruturaService para buscar atendente se disponível
+            if let Some(ref estrutura) = state.clickup.estrutura_service {
+                match estrutura.find_attendant_for_client(&client_name).await {
+                    Ok(Some(att)) => attendant_opt = Some(att),
+                    Ok(None) => log_info("ℹ️ Nenhum atendente mapeado no banco para este cliente"),
+                    Err(e) => log_warning(&format!("⚠️ Erro ao buscar atendente: {}", e)),
+                }
+            }
+        }
+
+        // Se não encontrou atendente, usar string vazia para acionar fallback "Clientes Inativos"
+        let attendant = attendant_opt.unwrap_or_else(|| {
+            log_warning("⚠️ Nenhum atendente encontrado - tarefa será criada em 'Clientes Inativos'");
+            String::new()  // String vazia aciona fallback para "Clientes Inativos"
+        });
+
+        log_info(&format!("🔍 Dynamic resolution: client='{}', attendant='{}'",
+            client_name, if attendant.is_empty() { "<sem atendente - Clientes Inativos>" } else { &attendant }));
+        log_info(&format!("📋 Debug campos: Info_1={:?}, Info_2={:?}, responsavel_nome={:?}",
+            extract_info_1_from_payload(payload),
+            extract_info_2_from_payload(payload),
+            extract_responsavel_nome_from_payload(payload)
+        ));
+
+        // Criar task_data usando o método correto que inclui o campo "name"
+        let task_data = payload.to_clickup_task_data_with_ai(Some(&classification));
+
+        // Criar tarefa no ClickUp - versão dinâmica ou legacy
+        // Verificar se sistema dinâmico está habilitado (leitura do banco)
+        let is_dynamic_enabled = state.config_db.is_dynamic_structure_enabled().await;
+        log_info(&format!("🔧 Sistema dinâmico habilitado: {}", is_dynamic_enabled));
+
+        let task_result = if is_dynamic_enabled {
+            match state.clickup.create_task_dynamic(&task_data, &client_name, &attendant).await {
+                Ok(result) => {
+                    log_info(&format!("📋 Tarefa criada dinamicamente: {}", result["id"]));
+                    result
+                }
+                Err(AppError::StructureNotFound(msg)) => {
+                    log_warning(&format!("⚠️ Estrutura não encontrada: {}", msg));
+
+                    // Enviar anotação ao ChatGuru pedindo para criar estrutura
+                    let annotation = format!(
+                        "⚠️ Estrutura não encontrada no sistema\n\n\
+                        📝 Cliente: {}\n\
+                        👤 Responsável: {}\n\n\
+                        Por favor, crie a pasta correspondente no ClickUp e adicione o mapeamento no banco de dados.\n\n\
+                        🔗 Acesse: https://app.clickup.com",
+                        client_name, attendant
+                    );
+
+                    if let Err(e) = send_annotation_to_chatguru(&state, payload, &annotation).await {
+                        log_error(&format!("❌ Falha ao enviar anotação de estrutura não encontrada: {}", e));
+                    }
+
+                    log_info("✅ Anotação de estrutura não encontrada enviada ao ChatGuru");
+
+                    return Ok(json!({
+                        "status": "structure_not_found",
+                        "is_activity": true,
+                        "client": client_name,
+                        "attendant": attendant,
+                        "annotation": annotation
+                    }));
+                }
+                Err(e) => {
+                    log_error(&format!("❌ Erro ao criar tarefa dinâmica: {}", e));
+                    return Err(e);
+                }
+            }
+        } else {
+            let result = state.clickup
+                .process_payload_with_ai(payload, Some(&classification))
+                .await?;
+            log_info(&format!("📋 Tarefa criada (legacy): {}", result["id"]));
+            result
+        };
 
         // Montar anotação com informações da task
         let task_id = task_result.get("id").and_then(|v| v.as_str()).unwrap_or("N/A");
@@ -642,6 +762,40 @@ fn extract_chat_id_from_payload(payload: &WebhookPayload) -> Option<String> {
         WebhookPayload::ChatGuru(p) => p.chat_id.clone(),
         WebhookPayload::EventType(_) => None,  // EventType não tem chat_id direto
         WebhookPayload::Generic(_) => None,
+    }
+}
+
+/// Extrai Info_1 (cliente) dos campos personalizados
+fn extract_info_1_from_payload(payload: &WebhookPayload) -> Option<String> {
+    match payload {
+        WebhookPayload::ChatGuru(p) => {
+            p.campos_personalizados.get("Info_1")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        },
+        _ => None,
+    }
+}
+
+/// Extrai Info_2 (cliente) dos campos personalizados
+fn extract_info_2_from_payload(payload: &WebhookPayload) -> Option<String> {
+    match payload {
+        WebhookPayload::ChatGuru(p) => {
+            p.campos_personalizados.get("Info_2")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        },
+        _ => None,
+    }
+}
+
+/// Extrai responsavel_nome (atendente) do payload do ChatGuru
+fn extract_responsavel_nome_from_payload(payload: &WebhookPayload) -> Option<String> {
+    match payload {
+        WebhookPayload::ChatGuru(p) => {
+            p.responsavel_nome.clone()
+        },
+        _ => None,
     }
 }
 

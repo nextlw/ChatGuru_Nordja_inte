@@ -1,386 +1,248 @@
-# ChatGuru-ClickUp Middleware (Event-Driven)
+# ChatGuru-ClickUp Middleware
 
-Middleware para integração entre ChatGuru e ClickUp usando arquitetura event-driven com Google Cloud Pub/Sub.
+Middleware Rust para integração entre ChatGuru e ClickUp com arquitetura event-driven, classificação IA e estrutura dinâmica.
 
 ## 🏗️ Arquitetura
 
 ```
-ChatGuru → Webhook → Pub/Sub (RAW) → Worker → OpenAI → ClickUp
-            ↓                         ↓
-         ACK <100ms            Processa assíncrono
+ChatGuru → Webhook → Pub/Sub → Worker → OpenAI → ClickUp
+            ↓                     ↓                  ↓
+         ACK <100ms          Classify          Create Task
+                                ↓
+                         Cloud SQL Cache
+                      (Cliente → Folder/List)
 ```
 
-### Componentes
+## ✨ Features
 
-**Handlers:**
-- `webhook.rs` - Recebe payload e publica no Pub/Sub (ACK imediato)
-- `worker.rs` - Consome Pub/Sub e processa com OpenAI
-- `health.rs` - Health checks
-- `clickup.rs` - Endpoints ClickUp (debug)
+### Core
+- Event-driven com Pub/Sub (ACK < 100ms)
+- Classificação de atividades com OpenAI
+- Processamento de mídia com Vertex AI
+- Estrutura dinâmica (Cliente + Atendente → Pasta/Lista)
+- Cache em 3 camadas (memória + DB + API)
+- OAuth2 para criar folders no ClickUp
 
-**Services:**
-- `openai.rs` - Classificação de atividades com OpenAI
-- `clickup.rs` - Integração com ClickUp API
-- `chatguru.rs` - Envio de anotações
-- `secrets.rs` - Gerenciamento de API keys (Secret Manager)
-- `prompts.rs` - Configuração de prompts da IA
-
-**Models:**
-- `payload.rs` - Estruturas de dados (ChatGuru, ClickUp)
+### Estrutura Dinâmica
+- Resolução dinâmica por Cliente + Atendente
+- Criação automática de listas mensais
+- Suporte a clientes inativos com listas individuais
+- TTL de 1 hora para cache em memória
 
 ## 🚀 Deploy
 
-### Build da imagem Docker
+### Build & Deploy
 
 ```bash
-gcloud builds submit \
-  --region=southamerica-east1 \
-  --tag gcr.io/buzzlightear/chatguru-clickup-middleware:latest \
-  --timeout=30m
-```
+# Build da imagem
+gcloud builds submit . \
+  --tag gcr.io/buzzlightear/chatguru-clickup-middleware:latest
 
-### Deploy no Cloud Run
-
-```bash
+# Deploy no Cloud Run
 gcloud run deploy chatguru-clickup-middleware \
   --image gcr.io/buzzlightear/chatguru-clickup-middleware:latest \
   --region southamerica-east1 \
-  --platform managed \
   --allow-unauthenticated \
-  --set-env-vars "RUST_LOG=info" \
-  --min-instances 1 \
-  --max-instances 10
+  --set-env-vars="RUST_LOG=info"
 ```
 
-### Criar tópico Pub/Sub
+### Configurar OAuth2
 
 ```bash
-gcloud pubsub topics create chatguru-webhook-raw \
-  --project buzzlightear
+# 1. Acessar endpoint OAuth
+curl https://your-service.run.app/auth/clickup
 
-gcloud pubsub subscriptions create chatguru-webhook-subscription \
-  --topic chatguru-webhook-raw \
-  --ack-deadline 60
+# 2. Autorizar no ClickUp
+
+# 3. Copiar token e salvar
+echo "YOUR_TOKEN" | gcloud secrets create clickup-oauth-token --data-file=-
 ```
 
-### Configurar Cloud Tasks
+## 📊 Endpoints
+
+### Webhook & Worker
+- `POST /webhooks/chatguru` - Webhook ChatGuru
+- `POST /worker/process` - Worker Pub/Sub
+
+### OAuth2
+- `GET /auth/clickup` - Inicia OAuth2
+- `GET /auth/clickup/callback` - Callback OAuth2
+
+### Health
+- `GET /health` - Liveness
+- `GET /ready` - Readiness
+- `GET /status` - Status
+
+### ClickUp (Debug)
+- `GET /clickup/tasks` - Lista tarefas
+- `GET /clickup/list` - Info lista
+- `GET /clickup/test` - Testa conexão
+
+## 🗄️ Database (Cloud SQL)
+
+### `folder_mapping`
+Mapeia Cliente + Atendente → Pasta ClickUp
+
+```sql
+CREATE TABLE folder_mapping (
+    id SERIAL PRIMARY KEY,
+    client_name VARCHAR(255) NOT NULL,
+    attendant_name VARCHAR(255) NOT NULL,
+    folder_id VARCHAR(255) NOT NULL,
+    folder_path VARCHAR(500) NOT NULL,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+### `list_cache`
+Cache de listas mensais
+
+```sql
+CREATE TABLE list_cache (
+    id SERIAL PRIMARY KEY,
+    folder_id VARCHAR(255) NOT NULL,
+    year_month VARCHAR(7) NOT NULL,
+    list_name VARCHAR(255) NOT NULL,
+    list_id VARCHAR(255) NOT NULL,
+    is_active BOOLEAN DEFAULT true,
+    last_verified TIMESTAMP DEFAULT NOW(),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+## 🔧 Configuração
+
+### Environment Variables
 
 ```bash
-gcloud tasks queues create chatguru-worker-queue \
-  --location southamerica-east1
+RUST_LOG=info
+RUST_ENV=production
+GCP_PROJECT_ID=buzzlightear
+DATABASE_URL=postgres://...
+
+# OAuth2
+CLICKUP_CLIENT_ID=...
+CLICKUP_CLIENT_SECRET=...
+CLICKUP_REDIRECT_URI=https://your-service.run.app/auth/clickup/callback
+```
+
+### Secrets (Secret Manager)
+
+```bash
+# OpenAI
+gcloud secrets create openai-api-key --data-file=-
+
+# ClickUp OAuth Token
+gcloud secrets create clickup-oauth-token --data-file=-
+
+# ChatGuru
+gcloud secrets create chatguru-api-token --data-file=-
 ```
 
 ## 🧪 Testes
 
-### Teste End-to-End (E2E)
-
-O teste E2E valida todo o fluxo com observabilidade completa:
+### E2E Test
 
 ```bash
-# Local (desenvolvimento)
-./test-e2e.js
-
-# Produção (Cloud Run)
-WEBHOOK_URL=https://your-service.run.app \
-WORKER_URL=https://your-service.run.app \
 ./test-e2e.js
 ```
 
-**Output do teste E2E:**
-
-```
-━━━ ETAPA 1: Enviar payload para Webhook ━━━
-ℹ Enviando payload ChatGuru para /webhooks/chatguru
-Payload de entrada:
-{
-  "nome": "Cliente Teste E2E",
-  "texto_mensagem": "Preciso implementar funcionalidade...",
-  ...
-}
-⏱  Tempo de resposta do webhook: 45ms
-✓ Webhook ACK recebido: {"message":"Success"}
-✓ ✨ ACK em 45ms - EXCELENTE (<100ms target)
-
-━━━ ETAPA 2: Pub/Sub recebe payload RAW ━━━
-...
-
-━━━ ETAPA 3: Worker processa mensagem do Pub/Sub ━━━
-⏱  Tempo de processamento do worker: 2500ms
-✓ Worker processou mensagem com sucesso
-
-━━━ ETAPA 4: OpenAI classifica a atividade ━━━
-🤖 Prompt OpenAI:
-System: Você é um assistente especializado...
-User: Campanha: WhatsApp...
-
-━━━ ETAPA 5: ClickUp Task criada ━━━
-...
-
-━━━ RESUMO DO TESTE E2E ━━━
-Etapas completadas: 6/6
-✓ Etapa 1: Webhook (45ms)
-✓ Etapa 2: Pub/Sub
-✓ Etapa 3: Worker (2500ms)
-✓ Etapa 4: OpenAI
-✓ Etapa 5: ClickUp
-✓ Etapa 6: ChatGuru
-
-⏱  Tempo total do teste: 3200ms
-
-✨ TESTE E2E PASSOU COM SUCESSO! ✨
-```
-
-### Teste de Health Check
-
-```bash
-curl https://your-service.run.app/health
-curl https://your-service.run.app/status
-```
-
-### Teste manual do Webhook
+### Manual Webhook Test
 
 ```bash
 curl -X POST https://your-service.run.app/webhooks/chatguru \
   -H "Content-Type: application/json" \
   -d '{
-    "nome": "Teste Manual",
-    "texto_mensagem": "Testar integração",
+    "nome": "Cliente Teste",
+    "texto_mensagem": "Teste de mensagem",
     "celular": "5511999999999",
-    "chat_id": "test-123"
+    "campos_personalizados": {
+      "Info_1": "Nexcode",
+      "Info_2": "William"
+    }
   }'
 ```
 
-## 📊 Observabilidade
+## 📈 Performance
 
-### Logs estruturados
+- **Webhook ACK:** < 100ms
+- **Worker:** ~2-5s (OpenAI + ClickUp)
+- **Cache Hit:** ~80%
+- **Volume:** 1.000-1.200 tarefas/mês
 
-Todos os logs são estruturados para fácil análise:
+## 🔍 Troubleshooting
 
-```
-[INFO] 📥 Webhook payload recebido (1234 bytes)
-[INFO] ✅ Payload enviado para Pub/Sub com sucesso
-[INFO] 💬 Processando mensagem de Cliente X: mensagem...
-[INFO] 🤖 Classificando com OpenAI diretamente...
-[INFO] ✅ Atividade identificada: Nova funcionalidade...
-[INFO] ✅ Tarefa criada no ClickUp: TASK-123
-[INFO] 📝 Anotação enviada ao ChatGuru
-```
-
-### Métricas importantes
-
-- **Webhook latency:** Target < 100ms
-- **Worker processing:** Variável (OpenAI + ClickUp)
-- **OpenAI latency:** ~2-5s
-- **ClickUp API:** ~500ms
-
-### Cloud Monitoring
-
-Queries úteis:
-
-```
-# Webhook latency
-resource.type="cloud_run_revision"
-resource.labels.service_name="chatguru-clickup-middleware"
-httpRequest.requestUrl=~"webhooks/chatguru"
-
-# Worker errors
-severity>=ERROR
-resource.type="cloud_run_revision"
-```
-
-## 🔧 Configuração
-
-### Variáveis de ambiente
+### Logs
 
 ```bash
-RUST_LOG=info                    # Log level
-CLICKUP_API_TOKEN=pk_xxx         # ClickUp API token
-CLICKUP_LIST_ID=901300373349     # ClickUp list ID
+gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=chatguru-clickup-middleware" \
+  --limit=50 --project=buzzlightear
 ```
 
-### Arquivo config/default.toml
-
-```toml
-[server]
-host = "0.0.0.0"
-port = 8080
-
-[clickup]
-base_url = "https://api.clickup.com/api/v2"
-list_id = "901300373349"
-
-[gcp]
-project_id = "buzzlightear"
-pubsub_topic = "chatguru-webhook-raw"
-
-[chatguru]
-api_token = "YOUR_TOKEN"
-api_endpoint = "https://s15.chatguru.app/api/v1"
-account_id = "625584ce6fdcb7bda7d94aa8"
-```
-
-## 🔐 Secrets
-
-As API keys são gerenciadas pelo Google Secret Manager:
+### Pub/Sub
 
 ```bash
-# OpenAI API Key
-gcloud secrets create openai-api-key \
-  --data-file=- <<< "sk-proj-xxx"
-
-# ClickUp API Token
-gcloud secrets create clickup-api-token \
-  --data-file=- <<< "pk_xxx"
+gcloud pubsub subscriptions pull chatguru-webhook-subscription --limit 10 --auto-ack
 ```
 
-## 📈 Custos
+### Database
 
-Para volume atual (~1.200 mensagens/mês):
+```bash
+gcloud sql connect chatguru-middleware-db --user=postgres
 
-- **Cloud Run:** ~$5/mês (min-instances=0, média de requests)
-- **Pub/Sub:** $0 (dentro do free tier de 10GB/mês)
-- **Cloud Tasks:** $0 (dentro do free tier de 1M operações/mês)
-- **Secret Manager:** ~$0.06/mês (6 secrets × $0.01)
+# Ver mapeamentos
+SELECT * FROM folder_mapping WHERE is_active = true;
 
-**Total estimado: ~$5-10/mês**
+# Ver cache
+SELECT * FROM list_cache WHERE is_active = true ORDER BY last_verified DESC;
+```
 
 ## 🛠️ Desenvolvimento
 
-### Compilar localmente
-
 ```bash
+# Build
 cargo build --release
-```
 
-### Executar localmente
-
-```bash
+# Run
 cargo run
-```
 
-### Verificar código
-
-```bash
+# Format
 cargo fmt
+
+# Lint
 cargo clippy
 ```
 
-## 📚 Endpoints
+## 📁 Estrutura
 
-### Webhook
-- `POST /webhooks/chatguru` - Recebe payload do ChatGuru
-
-### Worker
-- `POST /worker/process` - Processa mensagem do Pub/Sub
-
-### Health Checks
-- `GET /health` - Liveness probe
-- `GET /ready` - Readiness probe
-- `GET /status` - Status detalhado
-
-### ClickUp (Debug)
-- `GET /clickup/tasks` - Lista tarefas
-- `GET /clickup/list` - Info da lista
-- `GET /clickup/test` - Testa conexão
-
-## 🐛 Troubleshooting
-
-### Webhook não responde
-
-```bash
-# Verificar logs
-gcloud run services logs read chatguru-clickup-middleware \
-  --region southamerica-east1 \
-  --limit 50
-
-# Verificar se está rodando
-curl https://your-service.run.app/health
+```
+src/
+├── main.rs              # Entry point
+├── handlers/            # HTTP handlers
+│   ├── webhook.rs       # ChatGuru webhook
+│   ├── worker.rs        # Pub/Sub worker
+│   ├── auth.rs          # OAuth2
+│   ├── health.rs        # Health checks
+│   └── clickup.rs       # ClickUp debug
+├── services/            # Business logic
+│   ├── clickup.rs       # ClickUp API
+│   ├── clickup_oauth.rs # OAuth2
+│   ├── estrutura.rs     # Dynamic structure
+│   ├── openai.rs        # OpenAI
+│   ├── chatguru.rs      # ChatGuru API
+│   ├── secrets.rs       # Secret Manager
+│   └── prompts.rs       # AI prompts
+├── models/              # Data structures
+│   └── payload.rs
+├── config/              # Configuration
+│   └── mod.rs
+└── utils/               # Utilities
+    ├── error.rs
+    └── logging.rs
 ```
 
-### Worker não processa mensagens
+## 📝 Licença
 
-```bash
-# Verificar subscription
-gcloud pubsub subscriptions describe chatguru-webhook-subscription
-
-# Ver mensagens na fila
-gcloud pubsub subscriptions pull chatguru-webhook-subscription \
-  --limit 10 \
-  --auto-ack
-```
-
-### OpenAI timeout
-
-- Verificar se a API key está configurada
-- Verificar quota da OpenAI
-- Ver logs: `RUST_LOG=debug cargo run`
-
-### ClickUp API error
-
-- Verificar token no Secret Manager
-- Verificar list_id correto
-- Testar endpoint: `curl https://your-service.run.app/clickup/test`
-
-## 📋 Campos Personalizados (Custom Fields)
-
-O middleware suporta campos personalizados na criação de tarefas. Para configurar:
-
-### 1. Descobrir IDs dos Campos
-```bash
-# Via endpoint do middleware (mais fácil)
-curl http://localhost:8080/clickup/fields
-
-# Via API REST direta
-curl -H "Authorization: $CLICKUP_API_TOKEN" \
-  https://api.clickup.com/api/v2/list/901300373349/field
-
-# Via script automatizado
-cd scripts && node discover_custom_fields.js
-```
-
-### 2. Configurar Campos no Código
-Edite `src/handlers/worker.rs` na função `prepare_custom_fields()`:
-- Descomente os campos necessários
-- Substitua os IDs pelos valores reais descobertos
-- Configure valores dinâmicos baseados nos dados recebidos
-
-### 3. Tipos de Campo Suportados
-- **text**: Campos de texto simples
-- **number**: Campos numéricos
-- **dropdown**: Seleção (valores devem existir nas opções)
-- **date**: Data/hora (timestamp em milliseconds)
-- **email**: Campos de email
-- **phone**: Campos de telefone
-
-### 4. Exemplo de Implementação
-```rust
-// Campo: Nome do Cliente (text)
-custom_fields.push(json!({
-    "id": "12345678-1234-1234-1234-123456789012",
-    "value": nome
-}));
-
-// Campo: Categoria (dropdown)
-if let Some(category) = &classification.category {
-    custom_fields.push(json!({
-        "id": "87654321-4321-4321-4321-210987654321",
-        "value": category // Deve existir nas opções
-    }));
-}
-```
-
-### 5. Campos Disponíveis para Configuração
-- **Origem da campanha** (WhatsApp)
-- **Nome do cliente** (extraído do payload)
-- **Telefone** (extraído do payload)
-- **Categoria** (classificação IA)
-- **Score de confiança** (classificação IA)
-- **Data de criação** (timestamp automático)
-- **Prioridade** (configurável)
-- **Status da campanha** (configurável)
-
-**Importante**: Campos dropdown devem usar valores exatos que existem nas opções configuradas no ClickUp.
-
-## � Licença
-
-Proprietary - Nordja/Buzzlightear
+Proprietary - Nordja Company
