@@ -485,12 +485,15 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
         log_info(&format!("✅ Atividade identificada: {}", classification.reason));
 
         // Extrair dados para a criação dinâmica
-        // ESTRUTURA CORRETA (confirmada nos logs):
-        // - Info_1: Nome do cliente/empresa (ex: "Nexcode")
-        // - Info_2: Nome do solicitante (ex: "William") - pessoa que fez o pedido
-        // - responsavel_nome: Atendente responsável (deveria vir do ChatGuru, mas está vazio)
+        // LÓGICA FINAL CORRETA:
+        // - responsavel_nome: Nome do atendente (determina o SPACE - ex: "Anne" → Space "Anne Souza")
+        // - Info_2: Nome do solicitante → Campo personalizado "Solicitante" (não determina estrutura)
+        // - Info_1: Nome da empresa cliente → Campo personalizado "Conta cliente" (não determina estrutura)
 
-        let client_name = extract_info_1_from_payload(payload)
+        let attendant_name = extract_responsavel_nome_from_payload(payload)
+            .unwrap_or_else(|| extract_info_1_from_payload(payload).unwrap_or_default());
+
+        let client_name = extract_info_2_from_payload(payload)
             .unwrap_or_else(|| extract_nome_from_payload(payload));
 
         // Tentar obter atendente do webhook (responsavel_nome)
@@ -517,12 +520,13 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
             String::new()  // String vazia aciona fallback para "Clientes Inativos"
         });
 
-        log_info(&format!("🔍 Dynamic resolution: client='{}', attendant='{}'",
-            client_name, if attendant.is_empty() { "<sem atendente - Clientes Inativos>" } else { &attendant }));
-        log_info(&format!("📋 Debug campos: Info_1={:?}, Info_2={:?}, responsavel_nome={:?}",
-            extract_info_1_from_payload(payload),
+        log_info(&format!("🔍 Dynamic resolution (LÓGICA FINAL CORRETA): attendant='{}' (responsavel_nome -> Space), client='{}' (apenas para resolução)",
+            if attendant.is_empty() { "<sem atendente - Clientes Inativos>" } else { &attendant },
+            client_name));
+        log_info(&format!("📋 Debug campos: responsavel_nome (Space)={:?}, Info_2 (campo personalizado)={:?}, Info_1 (campo personalizado)={:?}",
+            extract_responsavel_nome_from_payload(payload),
             extract_info_2_from_payload(payload),
-            extract_responsavel_nome_from_payload(payload)
+            extract_info_1_from_payload(payload)
         ));
 
         // Criar task_data usando o método correto que inclui o campo "name"
@@ -534,7 +538,7 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
         log_info(&format!("🔧 Sistema dinâmico habilitado: {}", is_dynamic_enabled));
 
         let task_result = if is_dynamic_enabled {
-            match state.clickup.create_task_dynamic(&task_data, &client_name, &attendant).await {
+            match state.clickup.create_task_dynamic(&task_data, &attendant_name, &client_name).await {
                 Ok(result) => {
                     log_info(&format!("📋 Tarefa criada dinamicamente: {}", result["id"]));
                     result
@@ -765,7 +769,10 @@ fn extract_chat_id_from_payload(payload: &WebhookPayload) -> Option<String> {
     }
 }
 
-/// Extrai Info_1 (cliente) dos campos personalizados
+/// Extrai Info_1 (EMPRESA CLIENTE - apenas para campo personalizado) dos campos personalizados
+/// Info_1 = dados.campos_personalizados.Info_1
+/// Usado APENAS para preencher o campo personalizado "Conta cliente"
+/// NÃO é usado para determinar Space ou Folder
 fn extract_info_1_from_payload(payload: &WebhookPayload) -> Option<String> {
     match payload {
         WebhookPayload::ChatGuru(p) => {
@@ -777,7 +784,10 @@ fn extract_info_1_from_payload(payload: &WebhookPayload) -> Option<String> {
     }
 }
 
-/// Extrai Info_2 (cliente) dos campos personalizados
+/// Extrai Info_2 (NOME DO SOLICITANTE - campo personalizado) dos campos personalizados
+/// Info_2 = dados.campos_personalizados.Info_2
+/// Usado para preencher o campo personalizado "Solicitante" (não determina estrutura)
+/// Exemplo: "João Silva" → Campo personalizado "Solicitante"
 fn extract_info_2_from_payload(payload: &WebhookPayload) -> Option<String> {
     match payload {
         WebhookPayload::ChatGuru(p) => {
@@ -789,7 +799,10 @@ fn extract_info_2_from_payload(payload: &WebhookPayload) -> Option<String> {
     }
 }
 
-/// Extrai responsavel_nome (atendente) do payload do ChatGuru
+/// Extrai responsavel_nome (ATENDENTE - determina SPACE) do payload do ChatGuru
+/// responsavel_nome = dados.responsavel_nome
+/// Usado para determinar qual Space usar (Anne Souza, Gabriel Moreno, William Duarte, etc.)
+/// Exemplo: "anne" → Space "Anne Souza"
 fn extract_responsavel_nome_from_payload(payload: &WebhookPayload) -> Option<String> {
     match payload {
         WebhookPayload::ChatGuru(p) => {

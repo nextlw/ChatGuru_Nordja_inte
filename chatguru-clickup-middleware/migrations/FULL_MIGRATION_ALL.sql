@@ -429,5 +429,50 @@ INSERT INTO prompt_config (key, value, config_type) VALUES
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW();
 
 -- ==============================================================================
+-- MIGRATION 008: CORREÇÃO DA LÓGICA DE MAPEAMENTO Info_1 vs Info_2
+-- Data: 2025-10-12
+-- Descrição: Corrige a interpretação dos campos Info_1 e Info_2 do ChatGuru
+-- LÓGICA CORRIGIDA: Info_1 = Responsável (Space), Info_2 = Cliente (Folder)
+-- ==============================================================================
+
+-- Limpar dados existentes que podem estar com lógica invertida
+TRUNCATE TABLE client_mappings RESTART IDENTITY CASCADE;
+TRUNCATE TABLE attendant_mappings RESTART IDENTITY CASCADE;
+
+-- LÓGICA CORRIGIDA: Info_1 determina o SPACE (responsável/atendente)
+-- Recriar attendant_mappings com lógica correta: Info_1 → SPACE
+INSERT INTO attendant_mappings (attendant_key, attendant_full_name, attendant_aliases, space_id, is_active) VALUES
+('anne', 'Anne Souza', ARRAY['anne', 'Anne', 'Anne S', 'Anne Souza'], '90130178602', true),
+('gabriel', 'Gabriel Moreno', ARRAY['gabriel', 'Gabriel', 'Gabriel M', 'Gabriel Moreno'], '90130178634', true),
+('william', 'William Duarte', ARRAY['william', 'William', 'William D', 'William Duarte'], '90130178610', true)
+ON CONFLICT (attendant_key) DO UPDATE SET
+    attendant_full_name = EXCLUDED.attendant_full_name,
+    attendant_aliases = EXCLUDED.attendant_aliases,
+    space_id = EXCLUDED.space_id,
+    is_active = EXCLUDED.is_active,
+    updated_at = NOW();
+
+-- LÓGICA CORRIGIDA: Info_2 determina a FOLDER (cliente)
+-- Recriar client_mappings com lógica correta: Info_2 → FOLDER
+INSERT INTO client_mappings (client_key, client_full_name, client_aliases, folder_path, folder_id, space_id, is_active) VALUES
+('nexcode', 'Nexcode', ARRAY['nexcode', 'Nexcode', 'NEXCODE'], 'Anne Souza / Nexcode', '901320655648', '90130178602', true),
+('carolina', 'Carolina Torres', ARRAY['carolina', 'Carolina', 'Carolina T', 'Carolina Torres'], 'Gabriel Moreno / Carolina Torres', '901300373349', '90130178634', true)
+ON CONFLICT (client_key) DO UPDATE SET
+    client_full_name = EXCLUDED.client_full_name,
+    client_aliases = EXCLUDED.client_aliases,
+    folder_path = EXCLUDED.folder_path,
+    folder_id = EXCLUDED.folder_id,
+    space_id = EXCLUDED.space_id,
+    is_active = EXCLUDED.is_active,
+    updated_at = NOW();
+
+-- Registrar migração 008
+INSERT INTO prompt_config (key, value, config_type) VALUES
+('migration_008_applied', NOW()::text, 'text'),
+('logic_correction_info1_space', 'Info_1 (responsável) determina SPACE', 'text'),
+('logic_correction_info2_folder', 'Info_2 (cliente) determina FOLDER', 'text')
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW();
+
+-- ==============================================================================
 -- FIM DA MIGRAÇÃO COMPLETA
 -- ==============================================================================

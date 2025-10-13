@@ -28,6 +28,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+use sqlx::Row;
 
 #[derive(Clone)]
 pub struct EstruturaService {
@@ -130,6 +131,44 @@ impl EstruturaService {
         )))
     }
 
+    pub async fn resolve_folder_foldermapping(
+        &self,
+        client_name: &str,
+        attendant_name: &str,
+    ) -> AppResult<FolderInfo> {
+        let client_norm = self.normalize_name_local(client_name);
+        let attendant_norm = self.normalize_name_local(attendant_name);
+
+        let query = r#"
+            SELECT folder_id, folder_path, space_id
+            FROM folder_mapping
+            WHERE LOWER(attendant_name) = LOWER($1)
+              AND LOWER(client_name) = LOWER($2)
+              AND is_active = true
+            LIMIT 1
+        "#;
+
+        let row_opt = sqlx::query(query)
+            .bind(&attendant_norm)
+            .bind(&client_norm)
+            .fetch_optional(&self.db)
+            .await
+            .map_err(|e| AppError::InternalError(format!("Erro na busca folder_mapping: {}", e)))?;
+
+        if let Some(row) = row_opt {
+            Ok(FolderInfo {
+                folder_id: row.try_get("folder_id").unwrap_or_default(),
+                folder_path: row.try_get("folder_path").unwrap_or_default(),
+                space_id: row.try_get("space_id").ok(),
+            })
+        } else {
+            Err(AppError::StructureNotFound(format!(
+                "Pasta não encontrada na folder_mapping para Cliente='{}' e Atendente='{}'",
+                client_name, attendant_name
+            )))
+        }
+    }
+
     /// Normalizar nome do cliente via DB
     async fn normalize_client_name(&self, client_name: &str) -> AppResult<String> {
         let normalized = client_name.trim().to_lowercase();
@@ -139,14 +178,26 @@ impl EstruturaService {
             return Ok(self.normalize_name_local(client_name));
         }
 
+        log_info(&format!("🔍 Normalizando cliente: '{}' -> '{}'", client_name, normalized));
+
         // Buscar no DB se há aliases usando query simples
         match sqlx::query_scalar::<_, String>("SELECT client_key FROM client_mappings WHERE client_key = $1 OR $1 = ANY(client_aliases) LIMIT 1")
             .bind(&normalized)
             .fetch_optional(&self.db)
             .await
         {
-            Ok(Some(key)) => Ok(key),
-            _ => Ok(self.normalize_name_local(client_name))
+            Ok(Some(key)) => {
+                log_info(&format!("✅ Cliente normalizado de '{}' para '{}'", normalized, key));
+                Ok(key)
+            },
+            Ok(None) => {
+                log_warning(&format!("⚠️ Cliente '{}' não encontrado no DB, usando normalização local", normalized));
+                Ok(self.normalize_name_local(client_name))
+            },
+            Err(e) => {
+                log_warning(&format!("⚠️ Erro ao buscar cliente no DB: {} - usando normalização local", e));
+                Ok(self.normalize_name_local(client_name))
+            }
         }
     }
 
@@ -160,11 +211,10 @@ impl EstruturaService {
         let client_normalized = self.normalize_client_name(client_name).await?;
 
         // Buscar na tabela client_mappings qual atendente está mapeado para este cliente
-        // A folder_path tem formato: "Atendente / Cliente", então extraímos o atendente
         let query = r#"
             SELECT am.attendant_key
             FROM client_mappings cm
-            JOIN attendant_mappings am ON cm.folder_path LIKE CONCAT(am.attendant_full_name, ' /%')
+            JOIN attendant_mappings am ON cm.space_id = am.space_id
             WHERE cm.client_key = $1
             AND cm.is_active = true
             LIMIT 1
@@ -197,14 +247,26 @@ impl EstruturaService {
             return Ok(self.normalize_name_local(attendant_name));
         }
 
+        log_info(&format!("🔍 Normalizando atendente: '{}' -> '{}'", attendant_name, normalized));
+
         // Buscar no DB usando query simples
         match sqlx::query_scalar::<_, String>("SELECT attendant_key FROM attendant_mappings WHERE attendant_key = $1 OR $1 = ANY(attendant_aliases) LIMIT 1")
             .bind(&normalized)
             .fetch_optional(&self.db)
             .await
         {
-            Ok(Some(key)) => Ok(key),
-            _ => Ok(self.normalize_name_local(attendant_name))
+            Ok(Some(key)) => {
+                log_info(&format!("✅ Atendente normalizado de '{}' para '{}'", normalized, key));
+                Ok(key)
+            },
+            Ok(None) => {
+                log_warning(&format!("⚠️ Atendente '{}' não encontrado no DB, usando normalização local", normalized));
+                Ok(self.normalize_name_local(attendant_name))
+            },
+            Err(e) => {
+                log_warning(&format!("⚠️ Erro ao buscar atendente no DB: {} - usando normalização local", e));
+                Ok(self.normalize_name_local(attendant_name))
+            }
         }
     }
 
@@ -221,7 +283,7 @@ impl EstruturaService {
         let query = r#"
             SELECT cm.folder_id, cm.folder_path, cm.space_id
             FROM client_mappings cm
-            JOIN attendant_mappings am ON cm.folder_path LIKE CONCAT(am.attendant_full_name, ' /%')
+            JOIN attendant_mappings am ON cm.space_id = am.space_id
             WHERE cm.client_key = $1
             AND am.attendant_key = $2
             AND cm.is_active = true
@@ -547,3 +609,4 @@ impl EstruturaService {
         format!("{} {}", month_name, year)
     }
 }
+

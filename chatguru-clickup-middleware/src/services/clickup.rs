@@ -327,11 +327,16 @@ impl ClickUpService {
         )
     }
 
+    /// Cria tarefa dinamicamente na estrutura correta baseada em Info_1 (attendant) e Info_2 (client)
+    ///
+    /// LÓGICA CORRIGIDA:
+    /// - attendant_name (responsavel_nome): Determina o SPACE no ClickUp
+    /// - client_name (usado para resolução da estrutura, mas Info_1/Info_2 são apenas campos personalizados)
     pub async fn create_task_dynamic(
         &self,
         task_data: &Value,
-        client_name: &str,
-        attendant_name: &str,
+        attendant_name: &str,  // responsavel_nome determina Space
+        client_name: &str,     // usado para resolução de estrutura
     ) -> AppResult<Value> {
         use std::env;
 
@@ -344,6 +349,7 @@ impl ClickUpService {
         let list_id = if dynamic_enabled {
             // Tentar resolução dinâmica se EstruturaService estiver disponível
             if let Some(ref estrutura_service) = self.estrutura_service {
+                // LÓGICA CORRIGIDA: attendant_name (responsavel_nome) determina Space, client_name usado para resolução
                 match estrutura_service.resolve_folder(client_name, attendant_name).await {
                     Ok(folder_info) => {
                         info!("✅ Resolved folder: {} (id: {})", folder_info.folder_path, folder_info.folder_id);
