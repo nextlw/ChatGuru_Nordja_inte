@@ -245,6 +245,21 @@ impl WebhookPayload {
 
         // Adicionar contexto adicional se houver
         if let Some(ai) = ai_classification {
+            // Se há description da AI, usar ela como descrição principal
+            if let Some(ref ai_description) = ai.description {
+                if !ai_description.is_empty() {
+                    description = ai_description.clone();
+                    description.push_str("\n\n");
+                }
+            }
+            
+            // Se há campanha da AI, incluir junto com a descrição
+            if let Some(ref campanha) = ai.campanha {
+                if !campanha.is_empty() {
+                    description.push_str(&format!("**Campanha**: {}\n", campanha));
+                }
+            }
+            
             if let Some(ref category) = ai.category {
                 description.push_str(&format!("**Categoria**: {}\n", category));
             }
@@ -289,8 +304,11 @@ impl WebhookPayload {
         // task_categorizer foi deprecado - agora usamos apenas a classificação da AI
         // que é mais precisa e dinâmica
 
+        // Detectar se é um teste (email começa com "test_" ou campanha_id é "test_campaign")
+        let is_test = payload.email.starts_with("test_") || payload.campanha_id == "test_campaign";
+
         // Nome da tarefa - usar título profissional se temos AI classification
-        let task_name = if let Some(ai) = ai_classification {
+        let mut task_name = if let Some(ai) = ai_classification {
             if ai.is_activity {
                 // Se o reason vem do pattern matching (começa com "Contém palavras-chave")
                 // usar a mensagem original como título ao invés do reason genérico
@@ -326,9 +344,26 @@ impl WebhookPayload {
         } else {
             format!("[ChatGuru] {}", payload.nome)
         };
+
+        // Adicionar [TESTE] no início se for um teste
+        if is_test {
+            task_name = format!("[TESTE] {}", task_name);
+            tracing::info!("🧪 Tarefa de teste detectada, adicionado prefixo [TESTE]");
+        }
         
         // Mapear campos baseado na classificação AI
         if let Some(ai) = ai_classification {
+            // Log dos novos campos opcionais para debug
+            if let Some(ref space_name) = ai.space_name {
+                tracing::info!("🏢 Space sugerido pela AI: {}", space_name);
+            }
+            if let Some(ref folder_name) = ai.folder_name {
+                tracing::info!("📁 Folder sugerido pela AI: {}", folder_name);
+            }
+            if let Some(ref list_name) = ai.list_name {
+                tracing::info!("📋 List sugerida pela AI: {}", list_name);
+            }
+            
             // Carregar configuração para obter os IDs corretos
             // Por enquanto usar os IDs hardcoded, mas idealmente isso viria do prompt_config
             // TODO: Passar o prompt_config como parâmetro ou carregá-lo aqui
@@ -373,7 +408,7 @@ impl WebhookPayload {
                     tracing::error!("Falha ao carregar ai_prompt.yaml para obter ID da categoria");
                 }
             }
-
+            
             // Subcategoria (dropdown) - OTIMIZADO: usar mapeamento com IDs e estrelas
             if let Some(ref sub_categoria) = ai.sub_categoria {
                 if let Some(ref category) = ai.category {
@@ -381,15 +416,24 @@ impl WebhookPayload {
                         if let Some(subcat_id) = config.get_subcategory_id(category, sub_categoria) {
                             let field_id = config.get_field_ids()
                                 .map(|ids| ids.subcategory_field_id.clone())
-                                .unwrap_or_else(|| "330d635b-b0be-4a4a-960c-3ff974d597c3".to_string());
+                                .unwrap_or_else(|| "5333c095-eb40-4a5a-b0c2-76bfba4b1094".to_string());
 
                             custom_fields.push(serde_json::json!({
                                 "id": field_id,
                                 "value": subcat_id
                             }));
 
-                            // Log das estrelas para métricas
+                            // Adicionar campo de Estrelas (emoji rating)
                             if let Some(stars) = config.get_subcategory_stars(category, sub_categoria) {
+                                let stars_field_id = config.get_field_ids()
+                                    .map(|ids| ids.stars_field_id.clone())
+                                    .unwrap_or_else(|| "83afcb8c-2866-498f-9c62-8ea9666b104b".to_string());
+
+                                custom_fields.push(serde_json::json!({
+                                    "id": stars_field_id,
+                                    "value": stars  // Número inteiro de 1 a 4
+                                }));
+
                                 tracing::info!(
                                     "✨ Tarefa classificada: '{}' > '{}' ({} estrela{})",
                                     category, sub_categoria, stars, if stars > 1 { "s" } else { "" }
@@ -400,6 +444,46 @@ impl WebhookPayload {
                                 "⚠️ Subcategoria '{}' não encontrada para categoria '{}'",
                                 sub_categoria, category
                             );
+                        }
+                    }
+                }
+            }
+
+            // GARANTIR PRESENÇA DOS CAMPOS CATEGORIA_NOVA E SUBCATEGORIA_NOVA SEMPRE
+            // Estes campos usam o ID da opção, não o nome
+            if let Ok(config) = AiPromptConfig::load_default() {
+                if let Some(field_ids) = config.get_field_ids() {
+                    // Verificar se Categoria_nova já foi adicionada
+                    if !custom_fields.iter().any(|f| f["id"] == field_ids.category_field_id) {
+                        // Se AI retornou categoria, buscar o ID da opção
+                        if let Some(ref category) = ai.category {
+                            if let Some(cat_id) = config.get_category_id(category) {
+                                custom_fields.push(serde_json::json!({
+                                    "id": field_ids.category_field_id,
+                                    "value": cat_id
+                                }));
+                                tracing::debug!("Campo Categoria_nova adicionado: {} -> {}", category, cat_id);
+                            } else {
+                                tracing::warn!("Categoria '{}' não tem ID mapeado no YAML", category);
+                            }
+                        }
+                    }
+
+                    // Verificar se SubCategoria_nova já foi adicionada
+                    if !custom_fields.iter().any(|f| f["id"] == field_ids.subcategory_field_id) {
+                        // Se AI retornou subcategoria, buscar o ID da opção
+                        if let Some(ref sub_categoria) = ai.sub_categoria {
+                            if let Some(ref category) = ai.category {
+                                if let Some(subcat_id) = config.get_subcategory_id(category, sub_categoria) {
+                                    custom_fields.push(serde_json::json!({
+                                        "id": field_ids.subcategory_field_id,
+                                        "value": subcat_id
+                                    }));
+                                    tracing::debug!("Campo SubCategoria_nova adicionado: {} -> {}", sub_categoria, subcat_id);
+                                } else {
+                                    tracing::warn!("Subcategoria '{}/{}' não tem ID mapeado no YAML", category, sub_categoria);
+                                }
+                            }
                         }
                     }
                 }
@@ -423,61 +507,58 @@ impl WebhookPayload {
                 }
             }
         }
-        
-        // Mapeamento correto: Info_2 → Solicitante, Info_1 → Conta cliente
+
+        // Adicionar campo "Cliente Solicitante" (Info_2) - dropdown
+        // ID do campo: 0ed63eec-1c50-4190-91c1-59b4b17557f6
         if let Some(info_2) = payload.campos_personalizados.get("Info_2") {
             if let Some(info_2_str) = info_2.as_str() {
-                // Info_2 vai para o campo "Solicitante (Info_1)"
-                custom_fields.push(serde_json::json!({
-                    "id": "bf24f5b1-e909-473e-b864-75bf22edf67e",  // Campo Solicitante
-                    "value": info_2_str
-                }));
+                if let Ok(config) = AiPromptConfig::load_default() {
+                    if let Some(cliente_id) = config.get_cliente_solicitante_id(info_2_str) {
+                        custom_fields.push(serde_json::json!({
+                            "id": "0ed63eec-1c50-4190-91c1-59b4b17557f6",  // Campo "Cliente Solicitante"
+                            "value": cliente_id
+                        }));
+                        tracing::debug!("Campo Cliente Solicitante (Info_2) adicionado: {} -> {}", info_2_str, cliente_id);
+                    } else {
+                        tracing::warn!("Cliente '{}' não tem ID mapeado no YAML", info_2_str);
+                    }
+                }
             }
-        } else if let Some(responsavel_nome) = &payload.responsavel_nome {
-            // Se não tiver Info_2, usar responsavel_nome
-            custom_fields.push(serde_json::json!({
-                "id": "bf24f5b1-e909-473e-b864-75bf22edf67e",
-                "value": responsavel_nome
-            }));
         }
-        
-        // Adicionar dados de contato como campos personalizados
-        // Nome do solicitante
-        if !payload.nome.is_empty() {
-            custom_fields.push(serde_json::json!({
-                "id": "bf24f5b1-e909-473e-b864-75bf22edf67e",  // Campo "Solicitante (Info_1)"
-                "value": payload.nome
-            }));
-        }
-        
-        // Celular como campo de texto
-        if !payload.celular.is_empty() {
-            // Usar o campo "Conta cliente" para o celular
-            custom_fields.push(serde_json::json!({
-                "id": "0cd1d510-1906-4484-ba66-06ccdd659768",  // Campo "Conta cliente"
-                "value": payload.celular
-            }));
-        }
-        
+
+        // Adicionar campo "Conta cliente" (Info_1) - campo de texto livre
         if let Some(info_1) = payload.campos_personalizados.get("Info_1") {
             if let Some(info_1_str) = info_1.as_str() {
-                // Info_1 adicional (se vier nos campos personalizados, sobrescreve)
                 custom_fields.push(serde_json::json!({
-                    "id": "0cd1d510-1906-4484-ba66-06ccdd659768",  // Campo Conta cliente
+                    "id": "0cd1d510-1906-4484-ba66-06ccdd659768",  // Campo "Conta cliente"
                     "value": info_1_str
                 }));
+                tracing::debug!("Campo Conta cliente (Info_1) adicionado: {}", info_1_str);
             }
-        } else if !payload.celular.is_empty() {
-            // Se não tiver Info_1, usar celular
-            custom_fields.push(serde_json::json!({
-                "id": "0cd1d510-1906-4484-ba66-06ccdd659768",
-                "value": payload.celular
-            }));
         }
+
+        // Adicionar nome, Cliente (Info_1) e celular na descrição, nesta ordem e sem linhas extras
+        let mut extra_info = String::new();
+
+        if !payload.nome.is_empty() {
+            extra_info.push_str(&format!("\nNome: {}", payload.nome));
+        }
+
+        if let Some(info_1) = payload.campos_personalizados.get("Info_1") {
+            if let Some(info_1_str) = info_1.as_str() {
+                extra_info.push_str(&format!("\nCliente: {}", info_1_str));
+            }
+        }
+
+        if !payload.celular.is_empty() {
+            extra_info.push_str(&format!("\nCelular: {}", payload.celular));
+        }
+
+        let final_description = format!("{}{}", description.trim(), extra_info);
 
         serde_json::json!({
             "name": task_name,
-            "description": description.trim(),
+            "description": final_description,
             "tags": Vec::<String>::new(),
             "priority": 3,
             "custom_fields": custom_fields

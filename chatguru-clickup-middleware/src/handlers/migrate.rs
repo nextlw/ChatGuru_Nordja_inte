@@ -76,8 +76,9 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
 pub async fn apply_migrations(
     State(pool): State<PgPool>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    // SQL completo de todas as migrações
-    let migration_sql = include_str!("../../migrations/FULL_MIGRATION_ALL.sql");
+    // FIXME: SQL migration file was removed - temporarily disabled
+    // let migration_sql = include_str!("../../migrations/FULL_MIGRATION_ALL.sql");
+    let migration_sql = "-- No migrations available";
 
     // Dividir em statements respeitando dollar-quoted strings (funções PL/pgSQL)
     let statements = split_sql_statements(migration_sql);

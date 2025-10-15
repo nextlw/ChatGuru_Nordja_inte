@@ -1,0 +1,26 @@
+# Regras para fallback automático para MCPs
+# Esta configuração define a política para quando ferramentas internas ou nativas falharem pela segunda vez.
+# Objetivo: Tentar automaticamente usar o MCP correspondente como fallback para garantir resiliência.
+
+fallback_policy:
+  description: >
+    Política para fallback automático em caso de falha repetida de ferramentas internas ou nativas.
+    Quando uma ferramenta interna ou nativa falhar duas vezes consecutivas em uma operação,
+    o sistema deve tentar usar a ferramenta MCP equivalente, se disponível.
+
+  rules:
+    - id: "fallback_mcp_on_second_failure"
+      description: >
+        Se uma ferramenta interna ou nativa falhar pela segunda vez consecutiva,
+        tente usar a ferramenta MCP correspondente para a mesma função.
+      trigger:
+        failure_count: 2
+        tool_type: ["internal", "native"]
+      action:
+        use_fallback_tool: "mcp"
+        fallback_selection: "corresponding_mcp_tool"
+        retry_operation: true
+      notes:
+        - Esta regra aplica-se a todas as ferramentas internas e nativas.
+        - O mapeamento entre ferramenta interna/nativa e MCP deve estar configurado no sistema.
+        - Caso o MCP também falhe, a falha deve ser reportada ao usuário.

@@ -3,6 +3,7 @@ use sqlx::PgPool;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use chrono::Datelike;
 use crate::utils::{AppError, AppResult};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -21,6 +22,8 @@ pub struct AiPromptConfig {
     pub response_format: String,
     #[serde(default)]
     pub field_ids: Option<FieldIds>,
+    #[serde(default)]
+    pub cliente_solicitante_mappings: HashMap<String, String>,  // Nome → ID da opção
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -41,6 +44,49 @@ pub struct CategoryMapping {
     pub id: String,
 }
 
+// Estruturas auxiliares para parsing do YAML com nested options
+#[derive(Debug, Deserialize)]
+struct YamlCategoryField {
+    #[allow(dead_code)]
+    id: String,
+    #[allow(dead_code)]
+    name: String,
+    #[serde(rename = "type_config")]
+    type_config: YamlTypeConfig,
+}
+
+#[derive(Debug, Deserialize)]
+struct YamlTypeConfig {
+    options: Vec<YamlOption>,
+}
+
+#[derive(Debug, Deserialize)]
+struct YamlOption {
+    id: String,
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct YamlAiPromptConfig {
+    system_role: String,
+    task_description: String,
+    #[serde(default)]
+    categories: Vec<String>,
+    activity_types: Vec<ActivityType>,
+    status_options: Vec<StatusOption>,
+    category_mappings: Vec<YamlCategoryField>,
+    #[serde(default)]
+    subcategory_mappings: HashMap<String, Vec<SubcategoryMapping>>,
+    #[serde(default)]
+    subcategory_examples: HashMap<String, Vec<String>>,
+    rules: Vec<String>,
+    response_format: String,
+    #[serde(default)]
+    field_ids: Option<FieldIds>,
+    #[serde(default)]
+    cliente_solicitante_mappings: HashMap<String, String>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SubcategoryMapping {
     pub name: String,
@@ -54,13 +100,19 @@ pub struct FieldIds {
     pub subcategory_field_id: String,
     pub activity_type_field_id: String,
     pub status_field_id: String,
+    pub stars_field_id: String,
 }
 
 impl AiPromptConfig {
     /// NOVO: Carrega configuração do banco de dados PostgreSQL
     pub async fn from_database(db: &PgPool) -> AppResult<Self> {
+        use crate::utils::logging::{log_info, log_error};
+
+        log_info("🗄️  Loading AI prompt config from PostgreSQL database");
+
         // Se DB não está disponível, usa configuração padrão
         if db.is_closed() {
+            log_error("❌ Database connection is closed, falling back to YAML");
             return Self::load_default();
         }
 
@@ -224,6 +276,22 @@ impl AiPromptConfig {
         .flatten()
         .unwrap_or_else(|| "default_status_field".to_string());
 
+        let stars_field_id = sqlx::query_scalar::<_, String>(
+            "SELECT value FROM prompt_config WHERE key = 'stars_field_id' AND is_active = true"
+        )
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "default_stars_field".to_string());
+
+        log_info(&format!(
+            "✅ AI prompt config loaded from database successfully: {} categories, {} activity_types, {} rules",
+            categories.len(),
+            activity_types.len(),
+            rules.len()
+        ));
+
         Ok(AiPromptConfig {
             system_role,
             task_description,
@@ -235,34 +303,105 @@ impl AiPromptConfig {
             subcategory_examples: HashMap::new(), // Pode ser populado depois se necessário
             rules,
             response_format,
+            cliente_solicitante_mappings: HashMap::new(), // TODO: carregar do banco
             field_ids: Some(FieldIds {
                 category_field_id,
                 subcategory_field_id,
                 activity_type_field_id,
                 status_field_id,
+                stars_field_id,
             }),
         })
     }
 
     /// Carrega a configuração do prompt de um arquivo YAML (fallback/legacy)
     pub fn from_file<P: AsRef<Path>>(path: P) -> AppResult<Self> {
+        use crate::utils::logging::log_info;
+
+        log_info(&format!("📄 Loading AI prompt config from YAML file: {:?}", path.as_ref()));
+
         let contents = fs::read_to_string(path)
             .map_err(|e| AppError::ConfigError(format!("Failed to read prompt file: {}", e)))?;
 
-        let config: AiPromptConfig = serde_yaml::from_str(&contents)
+        // Parse usando a estrutura YAML auxiliar
+        let yaml_config: YamlAiPromptConfig = serde_yaml::from_str(&contents)
             .map_err(|e| AppError::ConfigError(format!("Failed to parse YAML: {}", e)))?;
 
-        Ok(config)
+        // Converter category_mappings de Vec<YamlCategoryField> para HashMap<String, CategoryMapping>
+        let mut category_mappings = HashMap::new();
+        for field in yaml_config.category_mappings {
+            // Extrair todas as options e criar mapeamento nome -> id
+            for option in field.type_config.options {
+                category_mappings.insert(
+                    option.name.clone(),
+                    CategoryMapping {
+                        id: option.id.clone(),
+                    },
+                );
+            }
+        }
+
+        // Extrair lista de categorias dos options se não estiver especificada
+        let categories = if yaml_config.categories.is_empty() {
+            category_mappings.keys().cloned().collect()
+        } else {
+            yaml_config.categories
+        };
+
+        log_info(&format!(
+            "✅ AI prompt config loaded from YAML successfully: {} categories, {} activity_types, {} rules",
+            categories.len(),
+            yaml_config.activity_types.len(),
+            yaml_config.rules.len()
+        ));
+
+        Ok(AiPromptConfig {
+            system_role: yaml_config.system_role,
+            task_description: yaml_config.task_description,
+            categories,
+            activity_types: yaml_config.activity_types,
+            status_options: yaml_config.status_options,
+            category_mappings,
+            subcategory_mappings: yaml_config.subcategory_mappings,
+            subcategory_examples: yaml_config.subcategory_examples,
+            rules: yaml_config.rules,
+            response_format: yaml_config.response_format,
+            field_ids: yaml_config.field_ids,
+            cliente_solicitante_mappings: yaml_config.cliente_solicitante_mappings,
+        })
     }
 
     /// Carrega a configuração padrão do diretório config (fallback/legacy)
     pub fn load_default() -> AppResult<Self> {
+        use crate::utils::logging::log_warning;
+
+        log_warning("⚠️  USING YAML FALLBACK: Loading AI prompt config from config/ai_prompt.yaml instead of database");
+
         Self::from_file("config/ai_prompt.yaml")
     }
     
     /// Gera o prompt formatado para o Vertex AI
     pub fn generate_prompt(&self, context: &str) -> String {
-        self.generate_prompt_with_dynamic_fields(context, None, None, None)
+        // Adicionar data atual ao contexto
+        let now = chrono::Local::now();
+        let current_month = match now.month() {
+            1 => "JANEIRO", 2 => "FEVEREIRO", 3 => "MARÇO",
+            4 => "ABRIL", 5 => "MAIO", 6 => "JUNHO",
+            7 => "JULHO", 8 => "AGOSTO", 9 => "SETEMBRO",
+            10 => "OUTUBRO", 11 => "NOVEMBRO", 12 => "DEZEMBRO",
+            _ => "DESCONHECIDO"
+        };
+
+        let current_date = format!(
+            "DATA ATUAL: {} (Mês: {}, Ano: {})",
+            now.format("%Y-%m-%d"),
+            current_month,
+            now.format("%Y")
+        );
+
+        let context_with_date = format!("{}\n\n{}", current_date, context);
+
+        self.generate_prompt_with_dynamic_fields(&context_with_date, None, None, None)
     }
     
     /// Gera o prompt com campos dinâmicos do ClickUp
@@ -395,6 +534,43 @@ impl AiPromptConfig {
                     .find(|sc| sc.name.to_lowercase() == subcategory_normalized)
                     .map(|sc| sc.id.clone())
             })
+    }
+
+    /// Obtém o ID do cliente solicitante pelo nome (com normalização)
+    pub fn get_cliente_solicitante_id(&self, name: &str) -> Option<String> {
+        // Normalizar: remover parênteses, números e acentos
+        let normalized = Self::normalize_client_name(name);
+
+        // Tentar match exato primeiro
+        if let Some(id) = self.cliente_solicitante_mappings.get(&normalized) {
+            return Some(id.clone());
+        }
+
+        // Tentar match com normalização nas chaves
+        self.cliente_solicitante_mappings.iter()
+            .find(|(key, _)| Self::normalize_client_name(key) == normalized)
+            .map(|(_, id)| id.clone())
+    }
+
+    /// Normalizar nome de cliente: remover parênteses, números, acentos
+    fn normalize_client_name(name: &str) -> String {
+        name.trim()
+            .to_lowercase()
+            .chars()
+            .filter(|c| !c.is_numeric() && *c != '(' && *c != ')')
+            .map(|c| match c {
+                'á' | 'à' | 'â' | 'ã' => 'a',
+                'é' | 'è' | 'ê' => 'e',
+                'í' | 'ì' | 'î' => 'i',
+                'ó' | 'ò' | 'ô' | 'õ' => 'o',
+                'ú' | 'ù' | 'û' => 'u',
+                'ç' => 'c',
+                _ => c,
+            })
+            .collect::<String>()
+            .split_whitespace()
+            .collect::<Vec<&str>>()
+            .join(" ")
     }
 
     /// Obtém o número de estrelas de uma subcategoria (busca case-insensitive)

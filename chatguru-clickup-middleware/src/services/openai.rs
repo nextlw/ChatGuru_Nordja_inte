@@ -22,8 +22,11 @@ pub struct OpenAIClassification {
     pub sub_categoria: Option<String>,
     pub subtasks: Vec<String>,
     pub status_back_office: Option<String>,
-    pub campanha: String,
-    pub description: String,
+    pub campanha: Option<String>,     // Novo campo opcional
+    pub description: Option<String>,  // Mudou para opcional
+    pub space_name: Option<String>,   // Novo campo
+    pub folder_name: Option<String>,  // Novo campo
+    pub list_name: Option<String>,    // Novo campo
     pub info_1: Option<String>,
     pub info_2: Option<String>,
 }
@@ -410,6 +413,7 @@ impl OpenAIService {
   "status_back_office": "status"
 }"#.to_string(),
             field_ids: None,
+            cliente_solicitante_mappings: HashMap::new(),
         }
     }
 }

@@ -568,6 +568,7 @@ dependencies = [
  "serde_yaml",
  "sha2",
  "sqlx",
+ "strsim",
  "thiserror 1.0.69",
  "tokio",
  "tokio-test",

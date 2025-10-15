@@ -136,19 +136,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .clone()
                 .unwrap_or_else(|| "media-processing-requests".to_string());
 
-            match services::VertexAIService::new(
+            let service = services::VertexAIService::new(
                 vertex_config.project_id.clone(),
                 topic_name
-            ).await {
-                Ok(service) => {
-                    log_info("Vertex AI service initialized");
-                    Some(service)
-                }
-                Err(e) => {
-                    log_error(&format!("Failed to initialize Vertex AI service: {}", e));
-                    None
-                }
-            }
+            );
+            log_info("Vertex AI service initialized");
+            Some(service)
         } else {
             log_info("Vertex AI service disabled in config");
             None

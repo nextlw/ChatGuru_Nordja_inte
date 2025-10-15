@@ -1,0 +1,366 @@
+id: 5333c095-eb40-4a5a-b0c2-76bfba4b1094
+name: SubCategoria_nova
+type: drop_down
+type_config:
+  sorting: manual
+  new_drop_down: true
+  options:
+    - id: bff3cb1c-a75c-42e3-8249-18dbe32296f7
+      name: Consultas
+      color: "#f900ea"
+      orderindex: 0
+    - id: 279d40c2-7856-4c74-9190-0b344172ce04
+      name: Exames
+      color: "#f900ea"
+      orderindex: 1
+    - id: dfa4f25f-e67c-42e7-a654-a29bba148635
+      name: Veterinário/Petshop (Consultas/Exames/Banhos/Tosas)
+      color: "#f900ea"
+      orderindex: 2
+    - id: 9f6b7d48-e72f-41a5-9998-8fd67e7c0348
+      name: Vacinas
+      color: "#f900ea"
+      orderindex: 3
+    - id: edf4e00d-bc90-4731-9390-77ee25d8f212
+      name: Manicure
+      color: "#f900ea"
+      orderindex: 4
+    - id: 8eb7dd7c-a67d-4ff6-9ca7-1134687610b6
+      name: Cabeleleiro
+      color: "#f900ea"
+      orderindex: 5
+    - id: ae9c9144-0676-46ec-b9aa-dcae536d2d82
+      name: Shopper
+      color: "#02BCD4"
+      orderindex: 6
+    - id: 6d77b238-5e18-45c8-bce1-502347793853
+      name: Mercados
+      color: "#02BCD4"
+      orderindex: 7
+    - id: ff7ebf1d-e28b-4759-9601-480b67815ca4
+      name: Presentes
+      color: "#02BCD4"
+      orderindex: 8
+    - id: b9fbb46e-95f2-4273-8c93-442dfaaff42f
+      name: Petshop
+      color: "#02BCD4"
+      orderindex: 9
+    - id: 101a73fe-9ae7-4e66-bddf-e736e6538d37
+      name: Papelaria
+      color: "#02BCD4"
+      orderindex: 10
+    - id: a8944553-7f2a-41d9-a2ca-dc2c4f734ac8
+      name: Farmácia
+      color: "#02BCD4"
+      orderindex: 11
+    - id: ac4019ae-ed29-4e10-b342-203029295d54
+      name: Ingressos
+      color: "#02BCD4"
+      orderindex: 12
+    - id: 576fe8f0-8aab-4dca-b11b-94c9f7f7a67c
+      name: Móveis e Eletros
+      color: "#02BCD4"
+      orderindex: 13
+    - id: e161df73-4977-4642-a116-6b21802092a7
+      name: Itens pessoais e da casa
+      color: "#02BCD4"
+      orderindex: 14
+    - id: 3be771dc-7efe-44de-bc66-8ab833537e75
+      name: CIN
+      color: "#0079bf"
+      orderindex: 15
+    - id: 1ad5c593-6b54-4673-83f7-a239d981fe72
+      name: Certificado Digital
+      color: "#0079bf"
+      orderindex: 16
+    - id: 12980d4b-c4bd-4ed7-b36d-060422d023da
+      name: Documento de Vacinação (BR/Iternacional)
+      color: "#0079bf"
+      orderindex: 17
+    - id: 6745d1ec-2083-4883-bdb0-00fccd1015f0
+      name: Seguros Carro/Casa/Viagem (anual)
+      color: "#0079bf"
+      orderindex: 18
+    - id: 94d4ef32-e631-42ca-87e1-aafb5ddbdcf8
+      name: Assinatura Digital
+      color: "#0079bf"
+      orderindex: 19
+    - id: afc11da3-774f-4560-a92d-6d41c1b5eb60
+      name: Contratos/Procurações
+      color: "#0079bf"
+      orderindex: 20
+    - id: 8fd5c543-fd90-4c07-be5e-a470f25c41a0
+      name: Cidadanias
+      color: "#0079bf"
+      orderindex: 21
+    - id: b9a5bac8-e0ad-46f4-9309-9b2ee5acdcf4
+      name: Vistos e Vistos Eletrônicos
+      color: "#0079bf"
+      orderindex: 22
+    - id: 04cd634f-28fa-41bb-9f66-dae43c3438ca
+      name: Passaporte
+      color: "#0079bf"
+      orderindex: 23
+    - id: a39b0909-862b-4ead-a20a-26a1846a2ba1
+      name: CNH
+      color: "#0079bf"
+      orderindex: 24
+    - id: 50447800-2557-4653-8874-79bc40473624
+      name: Averbações
+      color: "#0079bf"
+      orderindex: 25
+    - id: 3c90b607-8bab-40f6-b96d-75f2888ad9aa
+      name: Certidões
+      color: "#0079bf"
+      orderindex: 26
+    - id: 99e3c2b5-e89f-4095-bcf5-7cdc27a36052
+      name: Reserva de restaurantes/bares
+      color: "#f2d600"
+      orderindex: 27
+    - id: 75714f82-0366-429e-9131-4e91e925cf61
+      name: Planejamento de festas
+      color: "#f2d600"
+      orderindex: 28
+    - id: 2329a8b6-3d57-4136-b62a-4668cf88a7b6
+      name: Pesquisa de passeios/eventos (BR)
+      color: "#f2d600"
+      orderindex: 29
+    - id: 7ae92403-be05-4a57-890c-b2e6d5a8a3be
+      name: Fornecedores no exterior (passeios, fotógrafos)
+      color: "#f2d600"
+      orderindex: 30
+    - id: bbb7859d-5f9a-46ac-a1dc-31a2f50c3bf8
+      name: Corrida de motoboy
+      color: "#2ecd6f"
+      orderindex: 31
+    - id: e536f830-09f9-4643-9c96-a368f7751621
+      name: Motoboy + Correios e envios internacionais
+      color: "#2ecd6f"
+      orderindex: 32
+    - id: 0f5385b3-f4bf-4fda-8024-cb68bcfb8081
+      name: Lalamove
+      color: "#2ecd6f"
+      orderindex: 33
+    - id: 88e88662-8417-4289-8984-26fd9eef47ef
+      name: Corridas com Taxistas
+      color: "#2ecd6f"
+      orderindex: 34
+    - id: 1aea6ab4-24c4-405c-9165-8439fe648e51
+      name: Transporte Urbano (Uber/99)
+      color: "#2ecd6f"
+      orderindex: 35
+    - id: 790f6daf-a1f8-4dcb-a2fb-9b13a635af7b
+      name: Passagens Aéreas
+      color: "#61bd4f"
+      orderindex: 36
+    - id: a7b1efc0-21fb-43be-a1ce-093469a605a0
+      name: Hospedagens
+      color: "#61bd4f"
+      orderindex: 37
+    - id: 8e1e0e3f-c8d7-4d45-bee0-2fd7872fa1ce
+      name: Compra de Assentos e Bagagens
+      color: "#61bd4f"
+      orderindex: 38
+    - id: 43196e32-64bf-4e18-931b-71d1f55bc1f2
+      name: Passagens de Ônibus
+      color: "#61bd4f"
+      orderindex: 39
+    - id: c16c703c-a0bb-4b16-8b41-a0648d41b267
+      name: Passagens de Trem
+      color: "#61bd4f"
+      orderindex: 40
+    - id: d40e5677-26b9-4191-885a-f23e6c19e905
+      name: Checkins (Early/Late)
+      color: "#61bd4f"
+      orderindex: 41
+    - id: 812ae904-2273-4793-8228-eba85228b685
+      name: Extravio de Bagagens
+      color: "#61bd4f"
+      orderindex: 42
+    - id: 775b4b9b-f9d4-4cec-bba9-df233acd1f96
+      name: Seguro Viagem (Temporário)
+      color: "#61bd4f"
+      orderindex: 43
+    - id: ba110e55-104c-45f7-9302-bd8e14113c37
+      name: Transfer
+      color: "#61bd4f"
+      orderindex: 44
+    - id: 23d3e4cd-7d6d-4c0e-be26-2a771e0e8734
+      name: Programa de Milhagem
+      color: "#61bd4f"
+      orderindex: 45
+    - id: 960167db-afb7-48dc-b8e8-12d8f695611a
+      name: Gestão de Contas (CIAs Aereas)
+      color: "#61bd4f"
+      orderindex: 46
+    - id: 78df793d-3a57-4f33-baa2-1ec35e93a39c
+      name: Aluguel de Carro/Ônibus e Vans
+      color: "#61bd4f"
+      orderindex: 47
+    - id: b4b361fc-6d60-40b5-9c41-74f54d8d1ec7
+      name: Roteiro de Viagens
+      color: "#61bd4f"
+      orderindex: 48
+    - id: 76b0f31e-f8a1-4fcb-baca-7fc14bde2b30
+      name: Reembolso Médico
+      color: "#eb5a46"
+      orderindex: 49
+    - id: 54373456-c0c6-4a7b-87fb-2332831e2d98
+      name: Extrato para IR
+      color: "#eb5a46"
+      orderindex: 50
+    - id: 8ae20f10-16ea-4294-8e3b-cb83c64f7cdb
+      name: Prévia de Reembolso
+      color: "#eb5a46"
+      orderindex: 51
+    - id: af6f081a-49a9-414b-82c4-ddee43fbfb2e
+      name: Contestações
+      color: "#eb5a46"
+      orderindex: 52
+    - id: 5c805f34-4479-4ec3-8822-5dffe5489124
+      name: Autorizações
+      color: "#eb5a46"
+      orderindex: 53
+    - id: 2fdb5cc9-18a7-451d-be47-c184e537855e
+      name: Contratações/Cancelamentos
+      color: "#eb5a46"
+      orderindex: 54
+    - id: 45f0fa60-db1c-4343-93b0-111f1db221e1
+      name: Gestão de Agenda
+      color: "#bf55ec"
+      orderindex: 55
+    - id: 4a7728a4-1754-4325-9dc9-400a7209da9e
+      name: Criação e envio de invites
+      color: "#bf55ec"
+      orderindex: 56
+    - id: 530e1f11-b1a1-4505-bce5-76bc873dbdb4
+      name: Emissão de NF
+      color: "#ffab4a"
+      orderindex: 57
+    - id: 1a84d897-b53c-4713-b526-60eb5c965aab
+      name: Rotina de Pagamentos
+      color: "#ffab4a"
+      orderindex: 58
+    - id: b88bc587-6b13-47ec-a393-793ab335404e
+      name: Emissão de boletos
+      color: "#ffab4a"
+      orderindex: 59
+    - id: f01ad326-41e7-4d1e-914e-9457eabf9e30
+      name: Conciliação Bancária
+      color: "#ffab4a"
+      orderindex: 60
+    - id: af184e5d-bc21-4715-b792-1310e41cef12
+      name: Planilha de Gastos/Pagamentos
+      color: "#ffab4a"
+      orderindex: 61
+    - id: 88eb8b12-d65b-464a-923a-7d656ea95a23
+      name: Encerramento e Abertura de CNPJ
+      color: "#ffab4a"
+      orderindex: 62
+    - id: db04f3c8-7d9c-4adb-8a19-c033c189a0f9
+      name: Imposto de Renda
+      color: "#ffab4a"
+      orderindex: 63
+    - id: c2e61adb-92c8-4562-a9b2-8629e2f4a493
+      name: Emissão de Guias de Imposto (DARF, DAS, DIRF, GPS)
+      color: "#ffab4a"
+      orderindex: 64
+    - id: b77afa16-4a74-4a09-abe6-ccb7338d5b8d
+      name: Mudanças
+      color: "#c377e0"
+      orderindex: 65
+    - id: 2b9ecf23-5873-4a26-8b4d-36f9f7498421
+      name: Troca de titularidade
+      color: "#c377e0"
+      orderindex: 66
+    - id: c29d6435-7ed8-4324-af46-ff45eab5fa97
+      name: Assuntos do Carro/Moto
+      color: "#c377e0"
+      orderindex: 67
+    - id: 3613c025-d6bb-48a1-9cf4-e1b73f837d61
+      name: Internet e TV por Assinatura
+      color: "#c377e0"
+      orderindex: 68
+    - id: dd76b9a0-18e6-41cc-ade3-23add30748a7
+      name: Contas de Consumo
+      color: "#c377e0"
+      orderindex: 69
+    - id: c09ff878-ff56-401a-b51a-7a06d4af2015
+      name: Anúncio de Vendas Online (Itens, eletros. móveis)
+      color: "#c377e0"
+      orderindex: 70
+    - id: 18d4ff39-f15b-493a-9082-057b0b33ba8d
+      name: Assuntos Escolares e Professores Particulares
+      color: "#c377e0"
+      orderindex: 71
+    - id: 62a15b40-5462-4886-8fa3-bc8ace5008bc
+      name: Academia e Cursos Livres
+      color: "#c377e0"
+      orderindex: 72
+    - id: bff82ef1-6193-4f13-a363-b6bcfa7694e2
+      name: Telefone
+      color: "#c377e0"
+      orderindex: 73
+    - id: 4ff47999-34af-4e6b-8c68-11974bc6c56d
+      name: Assistência Técnica
+      color: "#c377e0"
+      orderindex: 74
+    - id: e1262c25-ace2-4c19-bff3-bc56662f98a6
+      name: Consertos na Casa
+      color: "#c377e0"
+      orderindex: 75
+    - id: 9de0acb5-2451-4531-adb5-08e0e929996e
+      name: Financeiro/Contábil
+      color: "#FF7FAB"
+      orderindex: 76
+    - id: 5f8c3193-31da-46fc-ba67-0b67bb87fea0
+      name: Atendimento ao Cliente
+      color: "#FF7FAB"
+      orderindex: 77
+    - id: 744ec6fb-7d28-43a1-a02d-fca5148993e9
+      name: Gestão de Planilhas e Emails
+      color: "#FF7FAB"
+      orderindex: 78
+    - id: 43d79a01-7c60-4902-a308-6a708c8ff6b0
+      name: Documentos/Contratos e Assinaturas
+      color: "#FF7FAB"
+      orderindex: 79
+    - id: f06a6de8-dd51-4df5-895c-d7b3495c1f5c
+      name: Gestão de Agenda (Corporativa)
+      color: "#FF7FAB"
+      orderindex: 80
+    - id: e301567c-e1d4-4095-a709-835b26538e0f
+      name: Recursos Humanos
+      color: "#FF7FAB"
+      orderindex: 81
+    - id: 82e3ba06-5125-4357-9b0e-3096a8ca6820
+      name: Gestão de Estoque
+      color: "#FF7FAB"
+      orderindex: 82
+    - id: 3c72d198-f18b-4747-8b39-302209e7b11d
+      name: Compras/vendas
+      color: "#FF7FAB"
+      orderindex: 83
+    - id: e42cab5b-6c54-4b70-8616-1ae96bbe0568
+      name: Fornecedores
+      color: "#FF7FAB"
+      orderindex: 84
+    - id: 26b11372-6bbc-4a36-aa5c-2b0cde733413
+      name: eSocial
+      color: "#81B1FF"
+      orderindex: 85
+    - id: 3f14982e-5047-48df-95f3-671fd55bd1da
+      name: Contratações e Desligamentos
+      color: "#81B1FF"
+      orderindex: 86
+    - id: 168420f6-f02e-4d80-af97-840411973461
+      name: DIRF
+      color: "#81B1FF"
+      orderindex: 87
+    - id: 3de88e9f-09f2-4a9e-84d9-eff5f987b344
+      name: Férias
+      color: "#81B1FF"
+      orderindex: 88
+date_created: "1759359516277"
+hide_from_guests: false
+required: true

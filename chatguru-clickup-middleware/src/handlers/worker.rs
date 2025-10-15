@@ -242,49 +242,16 @@ pub async fn handle_worker(
 
         // Verificar se tem media_url e media_type
         if let (Some(ref media_url), Some(ref media_type)) = (&chatguru_payload.media_url, &chatguru_payload.media_type) {
-            // Verificar se é tipo de mídia suportado
-            if crate::services::VertexAIService::is_supported_media_type(media_type) {
-                let processing_type = crate::services::VertexAIService::get_processing_type(media_type);
+            // Verificar se é tipo de mídia suportado - usando tipos estáticos para agora
+            let is_supported = media_type.contains("audio") || media_type.contains("image") || media_type.contains("video");
+            if is_supported {
+                let processing_type = if media_type.contains("audio") { "audio" } else if media_type.contains("image") { "image" } else { "video" };
                 log_info(&format!("📎 Mídia detectada ({}: {}), iniciando processamento: {}",
                     processing_type, media_type, media_url));
 
-                // Tentar usar Vertex AI primeiro, fallback para OpenAI
-                let media_result = if let (Some(ref vertex_service), Some(ref media_sync)) =
-                    (&state.vertex, &state.media_sync) {
-
-                    log_info("🤖 Usando Vertex AI para processamento de mídia");
-
-                    // Publicar requisição no Pub/Sub
-                    match vertex_service.process_media_async(
-                        media_url,
-                        media_type,
-                        chatguru_payload.chat_id.clone()
-                    ).await {
-                        Ok(correlation_id) => {
-                            log_info(&format!("📤 Requisição publicada: {}", correlation_id));
-
-                            // Aguardar resultado com timeout
-                            match media_sync.wait_for_result(correlation_id.clone()).await {
-                                Ok(result) => {
-                                    log_info(&format!("✅ Resultado recebido via Vertex AI: {} caracteres",
-                                        result.result.len()));
-                                    Some(result.result)
-                                }
-                                Err(e) => {
-                                    log_warning(&format!("⚠️ Erro/timeout Vertex AI: {}", e));
-                                    None
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            log_error(&format!("❌ Erro ao publicar requisição Vertex AI: {}", e));
-                            None
-                        }
-                    }
-                } else {
-                    log_info("ℹ️ Vertex AI não configurado, usando OpenAI Whisper");
-                    None
-                };
+                // TEMPORÁRIO: Vertex AI está sendo refatorado - usar apenas OpenAI por enquanto
+                log_info("🔄 Vertex AI em refatoração - usando apenas OpenAI por enquanto");
+                let media_result = None; // Placeholder para nova implementação
 
                 // Fallback para OpenAI se Vertex AI falhar
                 let final_result = if media_result.is_none() {
@@ -386,12 +353,54 @@ pub async fn handle_worker(
             Ok(Json(result))
         }
         Err(e) => {
-            log_error(&format!("Worker processing error: {}", e));
-            // Erro recuperável - Pub/Sub vai fazer retry
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": e.to_string()}))
-            ))
+            log_error(&format!("Worker processing error (attempt {}/{}): {}",
+                retry_count, MAX_RETRY_ATTEMPTS, e));
+
+            // Classificar erro: recuperável vs não-recuperável
+            let is_recoverable = match &e {
+                // Erros de API externa (ClickUp, HTTP, Timeout) - recuperável
+                AppError::ClickUpApi(_) => retry_count < MAX_RETRY_ATTEMPTS,
+                AppError::HttpError(_) => retry_count < MAX_RETRY_ATTEMPTS,
+                AppError::Timeout(_) => retry_count < MAX_RETRY_ATTEMPTS,
+                AppError::PubSubError(_) => retry_count < MAX_RETRY_ATTEMPTS,
+
+                // Erros de configuração/validação - NÃO recuperável
+                AppError::ConfigError(_) => false,
+                AppError::ValidationError(_) => false,
+                AppError::JsonError(_) => false,
+
+                // Estrutura não encontrada - NÃO recuperável (já tratado internamente)
+                AppError::StructureNotFound(_) => false,
+
+                // Database error - NÃO recuperável (indica problema de configuração)
+                AppError::DatabaseError(_) => false,
+
+                // Outros erros internos - permitir retry limitado
+                AppError::InternalError(_) => retry_count < MAX_RETRY_ATTEMPTS,
+            };
+
+            if is_recoverable {
+                // Erro recuperável - Pub/Sub vai fazer retry
+                log_warning(&format!("⚠️ Erro recuperável, Pub/Sub fará retry (tentativa {}/{})",
+                    retry_count, MAX_RETRY_ATTEMPTS));
+                Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "error": e.to_string(),
+                        "retry_count": retry_count,
+                        "will_retry": true
+                    }))
+                ))
+            } else {
+                // Erro não recuperável - retornar 200 para evitar retry
+                log_error(&format!("❌ Erro não recuperável ou limite de tentativas atingido, descartando mensagem: {}", e));
+                Ok(Json(json!({
+                    "status": "failed",
+                    "error": e.to_string(),
+                    "retry_count": retry_count,
+                    "reason": "Non-recoverable error or max retries exceeded"
+                })))
+            }
         }
     }
 }
@@ -439,12 +448,19 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
                 .map(|s| s.to_string()),
             campanha: forced.get("campanha")
                 .and_then(|v| v.as_str())
-                .unwrap_or("Atendimento")
-                .to_string(),
+                .map(|s| s.to_string()),
             description: forced.get("description")
                 .and_then(|v| v.as_str())
-                .unwrap_or("Classificação manual")
-                .to_string(),
+                .map(|s| s.to_string()),
+            space_name: forced.get("space_name")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            folder_name: forced.get("folder_name")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            list_name: forced.get("list_name")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
             info_1: forced.get("info_1")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
@@ -484,103 +500,42 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
     if is_activity {
         log_info(&format!("✅ Atividade identificada: {}", classification.reason));
 
-        // Extrair dados para a criação dinâmica
-        // LÓGICA FINAL CORRETA:
-        // - responsavel_nome: Nome do atendente (determina o SPACE - ex: "Anne" → Space "Anne Souza")
-        // - Info_2: Nome do solicitante → Campo personalizado "Solicitante" (não determina estrutura)
-        // - Info_1: Nome da empresa cliente → Campo personalizado "Conta cliente" (não determina estrutura)
-
-        let attendant_name = extract_responsavel_nome_from_payload(payload)
-            .unwrap_or_else(|| extract_info_1_from_payload(payload).unwrap_or_default());
+        // NOVA LÓGICA SIMPLIFICADA:
+        // - Info_2: Nome do cliente solicitante → Resolve DIRETAMENTE para folder_id via YAML
+        // - Fuzzy matching automático (85% similaridade)
+        // - Fallback para lista OUTUBRO da Renata se não encontrar
+        //
+        // NÃO MAIS USA:
+        // - responsavel_nome (atendente)
+        // - Info_1 (empresa)
+        // - Lógica de Space → Folder → List
 
         let client_name = extract_info_2_from_payload(payload)
             .unwrap_or_else(|| extract_nome_from_payload(payload));
 
-        // Tentar obter atendente do webhook (responsavel_nome)
-        let mut attendant_opt = extract_responsavel_nome_from_payload(payload)
-            .and_then(|s| if s.is_empty() { None } else { Some(s) });
-
-        // Se responsavel_nome está vazio, buscar no banco qual atendente está mapeado para este cliente
-        if attendant_opt.is_none() {
-            log_warning(&format!("⚠️ responsavel_nome vazio - buscando atendente mapeado para cliente '{}'", client_name));
-
-            // Usar EstruturaService para buscar atendente se disponível
-            if let Some(ref estrutura) = state.clickup.estrutura_service {
-                match estrutura.find_attendant_for_client(&client_name).await {
-                    Ok(Some(att)) => attendant_opt = Some(att),
-                    Ok(None) => log_info("ℹ️ Nenhum atendente mapeado no banco para este cliente"),
-                    Err(e) => log_warning(&format!("⚠️ Erro ao buscar atendente: {}", e)),
-                }
-            }
-        }
-
-        // Se não encontrou atendente, usar string vazia para acionar fallback "Clientes Inativos"
-        let attendant = attendant_opt.unwrap_or_else(|| {
-            log_warning("⚠️ Nenhum atendente encontrado - tarefa será criada em 'Clientes Inativos'");
-            String::new()  // String vazia aciona fallback para "Clientes Inativos"
-        });
-
-        log_info(&format!("🔍 Dynamic resolution (LÓGICA FINAL CORRETA): attendant='{}' (responsavel_nome -> Space), client='{}' (apenas para resolução)",
-            if attendant.is_empty() { "<sem atendente - Clientes Inativos>" } else { &attendant },
+        log_info(&format!("🔍 Nova lógica simplificada: Info_2='{}' → folder_id (via YAML com fuzzy match)",
             client_name));
-        log_info(&format!("📋 Debug campos: responsavel_nome (Space)={:?}, Info_2 (campo personalizado)={:?}, Info_1 (campo personalizado)={:?}",
-            extract_responsavel_nome_from_payload(payload),
+        log_info(&format!("📋 Debug campos: Info_2 (cliente solicitante)={:?}, Info_1 (empresa - não usado)={:?}, responsavel_nome (atendente - não usado)={:?}",
             extract_info_2_from_payload(payload),
-            extract_info_1_from_payload(payload)
+            extract_info_1_from_payload(payload),
+            extract_responsavel_nome_from_payload(payload)
         ));
 
         // Criar task_data usando o método correto que inclui o campo "name"
         let task_data = payload.to_clickup_task_data_with_ai(Some(&classification));
 
-        // Criar tarefa no ClickUp - versão dinâmica ou legacy
-        // Verificar se sistema dinâmico está habilitado (leitura do banco)
-        let is_dynamic_enabled = state.config_db.is_dynamic_structure_enabled().await;
-        log_info(&format!("🔧 Sistema dinâmico habilitado: {}", is_dynamic_enabled));
+        // Criar tarefa no ClickUp usando nova lógica simplificada
+        log_info("🚀 Usando create_task_by_client() (lógica simplificada com fuzzy match)");
 
-        let task_result = if is_dynamic_enabled {
-            match state.clickup.create_task_dynamic(&task_data, &attendant_name, &client_name).await {
-                Ok(result) => {
-                    log_info(&format!("📋 Tarefa criada dinamicamente: {}", result["id"]));
-                    result
-                }
-                Err(AppError::StructureNotFound(msg)) => {
-                    log_warning(&format!("⚠️ Estrutura não encontrada: {}", msg));
-
-                    // Enviar anotação ao ChatGuru pedindo para criar estrutura
-                    let annotation = format!(
-                        "⚠️ Estrutura não encontrada no sistema\n\n\
-                        📝 Cliente: {}\n\
-                        👤 Responsável: {}\n\n\
-                        Por favor, crie a pasta correspondente no ClickUp e adicione o mapeamento no banco de dados.\n\n\
-                        🔗 Acesse: https://app.clickup.com",
-                        client_name, attendant
-                    );
-
-                    if let Err(e) = send_annotation_to_chatguru(&state, payload, &annotation).await {
-                        log_error(&format!("❌ Falha ao enviar anotação de estrutura não encontrada: {}", e));
-                    }
-
-                    log_info("✅ Anotação de estrutura não encontrada enviada ao ChatGuru");
-
-                    return Ok(json!({
-                        "status": "structure_not_found",
-                        "is_activity": true,
-                        "client": client_name,
-                        "attendant": attendant,
-                        "annotation": annotation
-                    }));
-                }
-                Err(e) => {
-                    log_error(&format!("❌ Erro ao criar tarefa dinâmica: {}", e));
-                    return Err(e);
-                }
+        let task_result = match state.clickup.create_task_by_client(&task_data, &client_name).await {
+            Ok(result) => {
+                log_info(&format!("✅ Tarefa criada com sucesso: {}", result["id"]));
+                result
             }
-        } else {
-            let result = state.clickup
-                .process_payload_with_ai(payload, Some(&classification))
-                .await?;
-            log_info(&format!("📋 Tarefa criada (legacy): {}", result["id"]));
-            result
+            Err(e) => {
+                log_error(&format!("❌ Erro ao criar tarefa: {}", e));
+                return Err(e);
+            }
         };
 
         // Montar anotação com informações da task
@@ -612,7 +567,7 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
         let annotation = format!(
             "✅ Tarefa criada no ClickUp\n\n📋 Descrição: {}\n🏷️ Categoria: {}\n📂 Subcategoria: {}\n⭐ Prioridade: {} estrela(s)\n🔗 Link: {}{}",
             classification.reason,
-            classification.campanha,
+            classification.campanha.as_deref().unwrap_or("N/A"),
             classification.sub_categoria.as_deref().unwrap_or("N/A"),
             // Extrair prioridade da task_result se disponível
             task_result.get("priority")
