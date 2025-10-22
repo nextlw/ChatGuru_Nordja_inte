@@ -15,7 +15,6 @@ use axum::{
 };
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use sqlx::postgres::PgPoolOptions;
 
 // Importar módulos da biblioteca
 use chatguru_clickup_middleware::{AppState, config, services, utils, auth};
@@ -28,9 +27,6 @@ use handlers::{
     handle_webhook,
     handle_worker,
     list_clickup_tasks, get_clickup_list_info, test_clickup_connection,
-    check_database,
-    apply_migrations,
-    sync_clickup_data,
 };
 use services::ClickUpService;
 use utils::{AppError, logging::*};
@@ -49,85 +45,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     log_config_loaded(&std::env::var("RUST_ENV").unwrap_or_else(|_| "development".to_string()));
 
-    // Inicializar conexão com Cloud SQL PostgreSQL
-    // Cloud Run usa Unix socket: /cloudsql/PROJECT:REGION:INSTANCE
-    // Local development usa DATABASE_URL com host/port
-    log_info("🗄️  Conectando ao Cloud SQL PostgreSQL...");
-
-    let db_pool = if let Ok(database_url) = std::env::var("DATABASE_URL") {
-        // Usar DATABASE_URL diretamente (desenvolvimento local ou override)
-        log_info("📍 Usando DATABASE_URL fornecida");
-        PgPoolOptions::new()
-            .max_connections(5)
-            .acquire_timeout(std::time::Duration::from_secs(10))
-            .connect(&database_url)
-            .await
-            .map_err(|e| AppError::ConfigError(format!("Failed to connect with DATABASE_URL: {}", e)))?
-    } else {
-        // Construir conexão via Unix socket para Cloud Run
-        let instance_connection_name = std::env::var("INSTANCE_CONNECTION_NAME")
-            .unwrap_or_else(|_| "buzzlightear:southamerica-east1:chatguru-middleware-db".to_string());
-
-        let db_user = std::env::var("DB_USER").unwrap_or_else(|_| "postgres".to_string());
-        let db_pass = std::env::var("DB_PASS").unwrap_or_else(|_| {
-            log_warning("⚠️ DB_PASS não definida!");
-            "".to_string()
-        });
-        let db_name = std::env::var("DB_NAME").unwrap_or_else(|_| "chatguru_middleware".to_string());
-
-        log_info(&format!("🔧 DB Config - User: {}, DB: {}, Instance: {}", db_user, db_name, instance_connection_name));
-
-        // Usar sqlx connect_with para configurar Unix socket
-        let socket_path = format!("/cloudsql/{}", instance_connection_name);
-        log_info(&format!("🔌 Conectando via Unix socket: {}", socket_path));
-
-        use sqlx::postgres::PgConnectOptions;
-        
-
-        let options = PgConnectOptions::new()
-            .host(&socket_path)
-            .username(&db_user)
-            .password(&db_pass)
-            .database(&db_name);
-
-        PgPoolOptions::new()
-            .max_connections(5)
-            .acquire_timeout(std::time::Duration::from_secs(10))
-            .connect_with(options)
-            .await
-            .map_err(|e| AppError::ConfigError(format!("Failed to connect via Unix socket: {}", e)))?
-    };
-
-    log_info("✅ Cloud SQL PostgreSQL connected");
-
-    // Inicializar EstruturaService (se dinâmico estiver habilitado)
-    let estrutura_service = if std::env::var("DYNAMIC_STRUCTURE_ENABLED")
-        .unwrap_or_else(|_| "true".to_string()) == "true" {
-
-        let clickup_token = std::env::var("CLICKUP_API_TOKEN")
-            .or_else(|_| std::env::var("clickup_api_token"))
-            .or_else(|_| std::env::var("CLICKUP_TOKEN"))
-            .map_err(|_| AppError::ConfigError("clickup_api_token not set".to_string()))?;
-
-        let service = services::EstruturaService::new(db_pool.clone(), clickup_token);
-        log_info("✅ EstruturaService initialized (dynamic structure enabled)");
-        Some(Arc::new(service))
-    } else {
-        log_info("ℹ️ Dynamic structure disabled (DYNAMIC_STRUCTURE_ENABLED=false)");
-        None
-    };
+    // Sistema usa apenas YAML e API do ClickUp (sem banco de dados)
+    log_info("📄 Modo YAML-only: usando apenas configuração YAML e API do ClickUp");
 
     // Inicializar serviços
-    let mut clickup_service = ClickUpService::new_with_secrets().await
-        .map_err(|e| AppError::ConfigError(format!("Failed to initialize ClickUp service via Secret Manager: {}", e)))?;
+    // NOTA: EstruturaService (DB) e FolderResolver (YAML) foram substituídos por:
+    // - SmartFolderFinder (busca via API do ClickUp)
+    // - SmartAssigneeFinder (busca assignees via API)
+    // - CustomFieldManager (sincroniza "Cliente Solicitante")
+    log_info("ℹ️ Usando SmartFolderFinder/SmartAssigneeFinder (busca via API)");
 
-    // Injetar EstruturaService no ClickUpService se disponível
-    if let Some(ref estrutura) = estrutura_service {
-        clickup_service = clickup_service.with_estrutura_service(estrutura.clone());
-        log_info("✅ ClickUp service configured with EstruturaService");
-    } else {
-        log_info("ℹ️ ClickUp service initialized without EstruturaService (static mode)");
-    }
+    let clickup_service = ClickUpService::new(settings.clone(), None);
 
     // Inicializar Vertex AI service se habilitado
     let vertex_service = if let Some(ref vertex_config) = settings.vertex {
@@ -136,12 +64,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .clone()
                 .unwrap_or_else(|| "media-processing-requests".to_string());
 
-            let service = services::VertexAIService::new(
+            match services::VertexAIService::new(
                 vertex_config.project_id.clone(),
-                topic_name
-            );
-            log_info("Vertex AI service initialized");
-            Some(service)
+                vertex_config.location.clone(),
+                Some(topic_name)
+            ).await {
+                Ok(service) => {
+                    log_info("✅ Vertex AI service initialized with authentication");
+                    Some(service)
+                }
+                Err(e) => {
+                    log_warning(&format!("⚠️ Failed to initialize Vertex AI service: {}. Service disabled.", e));
+                    None
+                }
+            }
         } else {
             log_info("Vertex AI service disabled in config");
             None
@@ -164,9 +100,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    // Inicializar ConfigService para ler configurações do banco
-    let config_service = services::ConfigService::new(db_pool.clone());
-    log_info("ConfigService initialized");
+    // ConfigService desabilitado (sem banco de dados)
+    log_info("ℹ️  ConfigService disabled (no database - using YAML only)");
 
     // Inicializar OAuth2 State (novo módulo isolado)
     let oauth_config = OAuth2Config::from_env()
@@ -194,11 +129,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    // Inicializar estado da aplicação (SEM scheduler)
+    // Inicializar estado da aplicação (SEM scheduler, SEM database)
     let app_state = Arc::new(AppState {
         clickup_client: reqwest::Client::new(),
         clickup: clickup_service,
-        config_db: config_service,
         settings: settings.clone(),
         vertex: vertex_service,
         media_sync: media_sync_service,
@@ -223,24 +157,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/clickup/tasks", get(list_clickup_tasks))
         .route("/clickup/list", get(get_clickup_list_info))
         .route("/clickup/test", get(test_clickup_connection))
-
-        // Database check endpoint (admin)
-        .route("/admin/db-check", get({
-            let pool = db_pool.clone();
-            move || check_database(axum::extract::State(pool))
-        }))
-
-        // Database migration endpoint (admin)
-        .route("/admin/migrate", post({
-            let pool = db_pool.clone();
-            move || apply_migrations(axum::extract::State(pool))
-        }))
-
-        // ClickUp sync endpoint (admin) - sincroniza spaces, folders e lists
-        .route("/admin/sync-clickup", post({
-            let pool = db_pool.clone();
-            move || sync_clickup_data(axum::extract::State(pool))
-        }))
 
         .with_state(app_state);
 

@@ -15,6 +15,7 @@ pub enum AppError {
     InternalError(String),
     Timeout(String),
     StructureNotFound(String),
+    VertexError(String),
 }
 
 #[derive(Debug)]
@@ -49,6 +50,7 @@ impl fmt::Display for AppError {
             AppError::InternalError(msg) => write!(f, "Internal error: {}", msg),
             AppError::Timeout(msg) => write!(f, "Timeout error: {}", msg),
             AppError::StructureNotFound(msg) => write!(f, "Structure not found: {}", msg),
+            AppError::VertexError(msg) => write!(f, "Vertex AI error: {}", msg),
         }
     }
 }
@@ -67,11 +69,12 @@ impl From<reqwest::Error> for AppError {
     }
 }
 
-impl From<sqlx::Error> for AppError {
-    fn from(err: sqlx::Error) -> Self {
-        AppError::ConfigError(format!("Database error: {}", err))
-    }
-}
+// Database error conversion desabilitado (sem banco)
+// impl From<sqlx::Error> for AppError {
+//     fn from(err: sqlx::Error) -> Self {
+//         AppError::ConfigError(format!("Database error: {}", err))
+//     }
+// }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
@@ -86,6 +89,7 @@ impl IntoResponse for AppError {
             AppError::InternalError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
             AppError::Timeout(msg) => (StatusCode::GATEWAY_TIMEOUT, msg),
             AppError::StructureNotFound(msg) => (StatusCode::NOT_FOUND, msg),
+            AppError::VertexError(msg) => (StatusCode::BAD_GATEWAY, msg),
         };
 
         let body = json!({

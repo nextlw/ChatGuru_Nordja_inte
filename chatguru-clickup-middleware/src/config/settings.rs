@@ -9,6 +9,7 @@ pub struct Settings {
     pub chatguru: ChatGuruSettings,
     pub ai: Option<AISettings>,
     pub vertex: Option<VertexSettings>,
+    pub hybrid_ai: Option<HybridAISettings>,  // NOVO: Configurações do serviço híbrido
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -51,6 +52,8 @@ pub struct ChatGuruSettings {
 pub struct AISettings {
     pub enabled: bool,
     // Usa sempre Vertex AI no Google Cloud (mais eficiente e integrado)
+    pub use_hybrid: Option<bool>,     // NOVO: Usar serviço híbrido experimental
+    pub prefer_vertex: Option<bool>,  // NOVO: Preferir Vertex AI quando híbrido ativo
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -59,6 +62,51 @@ pub struct VertexSettings {
     pub timeout_seconds: u64,
     pub project_id: String,
     pub location: String,
+    pub model: Option<String>, // Modelo a usar (default: gemini-1.5-flash)
+    pub max_media_size_mb: Option<u32>, // Tamanho máximo de mídia em MB (default: 10)
+    pub supported_mime_types: Option<Vec<String>>, // Tipos MIME permitidos
+    pub generation: Option<VertexGenerationConfig>, // Configurações de geração
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct VertexGenerationConfig {
+    pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub top_k: Option<i32>,
+    pub max_output_tokens: Option<i32>,
+}
+
+// NOVO: Configurações para o serviço híbrido AI
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct HybridAISettings {
+    pub enabled: bool,                 // Feature flag principal
+    pub fallback_enabled: Option<bool>, // Permitir fallback automático
+    pub log_service_used: Option<bool>, // Log detalhado de qual serviço foi usado
+    pub vertex_timeout_seconds: Option<u64>, // Timeout específico para Vertex AI
+    pub prefer_vertex_for_media: Option<bool>, // Preferir Vertex para processamento de mídia
+}
+
+impl Default for VertexGenerationConfig {
+    fn default() -> Self {
+        Self {
+            temperature: Some(0.7),
+            top_p: Some(0.9),
+            top_k: Some(40),
+            max_output_tokens: Some(1024),
+        }
+    }
+}
+
+impl Default for HybridAISettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,                        // Desabilitado por padrão (segurança)
+            fallback_enabled: Some(true),         // Fallback habilitado por padrão
+            log_service_used: Some(true),         // Log habilitado por padrão
+            vertex_timeout_seconds: Some(10),     // Timeout baixo para fail-fast
+            prefer_vertex_for_media: Some(true),  // Vertex melhor para mídia
+        }
+    }
 }
 
 impl Settings {

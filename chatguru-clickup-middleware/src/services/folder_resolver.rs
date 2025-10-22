@@ -1,27 +1,46 @@
-/// Folder Resolver: Resolve cliente → folder_id usando mapeamento direto
-///
-/// NOVA LÓGICA SIMPLIFICADA:
-/// - Recebe Info_2 (nome do cliente)
-/// - Busca no YAML cliente_solicitante_mappings
-/// - Usa fuzzy matching para tolerar erros de digitação
-/// - Fallback para lista padrão se não encontrar
-///
-/// Exemplo:
-/// ```
-/// Info_2 = "Raphaela Spilberg" (erro de digitação)
-/// Fuzzy match → "Raphaela Spielberg"
-/// Retorna folder_id: "abeb7e51-2ca7-4322-9a91-4a3b7f4ebd85"
-/// ```
+// ==================================================================================
+// DEPRECATED: FolderResolver - Usa YAML estático (client_to_folder_mapping.yaml)
+// ==================================================================================
+// SUBSTITUÍDO POR: SmartFolderFinder (busca via API do ClickUp)
+//
+// Este serviço foi deprecado porque:
+// 1. Depende de YAML estático que precisa ser atualizado manualmente
+// 2. Não consegue encontrar clientes novos sem redeployment
+// 3. Não aproveita a estrutura real do ClickUp (single source of truth)
+//
+// A nova arquitetura usa:
+// - SmartFolderFinder: Busca folders via GET /team/{team_id}/space
+// - Fuzzy matching com API real do ClickUp
+// - Fallback para histórico de tarefas (campo Cliente Solicitante)
+// - Auto-criação de listas mensais
+//
+// Veja: src/services/smart_folder_finder.rs
+// ==================================================================================
+//
+// Folder Resolver: Resolve cliente → folder_id usando mapeamento direto
+//
+// LÓGICA ANTIGA:
+// - Recebe Info_2 (nome do cliente)
+// - Busca no YAML cliente_solicitante_mappings
+// - Usa fuzzy matching para tolerar erros de digitação
+// - Fallback para lista padrão se não encontrar
+//
+// Exemplo:
+// ```
+// Info_2 = "Raphaela Spilberg" (erro de digitação)
+// Fuzzy match → "Raphaela Spielberg"
+// Retorna folder_id: "abeb7e51-2ca7-4322-9a91-4a3b7f4ebd85"
+// ```
 
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use crate::utils::{AppResult, AppError};
 
-/// Estrutura do YAML dropdown_to_folder_mapping.yaml
+/// Estrutura do YAML client_to_folder_mapping.yaml
 /// Mapeia dropdown names → folder IDs reais do ClickUp
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ClienteMappings {
-    #[serde(alias = "cliente_solicitante_mappings", alias = "dropdown_to_folder_mapping")]
+    #[serde(alias = "cliente_solicitante_mappings", alias = "dropdown_to_folder_mapping", alias = "client_to_folder_mapping")]
     pub dropdown_to_folder_mapping: HashMap<String, String>,
 }
 
@@ -65,13 +84,14 @@ impl FolderResolver {
             mappings: config.dropdown_to_folder_mapping,
             fuzzy_threshold: 0.85, // 85% de similaridade mínima
             fallback_folder_id: std::env::var("FALLBACK_FOLDER_ID")
-                .unwrap_or_else(|_| "901320655648".to_string()), // Lista OUTUBRO da Renata (fallback)
+                .unwrap_or_else(|_| "901321080769".to_string()), // Lista "Sem Identificação" → OUTUBRO 2025 (fallback)
         })
     }
 
-    /// Carregar do arquivo padrão (novo mapeamento com folder IDs reais)
+    /// Carregar do arquivo padrão (mapeamento COMPLETO com 200+ clientes)
+    /// Usa client_to_folder_mapping.yaml (236 clientes) ao invés de dropdown_to_folder_mapping.yaml (73 clientes)
     pub fn load_default() -> AppResult<Self> {
-        Self::from_yaml("config/dropdown_to_folder_mapping.yaml")
+        Self::from_yaml("config/client_to_folder_mapping.yaml")
     }
 
     /// Resolver folder_id a partir do nome do cliente (Info_2)

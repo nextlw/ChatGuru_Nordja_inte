@@ -49,6 +49,9 @@ chrono = { version = "0.4", features = ["serde"] }
 # String similarity (fuzzy matching)
 strsim = "0.11"
 
+# Unicode normalization (remove accents)
+deunicode = "1.6"
+
 # Cryptography
 hmac = "0.12"
 sha2 = "0.10"
@@ -72,16 +75,16 @@ once_cell = "1.19"
 # Google Cloud
 google-cloud-pubsub = "0.30"
 google-cloud-googleapis = { version = "0.16", features = ["pubsub"] }
-google-cloud-auth = "0.17"  # Para autenticação com Vertex AI
-google-cloud-token = "0.1"  # Token provider para Vertex AI
+google-cloud-auth = "1.0"  # Para autenticação com Vertex AI (Application Default Credentials)
 google-cloud-secretmanager-v1 = "1.0"  # Secret Manager
 
-# Database
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "sqlite", "macros"] }
+# Database (DESABILITADO - usando apenas YAML)
+# sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "sqlite", "macros"] }
 
 [dev-dependencies]
 httpmock = "0.7"
 tokio-test = "0.4"
+rand = "0.8"  # Para testes com seleção aleatória
 
 [features]
 default = []
