@@ -242,14 +242,34 @@ impl ClickUpService {
     /// - **404 Not Found**: list_id não existe
     /// - **400 Bad Request**: Estrutura JSON inválida ou custom_field_id incorreto
     pub async fn create_task_from_json(&self, task_data: &Value) -> AppResult<Value> {
-        let url = format!("{}/list/{}/task", self.base_url, self.list_id);
+        // 🔧 FIX: Extrair list_id do task_data ao invés de usar sempre self.list_id
+        // O SmartFolderFinder insere o list_id correto no task_data, devemos usar ele!
+        let list_id = task_data
+            .get("list_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&self.list_id);
+
+        // Log do list_id sendo usado para debug
+        if task_data.get("list_id").is_some() {
+            log_info(&format!("🎯 Usando list_id do SmartFolderFinder: {}", list_id));
+        } else {
+            log_info(&format!("⚠️ list_id não encontrado no task_data, usando fallback: {}", list_id));
+        }
+
+        let url = format!("{}/list/{}/task", self.base_url, list_id);
+
+        // Remover list_id do task_data antes de enviar (a API espera list_id na URL, não no body)
+        let mut clean_task_data = task_data.clone();
+        if let Some(obj) = clean_task_data.as_object_mut() {
+            obj.remove("list_id");
+        }
 
         // Enviar requisição POST com JSON no body
         let response = self.client
             .post(&url)
             .header("Authorization", format!("Bearer {}", &self.token))
             .header("Content-Type", "application/json")
-            .json(task_data)
+            .json(&clean_task_data)
             .send()
             .await?;
 
