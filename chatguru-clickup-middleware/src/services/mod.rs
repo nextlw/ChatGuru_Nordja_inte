@@ -11,6 +11,7 @@ pub mod folder_resolver;  // Resolução simplificada de folders
 pub mod smart_folder_finder;  // Busca inteligente de folders via API + histórico
 pub mod smart_assignee_finder;  // Busca inteligente de assignees (responsáveis)
 pub mod custom_field_manager;  // Gerenciamento de campos personalizados (Cliente Solicitante)
+pub mod message_queue;  // Fila de mensagens por chat (5 msgs ou 100s)
 
 // Re-exports
 pub use clickup::*;
@@ -24,5 +25,6 @@ pub use folder_resolver::*;
 pub use smart_folder_finder::*;
 pub use smart_assignee_finder::*;
 pub use custom_field_manager::*;
+pub use message_queue::*;
 
 // OAuth2 module agora está em src/auth/ (módulo separado e isolado)
