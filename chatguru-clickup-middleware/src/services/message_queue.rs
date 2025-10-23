@@ -1,14 +1,17 @@
 /// Message Queue Service: Agrupa mensagens por chat antes de processar
 ///
-/// Comportamento:
+/// Comportamento Unificado:
 /// - Cada chat tem sua própria fila
-/// - Processa quando atingir 5 mensagens OU 100 segundos
-/// - Scheduler roda a cada 10 segundos verificando filas prontas
+/// - Processa AUTOMATICAMENTE via callback quando:
+///   - 5 mensagens acumuladas (via enqueue)
+///   - 100 segundos transcorridos (via scheduler)
+/// - Scheduler roda a cada 10 segundos verificando timeouts
+/// - Callback centraliza todo envio para Pub/Sub
 ///
 /// Exemplo:
 /// ```
-/// Chat A: msg1 → msg2 → msg3 → msg4 → msg5 → PROCESSA (5 mensagens)
-/// Chat B: msg1 → espera 100s → PROCESSA (timeout)
+/// Chat A: msg1 → msg2 → msg3 → msg4 → msg5 → CALLBACK → Pub/Sub (5 mensagens)
+/// Chat B: msg1 → espera 100s → CALLBACK → Pub/Sub (timeout)
 /// ```
 
 use std::collections::HashMap;
@@ -94,26 +97,30 @@ impl MessageQueueService {
     }
 
     /// Adiciona uma mensagem à fila do chat
-    ///
-    /// Retorna:
-    /// - Some(mensagens) se a fila está pronta para processar
-    /// - None se ainda está aguardando mais mensagens
-    pub async fn enqueue(&self, chat_id: String, payload: Value) -> Option<Vec<QueuedMessage>> {
+    /// Processa automaticamente quando atingir 5 mensagens ou 100 segundos
+    pub async fn enqueue(&self, chat_id: String, payload: Value) {
         let mut queues = self.queues.write().await;
-        
+
+        // Log do payload recebido (debug)
+        tracing::debug!(
+            "📥 Payload recebido para chat '{}': {}",
+            chat_id,
+            serde_json::to_string(&payload).unwrap_or_else(|_| "invalid".to_string())
+        );
+
         // Criar fila se não existir
         let queue = queues.entry(chat_id.clone()).or_insert_with(ChatQueue::new);
-        
+
         // Adicionar mensagem
         queue.push(payload);
-        
+
         tracing::info!(
             "📬 Chat '{}': {} mensagens na fila (aguardando {} ou 100s)",
             chat_id,
             queue.messages.len(),
             MAX_MESSAGES_PER_CHAT
         );
-        
+
         // Verificar se está pronto para processar
         if queue.is_ready_to_process() {
             let reason = if queue.messages.len() >= MAX_MESSAGES_PER_CHAT {
@@ -121,19 +128,73 @@ impl MessageQueueService {
             } else {
                 "100 segundos atingidos".to_string()
             };
-            
+
+            let message_count = queue.messages.len();
+
             tracing::info!(
-                "✅ Chat '{}': Pronto para processar ({}) - {} mensagens acumuladas",
+                "🚀 Chat '{}': Fila pronta para processar ({}) - {} mensagens acumuladas",
                 chat_id,
                 reason,
-                queue.messages.len()
+                message_count
             );
-            
-            // Remover fila do HashMap e retornar mensagens
-            let mut queue = queues.remove(&chat_id)?;
-            Some(queue.drain())
+
+            // Remover fila do HashMap e processar com callback
+            if let Some(mut queue) = queues.remove(&chat_id) {
+                let messages = queue.drain();
+
+                // Se há callback registrado, chamar
+                if let Some(ref callback) = self.on_batch_ready {
+                    tracing::info!(
+                        "📤 Chat '{}': Enviando {} mensagens para callback (processamento via {})",
+                        chat_id,
+                        message_count,
+                        reason
+                    );
+
+                    let cb = Arc::clone(callback);
+                    let chat_id_clone = chat_id.clone();
+                    tokio::spawn(async move {
+                        tracing::debug!(
+                            "🔄 Chat '{}': Callback iniciado para processar {} mensagens",
+                            chat_id_clone,
+                            messages.len()
+                        );
+                        cb(chat_id_clone, messages);
+                    });
+                } else {
+                    // Fallback: apenas agregar e logar
+                    tracing::warn!(
+                        "⚠️ Chat '{}': Nenhum callback configurado - usando fallback",
+                        chat_id
+                    );
+
+                    let chat_id_clone = chat_id.clone();
+                    tokio::spawn(async move {
+                        match aggregate_messages(chat_id_clone.clone(), messages) {
+                            Ok(payload) => {
+                                tracing::info!(
+                                    "✅ Batch agregado para chat '{}' (sem callback configurado)",
+                                    chat_id_clone
+                                );
+                                tracing::debug!(
+                                    "📋 Payload agregado (não enviado): {}",
+                                    serde_json::to_string(&payload).unwrap_or_else(|_| "invalid".to_string())
+                                );
+                            }
+                            Err(e) => {
+                                tracing::error!("❌ Erro ao agregar batch do chat '{}': {}", chat_id_clone, e);
+                            }
+                        }
+                    });
+                }
+            }
         } else {
-            None
+            tracing::debug!(
+                "⏳ Chat '{}': Mensagem adicionada, aguardando mais ({}/{})",
+                chat_id,
+                queue.messages.len(),
+                MAX_MESSAGES_PER_CHAT
+            );
         }
     }
 
@@ -161,41 +222,67 @@ impl MessageQueueService {
     async fn check_timeouts(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut queues = self.queues.write().await;
         let mut ready_chats = Vec::new();
-        
+
+        tracing::trace!("🔍 Verificando timeouts em {} filas ativas", queues.len());
+
         // Identificar chats prontos para processar
         for (chat_id, queue) in queues.iter() {
             if queue.is_ready_to_process() {
                 let elapsed = queue.first_message_at.elapsed().as_secs();
+                let message_count = queue.messages.len();
+
                 tracing::info!(
-                    "⏰ Chat '{}': Timeout atingido ({}s) - {} mensagens aguardando",
+                    "⏰ Chat '{}': Timeout atingido ({}s) - {} mensagens aguardando processamento",
                     chat_id,
                     elapsed,
-                    queue.messages.len()
+                    message_count
                 );
-                ready_chats.push(chat_id.clone());
+
+                ready_chats.push((chat_id.clone(), message_count, elapsed));
             }
         }
-        
+
         // Processar chats prontos
-        for chat_id in ready_chats {
+        for (chat_id, message_count, elapsed_secs) in ready_chats {
             if let Some(mut queue) = queues.remove(&chat_id) {
                 let messages = queue.drain();
-                
+
                 // Se há callback registrado, chamar
                 if let Some(ref callback) = self.on_batch_ready {
+                    tracing::info!(
+                        "📤 Chat '{}': Enviando {} mensagens para callback (timeout após {}s)",
+                        chat_id,
+                        message_count,
+                        elapsed_secs
+                    );
+
                     let cb = Arc::clone(callback);
                     let chat_id_clone = chat_id.clone();
                     tokio::spawn(async move {
+                        tracing::debug!(
+                            "🔄 Chat '{}': Callback iniciado para processar {} mensagens (timeout)",
+                            chat_id_clone,
+                            messages.len()
+                        );
                         cb(chat_id_clone, messages);
                     });
                 } else {
                     // Fallback: apenas agregar e logar
+                    tracing::warn!(
+                        "⚠️ Chat '{}': Nenhum callback configurado para timeout - usando fallback",
+                        chat_id
+                    );
+
                     tokio::spawn(async move {
                         match aggregate_messages(chat_id.clone(), messages) {
-                            Ok(_aggregated_payload) => {
+                            Ok(payload) => {
                                 tracing::info!(
-                                    "✅ Batch agregado para chat '{}' (sem callback configurado)",
+                                    "✅ Batch agregado para chat '{}' (timeout sem callback configurado)",
                                     chat_id
+                                );
+                                tracing::debug!(
+                                    "📋 Payload agregado por timeout (não enviado): {}",
+                                    serde_json::to_string(&payload).unwrap_or_else(|_| "invalid".to_string())
                                 );
                             }
                             Err(e) => {
@@ -206,7 +293,7 @@ impl MessageQueueService {
                 }
             }
         }
-        
+
         Ok(())
     }
     
@@ -239,7 +326,7 @@ fn aggregate_messages(
     messages: Vec<QueuedMessage>,
 ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
     tracing::info!(
-        "🚀 Processando batch do chat '{}': {} mensagens acumuladas",
+        "📦 Agregando batch do chat '{}': {} mensagens para processar",
         chat_id,
         messages.len()
     );
@@ -305,9 +392,11 @@ fn aggregate_messages(
         aggregated_text.len()
     );
     
-    // Log do payload final (debug)
+    // Log detalhado do payload final (debug)
     tracing::debug!(
-        "📋 Payload agregado:\n{}",
+        "📋 Payload final agregado para chat '{}' (batch_size={}):\n{}",
+        chat_id,
+        messages.len(),
         serde_json::to_string_pretty(&aggregated_payload).unwrap_or_default()
     );
     

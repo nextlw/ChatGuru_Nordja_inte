@@ -58,8 +58,10 @@ struct ClickUpUser {
     id: String,
     username: String,
     email: Option<String>,
+    #[allow(dead_code)]
     #[serde(default)]
     color: Option<String>,
+    #[allow(dead_code)]
     #[serde(default, rename = "profilePicture")]
     profile_picture: Option<String>,
 }

@@ -19,6 +19,7 @@ use std::time::Duration;
 /// Será completamente refatorado nas próximas fases
 #[derive(Clone)]
 pub struct MediaSyncService {
+    #[allow(dead_code)]
     default_timeout: Duration,
 }
 

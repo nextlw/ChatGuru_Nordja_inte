@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 use serde::Deserialize;
 use serde_json::Value;
-use chrono::Utc;
+use chrono::{Utc, Datelike};
 use crate::utils::{AppResult, AppError};
 
 const CLIENT_SOLICITANTE_FIELD_ID: &str = "0ed63eec-1c50-4190-91c1-59b4b17557f6";
@@ -64,6 +64,7 @@ struct ClickUpFolder {
     #[serde(deserialize_with = "deserialize_id_flexible")]
     id: String,
     name: String,
+    #[allow(dead_code)]
     lists: Option<Vec<ClickUpList>>,
 }
 
@@ -85,6 +86,7 @@ struct ClickUpTask {
     #[serde(deserialize_with = "deserialize_id_flexible")]
     id: String,
     folder: Option<ClickUpTaskFolder>,
+    #[allow(dead_code)]
     list: Option<ClickUpTaskList>,
     custom_fields: Option<Vec<ClickUpCustomField>>,
 }
@@ -98,8 +100,10 @@ struct ClickUpTaskFolder {
 
 #[derive(Debug, Deserialize)]
 struct ClickUpTaskList {
+    #[allow(dead_code)]
     #[serde(deserialize_with = "deserialize_id_flexible")]
     id: String,
+    #[allow(dead_code)]
     name: String,
 }
 
@@ -425,12 +429,37 @@ impl SmartFolderFinder {
         Ok(None)
     }
 
+    /// Gera nome do mês em português e caixa alta (ex: "OUTUBRO 2025")
+    fn get_month_name_pt(&self, date: chrono::DateTime<Utc>) -> String {
+        let month = date.month();
+        let year = date.year();
+
+        let month_pt = match month {
+            1 => "JANEIRO",
+            2 => "FEVEREIRO",
+            3 => "MARÇO",
+            4 => "ABRIL",
+            5 => "MAIO",
+            6 => "JUNHO",
+            7 => "JULHO",
+            8 => "AGOSTO",
+            9 => "SETEMBRO",
+            10 => "OUTUBRO",
+            11 => "NOVEMBRO",
+            12 => "DEZEMBRO",
+            _ => "DESCONHECIDO",
+        };
+
+        format!("{} {}", month_pt, year)
+    }
+
     /// Buscar ou criar lista do mês atual na folder
     async fn find_or_create_current_month_list(&self, folder_id: &str) -> AppResult<(String, String)> {
         let now = Utc::now();
-        let month_name = now.format("%B %Y").to_string(); // Ex: "January 2025"
+        let month_name_pt = self.get_month_name_pt(now); // Ex: "OUTUBRO 2025"
+        let month_number = now.month();
 
-        tracing::info!("📅 Buscando lista do mês atual: '{}'", month_name);
+        tracing::info!("📅 Buscando lista do mês atual: '{}'", month_name_pt);
 
         // GET /folder/{folder_id}
         let url = format!("https://api.clickup.com/api/v2/folder/{}", folder_id);
@@ -455,12 +484,21 @@ impl SmartFolderFinder {
         let folder: serde_json::Value = response.json().await
             .map_err(|e| AppError::InternalError(format!("Falha ao parsear folder: {}", e)))?;
 
-        // Buscar lista com nome do mês
+        // Meses em português para busca (aceita variações)
+        let months_pt = ["janeiro", "fevereiro", "março", "abril", "maio", "junho",
+                         "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+        let current_month_pt = months_pt[(month_number - 1) as usize];
+        let year_str = now.year().to_string();
+
+        // Buscar lista com nome do mês (aceita em português ou inglês, case-insensitive)
         if let Some(lists) = folder["lists"].as_array() {
             for list in lists {
                 if let Some(name) = list["name"].as_str() {
-                    if name.to_lowercase().contains(&month_name.to_lowercase())
-                        || name.to_lowercase().contains(&now.format("%B").to_string().to_lowercase())
+                    let name_lower = name.to_lowercase();
+
+                    // Aceita: "OUTUBRO 2025", "outubro 2025", "October 2025", etc.
+                    if (name_lower.contains(current_month_pt) || name_lower.contains(&now.format("%B").to_string().to_lowercase()))
+                        && name_lower.contains(&year_str)
                     {
                         let list_id = list["id"].as_str()
                             .ok_or_else(|| AppError::InternalError("Lista sem ID".to_string()))?;
@@ -472,9 +510,9 @@ impl SmartFolderFinder {
             }
         }
 
-        // Lista não encontrada, criar nova
-        tracing::info!("📝 Criando lista do mês: '{}'", month_name);
-        self.create_list(folder_id, &month_name).await
+        // Lista não encontrada, criar nova em português e caixa alta
+        tracing::info!("📝 Criando lista do mês: '{}'", month_name_pt);
+        self.create_list(folder_id, &month_name_pt).await
     }
 
     /// Criar lista na folder

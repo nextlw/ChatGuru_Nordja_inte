@@ -129,12 +129,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    // Inicializar fila de mensagens por chat
-    let message_queue = Arc::new(services::MessageQueueService::new());
+    // Inicializar fila de mensagens por chat com callback para Pub/Sub
+    let message_queue = Arc::new(
+        services::MessageQueueService::new()
+            .with_batch_callback({
+                let settings = settings.clone();
+                move |chat_id: String, messages: Vec<services::QueuedMessage>| {
+                    let settings = settings.clone();
+                    tokio::spawn(async move {
+                        match publish_batch_to_pubsub(&settings, chat_id.clone(), messages).await {
+                            Ok(_) => {
+                                tracing::info!(
+                                    "✅ Batch do chat '{}' publicado no Pub/Sub com sucesso",
+                                    chat_id
+                                );
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    "❌ Erro ao publicar batch do chat '{}' no Pub/Sub: {}",
+                                    chat_id, e
+                                );
+                            }
+                        }
+                    });
+                }
+            })
+    );
     
     // Iniciar scheduler da fila (verifica a cada 10s)
     message_queue.clone().start_scheduler();
-    log_info("✅ Message Queue Scheduler iniciado (5 msgs ou 100s por chat)");
+    log_info("✅ Message Queue Scheduler iniciado - COM CALLBACK para Pub/Sub (5 msgs ou 100s por chat)");
 
     // Inicializar estado da aplicação
     let app_state = Arc::new(AppState {
@@ -194,6 +218,74 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     log_server_ready(port);
 
     axum::serve(listener, app).await?;
+
+    Ok(())
+}
+
+/// Função auxiliar para publicar batch no Pub/Sub (reutiliza lógica do webhook handler)
+async fn publish_batch_to_pubsub(
+    settings: &Settings,
+    chat_id: String,
+    messages: Vec<services::QueuedMessage>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use google_cloud_pubsub::client::{Client, ClientConfig};
+    use google_cloud_googleapis::pubsub::v1::PubsubMessage;
+    use serde_json::json;
+
+    // 1. Agregar mensagens em um único payload
+    let aggregated_payload = services::MessageQueueService::process_batch_sync(chat_id.clone(), messages)?;
+
+    tracing::info!(
+        "📦 Payload agregado para chat '{}' criado com sucesso",
+        chat_id
+    );
+
+    // 2. Configurar cliente Pub/Sub
+    let config = ClientConfig::default().with_auth().await?;
+    let client = Client::new(config).await?;
+
+    // 3. Obter nome do tópico
+    let default_topic = "chatguru-webhook-raw".to_string();
+    let topic_name = settings.gcp.pubsub_topic
+        .as_ref()
+        .unwrap_or(&default_topic);
+
+    let topic = client.topic(topic_name);
+
+    // 4. Verificar se tópico existe
+    if !topic.exists(None).await? {
+        return Err(format!("Topic '{}' does not exist", topic_name).into());
+    }
+
+    // 5. Criar publisher
+    let publisher = topic.new_publisher(None);
+
+    // 6. Preparar envelope com payload agregado
+    let envelope = json!({
+        "raw_payload": serde_json::to_string(&aggregated_payload)?,
+        "received_at": chrono::Utc::now().to_rfc3339(),
+        "source": "chatguru-webhook-queue",
+        "chat_id": chat_id,
+        "is_batch": true
+    });
+
+    let msg_bytes = serde_json::to_vec(&envelope)?;
+
+    // 7. Criar mensagem Pub/Sub
+    let msg = PubsubMessage {
+        data: msg_bytes.into(),
+        ..Default::default()
+    };
+
+    // 8. Publicar mensagem
+    let awaiter = publisher.publish(msg).await;
+    awaiter.get().await?;
+
+    tracing::info!(
+        "📤 Payload agregado publicado no tópico '{}' (chat: {})",
+        topic_name,
+        chat_id
+    );
 
     Ok(())
 }
