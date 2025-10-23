@@ -180,7 +180,7 @@ pub async fn get_clickup_list_info(State(state): State<Arc<AppState>>) -> Result
 ///     "username": "user@example.com",
 ///     "email": "user@example.com"
 ///   },
-///   "list_id": "901320655648",
+///   "list_id": "901321080769",
 ///   "timestamp": "2025-10-14T16:20:00Z"
 /// }
 /// ```
@@ -191,7 +191,7 @@ pub async fn get_clickup_list_info(State(state): State<Arc<AppState>>) -> Result
 ///   "success": false,
 ///   "message": "ClickUp connection failed",
 ///   "error": "Invalid token or insufficient permissions",
-///   "list_id": "901320655648",
+///   "list_id": "901321080769",
 ///   "timestamp": "2025-10-14T16:20:00Z"
 /// }
 /// ```

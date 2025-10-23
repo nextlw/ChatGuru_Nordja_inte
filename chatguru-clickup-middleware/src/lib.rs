@@ -8,13 +8,12 @@ pub mod utils;
 pub mod auth; // Novo módulo OAuth2 isolado
 
 // AppState é definido aqui para ser compartilhado
-// Versão event-driven: SEM scheduler
+// Versão event-driven: SEM scheduler, SEM database
 #[derive(Clone)]
 pub struct AppState {
     pub settings: config::Settings,
     pub clickup_client: reqwest::Client,
     pub clickup: services::ClickUpService,
-    pub config_db: services::ConfigService,
     pub vertex: Option<services::VertexAIService>,
     pub media_sync: Option<services::MediaSyncService>,
 }

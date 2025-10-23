@@ -29,6 +29,10 @@ use chatguru_clickup_middleware::utils::logging::*;
 use chatguru_clickup_middleware::AppState;
 use chatguru_clickup_middleware::services::openai::OpenAIService;
 use chatguru_clickup_middleware::services::chatguru::ChatGuruApiService;
+use chatguru_clickup_middleware::services::hybrid_ai::HybridAIService;
+use chatguru_clickup_middleware::services::smart_folder_finder::SmartFolderFinder;
+use chatguru_clickup_middleware::services::smart_assignee_finder::SmartAssigneeFinder;
+use chatguru_clickup_middleware::services::custom_field_manager::CustomFieldManager;
 // use crate::services::{ClickUpService, VertexAIService};
 
 // Configuração de retry
@@ -375,6 +379,9 @@ pub async fn handle_worker(
                 // Database error - NÃO recuperável (indica problema de configuração)
                 AppError::DatabaseError(_) => false,
 
+                // Vertex AI errors - recuperável (problemas de rede/temporários)
+                AppError::VertexError(_) => retry_count < MAX_RETRY_ATTEMPTS,
+
                 // Outros erros internos - permitir retry limitado
                 AppError::InternalError(_) => retry_count < MAX_RETRY_ATTEMPTS,
             };
@@ -473,11 +480,12 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
             status_back_office: None,
         }
     } else {
-        // Classificar com OpenAI
-        let openai_service = match OpenAIService::new(None).await {
-            Some(service) => service,
-            None => {
-                return Err(AppError::InternalError("Failed to initialize OpenAI service".to_string()));
+        // Classificar com HybridAIService (Vertex AI + fallback OpenAI)
+        let hybrid_service = match HybridAIService::from_app_state(state).await {
+            Ok(service) => service,
+            Err(e) => {
+                log_error(&format!("❌ Erro ao inicializar HybridAIService: {}", e));
+                return Err(AppError::InternalError(format!("Failed to initialize HybridAIService: {}", e)));
             }
         };
 
@@ -486,11 +494,11 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
             nome, message, phone.as_deref().unwrap_or("N/A")
         );
 
-        match openai_service.classify_activity_fallback(&context).await {
+        match hybrid_service.classify_activity_with_fallback(&context).await {
             Ok(c) => c,
             Err(e) => {
-                log_error(&format!("❌ Erro na classificação OpenAI: {}", e));
-                return Err(AppError::InternalError(format!("OpenAI classification failed: {}", e)));
+                log_error(&format!("❌ Erro na classificação HybridAI: {}", e));
+                return Err(AppError::InternalError(format!("HybridAI classification failed: {}", e)));
             }
         }
     };
@@ -500,42 +508,225 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
     if is_activity {
         log_info(&format!("✅ Atividade identificada: {}", classification.reason));
 
-        // NOVA LÓGICA SIMPLIFICADA:
-        // - Info_2: Nome do cliente solicitante → Resolve DIRETAMENTE para folder_id via YAML
-        // - Fuzzy matching automático (85% similaridade)
-        // - Fallback para lista OUTUBRO da Renata se não encontrar
-        //
-        // NÃO MAIS USA:
-        // - responsavel_nome (atendente)
-        // - Info_1 (empresa)
-        // - Lógica de Space → Folder → List
+        // NOVA LÓGICA COM SMARTFOLDERFINDER:
+        // 1. Extrai Info_2 (nome do cliente)
+        // 2. Busca folder via API do ClickUp com fuzzy matching
+        // 3. Fallback: busca em tarefas anteriores pelo campo "Cliente Solicitante"
+        // 4. Retorna folder_id + list_id do mês atual
 
         let client_name = extract_info_2_from_payload(payload)
             .unwrap_or_else(|| extract_nome_from_payload(payload));
 
-        log_info(&format!("🔍 Nova lógica simplificada: Info_2='{}' → folder_id (via YAML com fuzzy match)",
-            client_name));
-        log_info(&format!("📋 Debug campos: Info_2 (cliente solicitante)={:?}, Info_1 (empresa - não usado)={:?}, responsavel_nome (atendente - não usado)={:?}",
+        log_info(&format!("🔍 SmartFolderFinder: Buscando folder para Info_2='{}'", client_name));
+        log_info(&format!("📋 Debug campos: Info_2 (cliente)={:?}, Info_1 (empresa)={:?}, responsavel_nome (atendente)={:?}",
             extract_info_2_from_payload(payload),
             extract_info_1_from_payload(payload),
             extract_responsavel_nome_from_payload(payload)
         ));
 
-        // Criar task_data usando o método correto que inclui o campo "name"
-        let task_data = payload.to_clickup_task_data_with_ai(Some(&classification));
+        // Inicializar SmartFolderFinder
+        let api_token = std::env::var("CLICKUP_API_TOKEN")
+            .or_else(|_| std::env::var("clickup_api_token"))
+            .or_else(|_| std::env::var("CLICKUP_TOKEN"))
+            .map_err(|_| AppError::ConfigError("CLICKUP_API_TOKEN não configurado".to_string()))?;
 
-        // Criar tarefa no ClickUp usando nova lógica simplificada
-        log_info("🚀 Usando create_task_by_client() (lógica simplificada com fuzzy match)");
+        let team_id = std::env::var("CLICKUP_TEAM_ID")
+            .unwrap_or_else(|_| "9013037641".to_string()); // Team ID da Nordja
 
-        let task_result = match state.clickup.create_task_by_client(&task_data, &client_name).await {
-            Ok(result) => {
-                log_info(&format!("✅ Tarefa criada com sucesso: {}", result["id"]));
-                result
+        // Clonar para uso posterior no assignee_finder
+        let folder_api_token = api_token.clone();
+        let folder_team_id = team_id.clone();
+
+        let mut finder = SmartFolderFinder::new(folder_api_token, folder_team_id);
+
+        // Buscar folder de forma inteligente
+        let folder_result = match finder.find_folder_for_client(&client_name).await {
+            Ok(Some(result)) => {
+                log_info(&format!(
+                    "✅ Folder encontrado: {} (id: {}, método: {:?}, confiança: {:.2})",
+                    result.folder_name,
+                    result.folder_id,
+                    result.search_method,
+                    result.confidence
+                ));
+
+                if let (Some(list_id), Some(list_name)) = (result.list_id.clone(), result.list_name.clone()) {
+                    log_info(&format!("📋 Lista do mês: {} (id: {})", list_name, list_id));
+                }
+
+                Some(result)
+            }
+            Ok(None) => {
+                log_warning(&format!(
+                    "⚠️ Folder não encontrado para '{}', usando fallback do ClickUpService",
+                    client_name
+                ));
+                None
             }
             Err(e) => {
-                log_error(&format!("❌ Erro ao criar tarefa: {}", e));
-                return Err(e);
+                log_error(&format!("❌ Erro ao buscar folder: {}, usando fallback", e));
+                None
             }
+        };
+
+        // Buscar assignee (responsável) se disponível
+        let assignee_result = if let Some(ref responsavel) = extract_responsavel_nome_from_payload(payload) {
+            log_info(&format!("👤 Buscando assignee para responsavel_nome: '{}'", responsavel));
+
+            // Clonar para evitar move
+            let assignee_api_token = api_token.clone();
+            let assignee_team_id = team_id.clone();
+
+            let mut assignee_finder = SmartAssigneeFinder::new(assignee_api_token, assignee_team_id);
+
+            match assignee_finder.find_assignee_by_name(responsavel).await {
+                Ok(Some(result)) => {
+                    log_info(&format!(
+                        "✅ Assignee encontrado: {} (user_id: {}, método: {:?}, confiança: {:.2})",
+                        result.username,
+                        result.user_id,
+                        result.search_method,
+                        result.confidence
+                    ));
+                    Some(result)
+                }
+                Ok(None) => {
+                    log_warning(&format!(
+                        "⚠️ Assignee não encontrado para '{}', tarefa será criada sem responsável",
+                        responsavel
+                    ));
+                    None
+                }
+                Err(e) => {
+                    log_error(&format!("❌ Erro ao buscar assignee: {}, continuando sem responsável", e));
+                    None
+                }
+            }
+        } else {
+            log_info("ℹ️ Sem responsavel_nome no payload, tarefa será criada sem assignee");
+            None
+        };
+
+        // Criar task_data
+        let mut task_data = payload.to_clickup_task_data_with_ai(Some(&classification));
+
+        // Adicionar assignee ao task_data se encontrado
+        if let Some(assignee_info) = assignee_result {
+            if let Some(obj) = task_data.as_object_mut() {
+                obj.insert("assignees".to_string(), serde_json::json!(vec![assignee_info.user_id]));
+                log_info(&format!("✅ Assignee adicionado ao task_data: {}", assignee_info.username));
+            }
+        }
+
+        // Processar resultado do SmartFolderFinder
+        let task_result = if let Some(folder_info) = folder_result {
+            if let Some(list_id) = folder_info.list_id {
+                // Garantir que "Cliente Solicitante" corresponda ao folder encontrado
+                log_info(&format!(
+                    "📝 Configurando 'Cliente Solicitante' para: '{}'",
+                    folder_info.folder_name
+                ));
+
+                let custom_field_manager = CustomFieldManager::new(api_token.clone());
+
+                match custom_field_manager
+                    .ensure_client_solicitante_option(&list_id, &folder_info.folder_name)
+                    .await
+                {
+                    Ok(client_field) => {
+                        log_info("✅ Campo 'Cliente Solicitante' configurado");
+
+                        // Adicionar/substituir o campo custom no task_data
+                        if let Some(obj) = task_data.as_object_mut() {
+                            // Buscar custom_fields existentes ou criar array vazio
+                            let custom_fields = obj
+                                .entry("custom_fields")
+                                .or_insert_with(|| serde_json::json!([]));
+
+                            if let Some(fields_array) = custom_fields.as_array_mut() {
+                                // Remover campo "Cliente Solicitante" se já existir
+                                fields_array.retain(|f| {
+                                    f.get("id")
+                                        .and_then(|id| id.as_str())
+                                        != Some("0ed63eec-1c50-4190-91c1-59b4b17557f6")
+                                });
+
+                                // Adicionar novo valor
+                                fields_array.push(client_field);
+
+                                log_info(&format!(
+                                    "✅ 'Cliente Solicitante' sincronizado com folder: '{}'",
+                                    folder_info.folder_name
+                                ));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log_warning(&format!(
+                            "⚠️ Erro ao configurar 'Cliente Solicitante': {}, continuando sem o campo",
+                            e
+                        ));
+                    }
+                }
+                log_info(&format!(
+                    "🎯 Criando tarefa diretamente na lista: {} (folder: {})",
+                    list_id, folder_info.folder_id
+                ));
+
+                // Adicionar list_id ao task_data (ClickUpService espera que o list_id esteja no JSON)
+                // O método create_task_from_json extrai o list_id do próprio JSON
+                if let Some(obj) = task_data.as_object_mut() {
+                    obj.insert("list_id".to_string(), serde_json::json!(list_id));
+                }
+
+                // Criar tarefa diretamente na lista usando o ClickUpService
+                match state.clickup.create_task_from_json(&task_data).await {
+                    Ok(result) => {
+                        log_info(&format!("✅ Tarefa criada via SmartFolderFinder: {}", result["id"]));
+                        result
+                    }
+                    Err(e) => {
+                        log_error(&format!("❌ Erro ao criar tarefa: {}", e));
+                        return Err(e);
+                    }
+                }
+            } else {
+                // Tem folder mas não tem lista do mês - encaminhar para App Engine
+                log_warning(&format!(
+                    "⚠️ Folder '{}' encontrado mas sem lista do mês, encaminhando para App Engine",
+                    folder_info.folder_name
+                ));
+
+                // Enviar payload original para o App Engine
+                forward_to_app_engine(&payload).await?;
+
+                log_info("✅ Payload encaminhado para App Engine com sucesso - Processamento encerrado");
+
+                // Retornar resposta de sucesso sem criar task no ClickUp
+                return Ok(json!({
+                    "status": "forwarded_to_app_engine",
+                    "message": "Folder encontrado mas sem lista do mês, payload encaminhado para App Engine",
+                    "folder_name": folder_info.folder_name,
+                    "app_engine_url": "https://buzzlightear.rj.r.appspot.com/webhook"
+                }));
+            }
+        } else {
+            // Não encontrou folder, encaminhar para App Engine
+            log_warning(&format!("⚠️ Folder não encontrado para '{}', encaminhando para App Engine", client_name));
+
+            // Enviar payload original para o App Engine e encerrar processamento
+            forward_to_app_engine(&payload).await?;
+
+            log_info("✅ Payload encaminhado para App Engine com sucesso - Processamento encerrado");
+
+            // Retornar resposta de sucesso sem criar task no ClickUp
+            // O App Engine será responsável por todo o processamento daqui em diante
+            return Ok(json!({
+                "status": "forwarded_to_app_engine",
+                "message": "Cliente não encontrado no Cloud Run, payload encaminhado para App Engine",
+                "client_name": client_name,
+                "app_engine_url": "https://buzzlightear.rj.r.appspot.com/webhook"
+            }));
         };
 
         // Montar anotação com informações da task
@@ -995,4 +1186,53 @@ fn determine_estrelas(
     // Fallback: 1 estrela padrão
     log_info("Using fallback: 1 star");
     1
+}
+
+// ============================================================================
+// App Engine Fallback
+// ============================================================================
+
+/// Encaminha payload original do ChatGuru para o App Engine (fallback)
+///
+/// Usado quando o SmartFolderFinder não consegue encontrar o folder do cliente.
+/// O App Engine processa o payload com sua própria lógica e pode ter outros
+/// folders/listas cadastrados.
+async fn forward_to_app_engine(payload: &WebhookPayload) -> AppResult<()> {
+    const APP_ENGINE_URL: &str = "https://buzzlightear.rj.r.appspot.com/webhook";
+
+    log_info("🔄 Encaminhando payload para App Engine...");
+
+    // Serializar o payload completo
+    let payload_json = serde_json::to_value(payload)
+        .map_err(|e| AppError::InternalError(format!("Failed to serialize payload: {}", e)))?;
+
+    // Fazer POST para o App Engine
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let response = client
+        .post(APP_ENGINE_URL)
+        .header("Content-Type", "application/json")
+        .header("X-Forwarded-From", "cloud-run-middleware")
+        .json(&payload_json)
+        .send()
+        .await
+        .map_err(|e| AppError::InternalError(format!("Failed to forward to App Engine: {}", e)))?;
+
+    let status = response.status();
+
+    if status.is_success() {
+        let response_body = response.text().await.unwrap_or_default();
+        log_info(&format!("✅ App Engine response ({}): {}", status, response_body));
+        Ok(())
+    } else {
+        let error_body = response.text().await.unwrap_or_default();
+        log_error(&format!("❌ App Engine returned error ({}): {}", status, error_body));
+        Err(AppError::InternalError(format!(
+            "App Engine returned status {}: {}",
+            status, error_body
+        )))
+    }
 }

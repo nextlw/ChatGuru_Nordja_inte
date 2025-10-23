@@ -17,7 +17,7 @@ topic_name = "chatguru-events"
 subscription_name = "chatguru-events-subscription"
 
 [database]
-url = "postgresql://user:pass@/cloudsql/PROJECT:REGION:INSTANCE/dbname"
+url = "postgresql://postgres:postgres@localhost:5434/chatguru_middleware"
 max_connections = 10
 
 [chatguru]

@@ -43,7 +43,8 @@
 
 use crate::config::Settings;
 use crate::models::WebhookPayload;
-use crate::services::estrutura::EstruturaService;
+// REMOVIDO: EstruturaService (substituído por SmartFolderFinder)
+// use crate::services::estrutura::EstruturaService;
 use crate::services::secrets::SecretManagerService;
 use crate::utils::{AppError, AppResult};
 use crate::utils::logging::*;
@@ -60,7 +61,6 @@ use tracing::info;
 /// - `token`: Token de autenticação (Personal Token ou OAuth2 Access Token)
 /// - `list_id`: ID da lista padrão/fallback para criação de tarefas
 /// - `base_url`: URL base da API do ClickUp (https://api.clickup.com/api/v2)
-/// - `estrutura_service`: Serviço opcional para resolução dinâmica de estrutura
 ///
 /// # Timeouts
 ///
@@ -76,7 +76,7 @@ pub struct ClickUpService {
     token: String,
     list_id: String,
     base_url: String,
-    pub estrutura_service: Option<std::sync::Arc<EstruturaService>>,
+    // REMOVIDO: estrutura_service (substituído por SmartFolderFinder no worker)
 }
 
 impl ClickUpService {
@@ -85,7 +85,7 @@ impl ClickUpService {
     /// # Argumentos
     ///
     /// - `settings`: Configurações carregadas de arquivo TOML ou variáveis de ambiente
-    /// - `estrutura_service`: Serviço opcional para resolução dinâmica de estrutura
+    /// - `_estrutura_service`: Parâmetro deprecated (mantido por compatibilidade)
     ///
     /// # Configuração do Cliente HTTP
     ///
@@ -97,9 +97,9 @@ impl ClickUpService {
     /// # Uso
     ///
     /// ```rust,ignore
-    /// let clickup = ClickUpService::new(settings, Some(estrutura_service));
+    /// let clickup = ClickUpService::new(settings, None);
     /// ```
-    pub fn new(settings: Settings, estrutura_service: Option<std::sync::Arc<EstruturaService>>) -> Self {
+    pub fn new(settings: Settings, _estrutura_service: Option<()>) -> Self {
         // OTIMIZAÇÃO FASE 1: Cliente HTTP com timeout padrão de 30s
         // Previne requisições travadas e melhora resiliência do sistema
         let client = Client::builder()
@@ -115,7 +115,6 @@ impl ClickUpService {
             token: settings.clickup.token.clone(),
             list_id: settings.clickup.list_id.clone(),
             base_url: settings.clickup.base_url.clone(),
-            estrutura_service,
         }
     }
 
@@ -178,7 +177,6 @@ impl ClickUpService {
             token: api_token,
             list_id: list_id.clone(),
             base_url: "https://api.clickup.com/api/v2".to_string(),
-            estrutura_service: None,  // EstruturaService será injetado depois com with_estrutura_service()
         })
     }
 
@@ -198,17 +196,13 @@ impl ClickUpService {
     ///
     /// Retorna `self` para permitir chaining (pattern fluent)
     ///
-    /// # Exemplo
-    ///
-    /// ```rust,ignore
-    /// let clickup = ClickUpService::new_with_secrets()
-    ///     .await?
-    ///     .with_estrutura_service(Arc::new(estrutura_service));
-    /// ```
-    pub fn with_estrutura_service(mut self, service: std::sync::Arc<EstruturaService>) -> Self {
-        self.estrutura_service = Some(service);
-        self
-    }
+    // MÉTODO REMOVIDO: with_estrutura_service
+    // Substituído por SmartFolderFinder usado diretamente no worker
+    //
+    // pub fn with_estrutura_service(mut self, service: std::sync::Arc<EstruturaService>) -> Self {
+    //     self.estrutura_service = Some(service);
+    //     self
+    // }
 
     /// Cria uma tarefa no ClickUp a partir de dados JSON
     ///
@@ -347,7 +341,7 @@ impl ClickUpService {
     /// - `Ok(Value)`: Informações da lista em formato JSON
     ///   ```json
     ///   {
-    ///     "id": "901320655648",
+    ///     "id": "901321080769",
     ///     "name": "OUTUBRO 2025",
     ///     "status": [...],
     ///     "custom_fields": [
@@ -720,15 +714,24 @@ impl ClickUpService {
         )
     }
 
-    /// NOVA LÓGICA SIMPLIFICADA: Cria tarefa usando apenas Info_2 (nome do cliente)
-    ///
-    /// Fluxo:
-    /// 1. Info_2 (cliente) → lookup no YAML cliente_solicitante_mappings
-    /// 2. Fuzzy matching para tolerar erros (ex: "Spilberg" → "Spielberg")
-    /// 3. folder_id → resolve_monthly_list() → list_id
-    /// 4. Criar task no list_id
-    ///
-    /// Fallback: Se cliente não encontrado, usa lista padrão
+    // ==================================================================================
+    // DEPRECATED: create_task_by_client() - Usa FolderResolver (YAML) e EstruturaService (DB)
+    // ==================================================================================
+    // SUBSTITUÍDO POR: SmartFolderFinder (busca via API do ClickUp)
+    //
+    // Este método foi deprecado porque:
+    // 1. Dependia de YAML estático (client_to_folder_mapping.yaml)
+    // 2. Dependia de EstruturaService (PostgreSQL)
+    // 3. Não conseguia encontrar clientes novos sem atualizar YAML manualmente
+    //
+    // A nova arquitetura usa:
+    // - SmartFolderFinder: Busca folders via API do ClickUp com fuzzy matching
+    // - Fallback para histórico de tarefas (campo Cliente Solicitante)
+    // - Auto-criação de listas mensais quando necessário
+    //
+    // Veja: src/handlers/worker.rs (linhas 509-735) para implementação atual
+    // ==================================================================================
+    /*
     pub async fn create_task_by_client(
         &self,
         task_data: &Value,
@@ -801,12 +804,27 @@ impl ClickUpService {
             Err(AppError::ClickUpApi(format!("Status: {} - {}", status, error_text)))
         }
     }
+    */
 
-    /// Cria tarefa dinamicamente na estrutura correta baseada em Info_1 (attendant) e Info_2 (client)
-    ///
-    /// LÓGICA ANTIGA (DEPRECADA): Use create_task_by_client() ao invés disso
-    /// - attendant_name (responsavel_nome): Determina o SPACE no ClickUp
-    /// - client_name (usado para resolução da estrutura, mas Info_1/Info_2 são apenas campos personalizados)
+    // ==================================================================================
+    // DEPRECATED: create_task_dynamic() - Usa EstruturaService (DB) para resolução de estrutura
+    // ==================================================================================
+    // SUBSTITUÍDO POR: SmartFolderFinder + SmartAssigneeFinder + CustomFieldManager
+    //
+    // Este método foi deprecado porque:
+    // 1. Dependia de EstruturaService (PostgreSQL) para mapear Client+Attendant → Folder/List
+    // 2. Usava feature flag DYNAMIC_STRUCTURE_ENABLED (complexidade desnecessária)
+    // 3. Não conseguia encontrar estruturas novas sem popular DB manualmente
+    //
+    // A nova arquitetura usa:
+    // - SmartFolderFinder: Busca folders via API usando Info_2 (nome do cliente)
+    // - SmartAssigneeFinder: Busca assignees via API usando responsavel_nome
+    // - CustomFieldManager: Sincroniza "Cliente Solicitante" com folder name
+    // - Todas as buscas têm fallback para histórico de tarefas
+    //
+    // Veja: src/handlers/worker.rs (linhas 509-735) para implementação atual
+    // ==================================================================================
+    /*
     pub async fn create_task_dynamic(
         &self,
         task_data: &Value,
@@ -883,6 +901,7 @@ impl ClickUpService {
             Err(AppError::ClickUpApi(format!("Status: {} - {}", status, error_text)))
         }
     }
+    */
 
     /// Obtém ID da lista de fallback - agora apenas usa configuração
     /// Não tenta mais criar estrutura dinâmica

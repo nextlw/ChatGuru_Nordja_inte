@@ -221,7 +221,7 @@ client_to_folder_mapping:
     folder_id: "abeb7e51-2ca7-4322-9a91-4a3b7f4ebd85"
   # ... 95 clientes mapeados
 
-fallback_list_id: "901320655648"  # Lista OUTUBRO Renata
+fallback_list_id: "901321080769"  # Lista "Sem Identificação" → OUTUBRO 2025
 ```
 
 **Fuzzy Matching**: Sistema tolera erros de digitação (ex: "Spilberg" → "Spielberg", 98% score)

@@ -13,7 +13,7 @@ pub struct OpenAIService {
     api_key: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenAIClassification {
     pub is_activity: bool,
     pub reason: String,

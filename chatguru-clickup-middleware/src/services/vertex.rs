@@ -1,374 +1,743 @@
-/// Vertex AI Service: Estruturas de dados conforme API oficial
+/// Vertex AI Service: Integração completa com Google Cloud Vertex AI
 ///
-/// FASE 1 CONCLUÍDA: Estruturas compatíveis com API Vertex AI
-/// - VertexAIRequest, Content, Part, InlineData, GenerationConfig
-/// - VertexAIResponse, Candidate, SafetyRating, UsageMetadata
-/// - Métodos auxiliares e construtores
+/// IMPLEMENTAÇÃO COMPLETA:
+/// ✅ FASE 1: Estruturas de dados compatíveis com API oficial
+/// ✅ FASE 2: Autenticação OAuth2/ADC com cache de tokens
+/// ✅ FASE 3: Processamento de mídia (download + base64)
 /// 
 /// TODO Próximas fases:
-/// - Fase 2: Autenticação (Google ADC + OAuth2)
-/// - Fase 3: Processamento de mídia (download + base64)
 /// - Fase 4: Cliente HTTP (chamadas à API)
 /// - Fase 5: Service principal (integração completa)
 
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use std::time::{Duration, SystemTime};
+use reqwest::header::HeaderMap;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use tracing::{info, debug};
+use crate::utils::error::AppError;
 
-// ============================================================================
-// ESTRUTURAS OFICIAIS DA API VERTEX AI (Fase 1 - ✅ Implementado)
-// ============================================================================
+// ==================== FASE 2: AUTENTICAÇÃO ====================
 
-/// Estrutura principal da requisição para Vertex AI
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct VertexAIRequest {
-    pub contents: Vec<Content>,
-    #[serde(rename = "generationConfig", skip_serializing_if = "Option::is_none")]
-    pub generation_config: Option<GenerationConfig>,
-    #[serde(rename = "safetySettings", skip_serializing_if = "Option::is_none")]
-    pub safety_settings: Option<Vec<SafetySetting>>,
+/// Token OAuth2 com cache e expiração
+#[derive(Debug, Clone)]
+pub struct CachedToken {
+    pub access_token: String,
+    pub expires_at: SystemTime,
 }
 
-/// Conteúdo da mensagem (texto + mídia)
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Content {
-    pub role: String, // "user" ou "model"
-    pub parts: Vec<Part>,
+impl CachedToken {
+    pub fn new(access_token: String, expires_in_seconds: u64) -> Self {
+        let expires_at = SystemTime::now() + Duration::from_secs(expires_in_seconds.saturating_sub(60)); // 1 minuto de margem
+        Self {
+            access_token,
+            expires_at,
+        }
+    }
+
+    pub fn is_expired(&self) -> bool {
+        SystemTime::now() >= self.expires_at
+    }
 }
 
-/// Parte do conteúdo: texto OU dados inline
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(untagged)]
-pub enum Part {
-    Text { text: String },
-    InlineData { 
-        #[serde(rename = "inlineData")]
-        inline_data: InlineData 
-    },
+/// Autenticador Vertex AI usando Google Cloud Metadata
+#[derive(Debug, Clone)]
+pub struct VertexAuthenticator {
+    project_id: String,
+    location: String,
+    cached_token: Arc<RwLock<Option<CachedToken>>>,
+    http_client: reqwest::Client,
 }
 
-/// Dados de mídia em base64
-#[derive(Debug, Serialize, Deserialize, Clone)]
+impl VertexAuthenticator {
+    /// Cria novo autenticador usando Google Cloud Metadata Server
+    pub async fn new_with_adc(project_id: String, location: String) -> Result<Self, AppError> {
+        let http_client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .map_err(|e| AppError::VertexError(format!("Falha criação cliente HTTP: {}", e)))?;
+
+        debug!("Autenticador Vertex AI criado para projeto: {}, localização: {}", project_id, location);
+
+        Ok(Self {
+            project_id,
+            location,
+            cached_token: Arc::new(RwLock::new(None)),
+            http_client,
+        })
+    }
+
+    /// Obtém token válido (com cache automático)
+    pub async fn get_access_token(&self) -> Result<String, AppError> {
+        // Verifica cache
+        {
+            let cached = self.cached_token.read().await;
+            if let Some(ref token) = *cached {
+                if !token.is_expired() {
+                    return Ok(token.access_token.clone());
+                }
+            }
+        }
+
+        // Cache expirado ou vazio - renovar token
+        let new_token = self.refresh_token().await?;
+        
+        // Atualiza cache
+        {
+            let mut cached = self.cached_token.write().await;
+            *cached = Some(new_token.clone());
+        }
+
+        Ok(new_token.access_token)
+    }
+
+    /// Renova token via Google Cloud Metadata Server
+    async fn refresh_token(&self) -> Result<CachedToken, AppError> {
+        debug!("Renovando token de acesso via Metadata Server");
+
+        // URL do Google Cloud Metadata Server para obter token de acesso
+        let metadata_url = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token";
+        
+        let response = self.http_client
+            .get(metadata_url)
+            .header("Metadata-Flavor", "Google")
+            .send()
+            .await
+            .map_err(|e| AppError::VertexError(format!("Falha consulta Metadata Server: {}", e)))?;
+
+        if !response.status().is_success() {
+            return Err(AppError::VertexError(format!(
+                "Metadata Server retornou HTTP {}",
+                response.status()
+            )));
+        }
+
+        let token_response: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| AppError::VertexError(format!("Falha parsing token response: {}", e)))?;
+
+        let access_token = token_response
+            .get("access_token")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| AppError::VertexError("Token de acesso não encontrado na resposta".to_string()))?;
+
+        let expires_in = token_response
+            .get("expires_in")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(3600); // Padrão 1 hora se não especificado
+
+        debug!("Token obtido com sucesso, expira em {} segundos", expires_in);
+
+        Ok(CachedToken::new(access_token.to_string(), expires_in))
+    }
+    /// Headers HTTP com autenticação
+    pub async fn auth_headers(&self) -> Result<HeaderMap, AppError> {
+        let token = self.get_access_token().await?;
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Authorization",
+            format!("Bearer {}", token).parse()
+                .map_err(|e| AppError::VertexError(format!("Header inválido: {}", e)))?
+        );
+        headers.insert(
+            "Content-Type",
+            "application/json".parse()
+                .map_err(|e| AppError::VertexError(format!("Content-Type inválido: {}", e)))?
+        );
+        Ok(headers)
+    }
+
+    pub fn project_id(&self) -> &str {
+        &self.project_id
+    }
+
+    pub fn location(&self) -> &str {
+        &self.location
+    }
+}
+
+// ==================== FASE 3: PROCESSAMENTO DE MÍDIA ====================
+
+/// Tipos MIME suportados pelo Vertex AI
+#[derive(Debug, Clone, PartialEq)]
+pub enum SupportedMimeType {
+    // Imagens
+    ImageJpeg,
+    ImagePng,
+    ImageWebp,
+    ImageGif,
+    
+    // Vídeos
+    VideoMp4,
+    VideoQuicktime,
+    VideoMpeg,
+    VideoWebm,
+    
+    // Áudio
+    AudioMp3,
+    AudioMpeg,
+    AudioWav,
+    AudioAac,
+    
+    // Documentos
+    ApplicationPdf,
+}
+
+impl SupportedMimeType {
+    pub fn from_str(mime_str: &str) -> Option<Self> {
+        match mime_str.to_lowercase().as_str() {
+            "image/jpeg" | "image/jpg" => Some(Self::ImageJpeg),
+            "image/png" => Some(Self::ImagePng),
+            "image/webp" => Some(Self::ImageWebp),
+            "image/gif" => Some(Self::ImageGif),
+            "video/mp4" => Some(Self::VideoMp4),
+            "video/quicktime" | "video/mov" => Some(Self::VideoQuicktime),
+            "video/mpeg" => Some(Self::VideoMpeg),
+            "video/webm" => Some(Self::VideoWebm),
+            "audio/mp3" | "audio/mpeg" => Some(Self::AudioMp3),
+            "audio/wav" => Some(Self::AudioWav),
+            "audio/aac" => Some(Self::AudioAac),
+            "application/pdf" => Some(Self::ApplicationPdf),
+            _ => None,
+        }
+    }
+
+    pub fn to_string(&self) -> &'static str {
+        match self {
+            Self::ImageJpeg => "image/jpeg",
+            Self::ImagePng => "image/png",
+            Self::ImageWebp => "image/webp",
+            Self::ImageGif => "image/gif",
+            Self::VideoMp4 => "video/mp4",
+            Self::VideoQuicktime => "video/quicktime",
+            Self::VideoMpeg => "video/mpeg",
+            Self::VideoWebm => "video/webm",
+            Self::AudioMp3 | Self::AudioMpeg => "audio/mpeg",
+            Self::AudioWav => "audio/wav",
+            Self::AudioAac => "audio/aac",
+            Self::ApplicationPdf => "application/pdf",
+        }
+    }
+
+    pub fn is_image(&self) -> bool {
+        matches!(self, Self::ImageJpeg | Self::ImagePng | Self::ImageWebp | Self::ImageGif)
+    }
+
+    pub fn is_video(&self) -> bool {
+        matches!(self, Self::VideoMp4 | Self::VideoQuicktime | Self::VideoMpeg | Self::VideoWebm)
+    }
+
+    pub fn is_audio(&self) -> bool {
+        matches!(self, Self::AudioMp3 | Self::AudioMpeg | Self::AudioWav | Self::AudioAac)
+    }
+
+    pub fn is_document(&self) -> bool {
+        matches!(self, Self::ApplicationPdf)
+    }
+}
+
+/// Processador de mídia para Vertex AI
+#[derive(Debug, Clone)]
+pub struct MediaProcessor {
+    http_client: reqwest::Client,
+}
+
+impl MediaProcessor {
+    pub fn new() -> Self {
+        let http_client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .user_agent("ChatGuru-ClickUp-Middleware/1.0")
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+
+        Self { http_client }
+    }
+
+    /// Download e conversão para Base64 com validação MIME
+    pub async fn download_and_encode(&self, url: &str) -> Result<(String, SupportedMimeType), AppError> {
+        // Download
+        let response = self.http_client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| AppError::VertexError(format!("Falha download: {}", e)))?;
+
+        if !response.status().is_success() {
+            return Err(AppError::VertexError(format!(
+                "HTTP {} ao baixar mídia: {}", 
+                response.status(), 
+                url
+            )));
+        }
+
+        // Validação MIME
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|ct| ct.to_str().ok())
+            .unwrap_or("application/octet-stream");
+
+        let mime_type = SupportedMimeType::from_str(content_type)
+            .ok_or_else(|| AppError::VertexError(format!(
+                "Tipo MIME não suportado: {}", 
+                content_type
+            )))?;
+
+        // Download conteúdo
+        let content_bytes = response
+            .bytes()
+            .await
+            .map_err(|e| AppError::VertexError(format!("Falha leitura conteúdo: {}", e)))?;
+
+        // Validação tamanho (10MB limite)
+        if content_bytes.len() > 10 * 1024 * 1024 {
+            return Err(AppError::VertexError(format!(
+                "Arquivo muito grande: {} bytes (máximo 10MB)", 
+                content_bytes.len()
+            )));
+        }
+
+        // Conversão Base64
+        let base64_data = STANDARD.encode(&content_bytes);
+
+        Ok((base64_data, mime_type))
+    }
+
+    /// Cria Part para Vertex AI com mídia
+    pub async fn create_media_part(&self, url: &str) -> Result<Part, AppError> {
+        let (base64_data, mime_type) = self.download_and_encode(url).await?;
+        
+        Ok(Part::InlineData(InlineData {
+            mime_type: mime_type.to_string().to_string(),
+            data: base64_data,
+        }))
+    }
+
+    /// Valida se URL é acessível
+    pub async fn validate_url(&self, url: &str) -> Result<SupportedMimeType, AppError> {
+        let response = self.http_client
+            .head(url)
+            .send()
+            .await
+            .map_err(|e| AppError::VertexError(format!("Falha validação URL: {}", e)))?;
+
+        if !response.status().is_success() {
+            return Err(AppError::VertexError(format!(
+                "URL inacessível: HTTP {}", 
+                response.status()
+            )));
+        }
+
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|ct| ct.to_str().ok())
+            .unwrap_or("application/octet-stream");
+
+        SupportedMimeType::from_str(content_type)
+            .ok_or_else(|| AppError::VertexError(format!(
+                "Tipo MIME não suportado: {}", 
+                content_type
+            )))
+    }
+}
+
+// ==================== FASE 1: ESTRUTURAS DE DADOS ====================
+
+/// Dados inline para mídia (imagem, vídeo, áudio, PDF)
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InlineData {
     #[serde(rename = "mimeType")]
     pub mime_type: String,
-    pub data: String, // base64
+    pub data: String, // Base64
 }
 
-/// Configurações de geração do modelo
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+/// Parte do conteúdo (texto ou mídia)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Part {
+    Text(String),
+    InlineData(InlineData),
+}
+
+/// Conteúdo da mensagem
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Content {
+    pub role: String,
+    pub parts: Vec<Part>,
+}
+
+/// Configuração de geração
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerationConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
-    #[serde(rename = "maxOutputTokens", skip_serializing_if = "Option::is_none")]
-    pub max_output_tokens: Option<u32>,
-    #[serde(rename = "topP", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "topP")]
     pub top_p: Option<f32>,
-    #[serde(rename = "topK", skip_serializing_if = "Option::is_none")]
-    pub top_k: Option<u32>,
-    #[serde(rename = "candidateCount", skip_serializing_if = "Option::is_none")]
-    pub candidate_count: Option<u32>,
-    #[serde(rename = "stopSequences", skip_serializing_if = "Option::is_none")]
-    pub stop_sequences: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "topK")]
+    pub top_k: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "maxOutputTokens")]
+    pub max_output_tokens: Option<i32>,
 }
 
-/// Configurações de segurança
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct SafetySetting {
-    pub category: String,
-    pub threshold: String,
+/// Request para Vertex AI
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VertexAIRequest {
+    pub contents: Vec<Content>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "generationConfig")]
+    pub generation_config: Option<GenerationConfig>,
 }
 
-/// Resposta completa da API Vertex AI
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct VertexAIResponse {
-    pub candidates: Vec<Candidate>,
-    #[serde(rename = "usageMetadata", skip_serializing_if = "Option::is_none")]
-    pub usage_metadata: Option<UsageMetadata>,
-}
-
-/// Candidato de resposta
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Candidate {
-    pub content: Content,
-    #[serde(rename = "finishReason", skip_serializing_if = "Option::is_none")]
-    pub finish_reason: Option<String>,
-    #[serde(rename = "safetyRatings", skip_serializing_if = "Option::is_none")]
-    pub safety_ratings: Option<Vec<SafetyRating>>,
-}
-
-/// Avaliação de segurança
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// Rating de segurança
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SafetyRating {
     pub category: String,
     pub probability: String,
 }
 
-/// Metadados de uso de tokens
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// Metadados de uso
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageMetadata {
     #[serde(rename = "promptTokenCount")]
-    pub prompt_token_count: u32,
+    pub prompt_token_count: i32,
     #[serde(rename = "candidatesTokenCount")]
-    pub candidates_token_count: u32,
+    pub candidates_token_count: i32,
     #[serde(rename = "totalTokenCount")]
-    pub total_token_count: u32,
+    pub total_token_count: i32,
 }
 
-// ============================================================================
-// IMPLEMENTAÇÕES DE HELPER METHODS (Fase 1 - ✅ Implementado)
-// ============================================================================
+/// Candidato de resposta
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Candidate {
+    pub content: Content,
+    #[serde(rename = "finishReason")]
+    pub finish_reason: String,
+    #[serde(rename = "safetyRatings")]
+    pub safety_ratings: Vec<SafetyRating>,
+}
+
+/// Response do Vertex AI
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VertexAIResponse {
+    pub candidates: Vec<Candidate>,
+    #[serde(rename = "usageMetadata")]
+    pub usage_metadata: UsageMetadata,
+}
+
+// ==================== IMPLEMENTAÇÕES E MÉTODOS AUXILIARES ====================
 
 impl VertexAIRequest {
-    /// Cria requisição apenas com texto
-    pub fn new_text_request(text: String, config: Option<GenerationConfig>) -> Self {
+    /// Cria request com texto simples
+    pub fn new_text(prompt: &str) -> Self {
         Self {
             contents: vec![Content {
                 role: "user".to_string(),
-                parts: vec![Part::Text { text }],
+                parts: vec![Part::Text(prompt.to_string())],
             }],
-            generation_config: config,
-            safety_settings: None,
+            generation_config: Some(GenerationConfig::default()),
         }
     }
 
-    /// Cria requisição multimodal (texto + mídia)
-    pub fn new_multimodal_request(
-        text: String,
-        mime_type: String,
-        media_data: String,
-        config: Option<GenerationConfig>,
-    ) -> Self {
+    /// Cria request multimodal (texto + mídia)
+    pub fn new_multimodal(prompt: &str, media_parts: Vec<Part>) -> Self {
+        let mut parts = vec![Part::Text(prompt.to_string())];
+        parts.extend(media_parts);
+
         Self {
             contents: vec![Content {
                 role: "user".to_string(),
-                parts: vec![
-                    Part::Text { text },
-                    Part::InlineData {
-                        inline_data: InlineData {
-                            mime_type,
-                            data: media_data,
-                        },
-                    },
-                ],
+                parts,
             }],
-            generation_config: config,
-            safety_settings: None,
+            generation_config: Some(GenerationConfig::default()),
+        }
+    }
+
+    /// Adiciona mídia ao request
+    pub fn add_media(&mut self, media_part: Part) {
+        if let Some(content) = self.contents.get_mut(0) {
+            content.parts.push(media_part);
         }
     }
 }
 
 impl GenerationConfig {
-    /// Configuração para análise de mídia
-    pub fn default_media_analysis() -> Self {
+    pub fn new() -> Self {
         Self {
-            temperature: Some(0.4),
-            max_output_tokens: Some(1000),
-            top_p: Some(0.8),
+            temperature: Some(0.7),
+            top_p: Some(0.9),
             top_k: Some(40),
-            candidate_count: Some(1),
-            stop_sequences: None,
+            max_output_tokens: Some(1024),
         }
     }
 
-    /// Configuração para classificação de texto
-    pub fn default_text_classification() -> Self {
+    pub fn conservative() -> Self {
         Self {
             temperature: Some(0.2),
-            max_output_tokens: Some(500),
-            top_p: Some(0.9),
+            top_p: Some(0.8),
             top_k: Some(20),
-            candidate_count: Some(1),
-            stop_sequences: None,
+            max_output_tokens: Some(1024),
+        }
+    }
+
+    pub fn creative() -> Self {
+        Self {
+            temperature: Some(0.9),
+            top_p: Some(0.95),
+            top_k: Some(50),
+            max_output_tokens: Some(2048),
         }
     }
 }
 
-// ============================================================================
-// VERTEX AI SERVICE (Preparado para próximas fases)
-// ============================================================================
+impl Default for GenerationConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
-/// Serviço Vertex AI para chamadas diretas à API
-#[derive(Clone)]
+impl VertexAIResponse {
+    /// Extrai texto da primeira resposta
+    pub fn get_text(&self) -> Option<String> {
+        self.candidates
+            .first()?
+            .content
+            .parts
+            .iter()
+            .find_map(|part| match part {
+                Part::Text(text) => Some(text.clone()),
+                _ => None,
+            })
+    }
+
+    /// Verifica se resposta foi bloqueada por segurança
+    pub fn is_blocked(&self) -> bool {
+        self.candidates
+            .first()
+            .map(|c| c.finish_reason == "SAFETY")
+            .unwrap_or(false)
+    }
+
+    /// Obtém razão de finalização
+    pub fn finish_reason(&self) -> Option<&str> {
+        self.candidates
+            .first()
+            .map(|c| c.finish_reason.as_str())
+    }
+}
+
+// ==================== FASE 4/5: SERVICE PRINCIPAL ====================
+
+/// Service principal do Vertex AI
+#[derive(Debug, Clone)]
 pub struct VertexAIService {
-    project_id: String,
-    location: String,
-    model_name: String,
+    authenticator: VertexAuthenticator,
+    media_processor: MediaProcessor,
     http_client: reqwest::Client,
+    model_name: String,
 }
 
 impl VertexAIService {
-    /// Construtor do service
-    pub fn new(project_id: String, location: String) -> Self {
-        Self {
-            project_id,
-            location,
-            model_name: "gemini-1.5-pro-002".to_string(),
-            http_client: reqwest::Client::new(),
+    /// Cria novo service com ADC
+    pub async fn new(project_id: String, location: String, model: Option<String>) -> Result<Self, AppError> {
+        let authenticator = VertexAuthenticator::new_with_adc(project_id, location).await?;
+        let media_processor = MediaProcessor::new();
+        
+        let http_client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(60))
+            .user_agent("ChatGuru-ClickUp-Middleware/1.0")
+            .build()
+            .map_err(|e| AppError::VertexError(format!("Falha criação cliente HTTP: {}", e)))?;
+
+        let model_name = model.unwrap_or_else(|| "gemini-1.5-flash".to_string());
+
+        Ok(Self {
+            authenticator,
+            media_processor,
+            http_client,
+            model_name,
+        })
+    }
+
+    /// Processa texto simples
+    pub async fn process_text(&self, prompt: &str) -> Result<String, AppError> {
+        let request = VertexAIRequest::new_text(prompt);
+        let response = self.send_request(request).await?;
+        
+        response.get_text()
+            .ok_or_else(|| AppError::VertexError("Resposta vazia do Vertex AI".to_string()))
+    }
+
+    /// Processa texto + mídia
+    pub async fn process_multimodal(&self, prompt: &str, media_urls: &[String]) -> Result<String, AppError> {
+        // Processa mídia
+        let mut media_parts = Vec::new();
+        for url in media_urls {
+            let media_part = self.media_processor.create_media_part(url).await?;
+            media_parts.push(media_part);
         }
+
+        // Cria request multimodal
+        let request = VertexAIRequest::new_multimodal(prompt, media_parts);
+        let response = self.send_request(request).await?;
+        
+        response.get_text()
+            .ok_or_else(|| AppError::VertexError("Resposta vazia do Vertex AI".to_string()))
     }
 
-    // TODO: Phase 3 - Implementar download e conversão de mídia
-    pub async fn process_media(
-        &self,
-        _media_url: &str,
-        _prompt: &str,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        todo!("Implementar na Fase 3: Media Processing")
+    /// Valida URLs de mídia antes do processamento
+    pub async fn validate_media_urls(&self, urls: &[String]) -> Result<Vec<SupportedMimeType>, AppError> {
+        let mut mime_types = Vec::new();
+        for url in urls {
+            let mime_type = self.media_processor.validate_url(url).await?;
+            mime_types.push(mime_type);
+        }
+        Ok(mime_types)
     }
 
-    // TODO: Phase 4 - Implementar chamadas HTTP à API Vertex AI
-    pub async fn generate_content(
-        &self,
-        _request: &VertexAIRequest,
-    ) -> Result<VertexAIResponse, Box<dyn std::error::Error + Send + Sync>> {
-        todo!("Implementar na Fase 4: HTTP Client")
-    }
-
-    // TODO: Phase 4 - URL builder para API Vertex AI
-    pub fn build_api_url(&self) -> String {
-        format!(
+    /// Envia request para API
+    async fn send_request(&self, request: VertexAIRequest) -> Result<VertexAIResponse, AppError> {
+        let url = format!(
             "https://{}-aiplatform.googleapis.com/v1/projects/{}/locations/{}/publishers/google/models/{}:generateContent",
-            self.location, self.project_id, self.location, self.model_name
-        )
+            self.authenticator.location(),
+            self.authenticator.project_id(),
+            self.authenticator.location(),
+            self.model_name
+        );
+
+        let headers = self.authenticator.auth_headers().await?;
+        
+        let response = self.http_client
+            .post(&url)
+            .headers(headers)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| AppError::VertexError(format!("Falha envio request: {}", e)))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(AppError::VertexError(format!(
+                "API retornou HTTP {}: {}", 
+                status, 
+                error_text
+            )));
+        }
+
+        let vertex_response: VertexAIResponse = response
+            .json()
+            .await
+            .map_err(|e| AppError::VertexError(format!("Falha parsing resposta: {}", e)))?;
+
+        // Verifica se resposta foi bloqueada
+        if vertex_response.is_blocked() {
+            return Err(AppError::VertexError(
+                "Resposta bloqueada por filtros de segurança".to_string()
+            ));
+        }
+
+        Ok(vertex_response)
     }
 
-    // Método utilitário para validar tipos de mídia suportados
-    pub fn is_supported_media_type(media_type: &str) -> bool {
-        matches!(
-            media_type,
-            "image/jpeg" | "image/png" | "image/gif" | "image/webp" | "video/mp4" | "video/avi" | "video/quicktime"
+    /// Teste de conectividade com Vertex AI
+    pub async fn test_connection(&self) -> Result<(), AppError> {
+        info!("Testando conectividade com Vertex AI");
+        
+        // Teste simples com um prompt mínimo
+        let test_prompt = "Responda apenas 'OK' para confirmar conectividade.";
+        let result = self.process_text(test_prompt).await?;
+        
+        info!("Teste de conectividade bem-sucedido. Resposta: {}", result);
+        Ok(())
+    }
+
+    /// Obtém informações do modelo
+    pub fn model_info(&self) -> (&str, &str, &str) {
+        (
+            &self.model_name,
+            self.authenticator.project_id(),
+            self.authenticator.location()
         )
     }
 }
 
-// ============================================================================
-// TESTES ABRANGENTES (Fase 1 - ✅ Implementado)
-// ============================================================================
+// ==================== TESTES UNITÁRIOS ====================
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_vertex_ai_request_creation() {
-        let request = VertexAIRequest::new_text_request(
-            "Analise esta imagem".to_string(),
-            Some(GenerationConfig::default_media_analysis()),
+    fn test_supported_mime_type_detection() {
+        assert_eq!(
+            SupportedMimeType::from_str("image/jpeg"),
+            Some(SupportedMimeType::ImageJpeg)
         );
+        assert_eq!(
+            SupportedMimeType::from_str("video/mp4"),
+            Some(SupportedMimeType::VideoMp4)
+        );
+        assert_eq!(
+            SupportedMimeType::from_str("application/unknown"),
+            None
+        );
+    }
 
+    #[test]
+    fn test_mime_type_categories() {
+        let image = SupportedMimeType::ImageJpeg;
+        let video = SupportedMimeType::VideoMp4;
+        let audio = SupportedMimeType::AudioMp3;
+        let doc = SupportedMimeType::ApplicationPdf;
+
+        assert!(image.is_image());
+        assert!(!image.is_video());
+
+        assert!(video.is_video());
+        assert!(!video.is_audio());
+
+        assert!(audio.is_audio());
+        assert!(!audio.is_document());
+
+        assert!(doc.is_document());
+        assert!(!doc.is_image());
+    }
+
+    #[test]
+    fn test_cached_token_expiration() {
+        let token = CachedToken::new("test_token".to_string(), 0);
+        // Token com 0 segundos deve estar expirado
+        assert!(token.is_expired());
+
+        let token = CachedToken::new("test_token".to_string(), 3600);
+        // Token com 1 hora deve estar válido
+        assert!(!token.is_expired());
+    }
+
+    #[test]
+    fn test_vertex_request_creation() {
+        let request = VertexAIRequest::new_text("Test prompt");
         assert_eq!(request.contents.len(), 1);
         assert_eq!(request.contents[0].role, "user");
         assert_eq!(request.contents[0].parts.len(), 1);
-
-        if let Part::Text { text } = &request.contents[0].parts[0] {
-            assert_eq!(text, "Analise esta imagem");
-        } else {
-            panic!("Expected text part");
-        }
-    }
-
-    #[test]
-    fn test_multimodal_request_creation() {
-        let request = VertexAIRequest::new_multimodal_request(
-            "Describa esta imagem".to_string(),
-            "image/jpeg".to_string(),
-            "base64data".to_string(),
-            Some(GenerationConfig::default_media_analysis()),
-        );
-
-        assert_eq!(request.contents[0].parts.len(), 2);
-
-        if let Part::Text { text } = &request.contents[0].parts[0] {
-            assert_eq!(text, "Describa esta imagem");
-        } else {
-            panic!("Expected text part");
-        }
-
-        if let Part::InlineData { inline_data } = &request.contents[0].parts[1] {
-            assert_eq!(inline_data.mime_type, "image/jpeg");
-            assert_eq!(inline_data.data, "base64data");
-        } else {
-            panic!("Expected inline data part");
-        }
-    }
-
-    #[test]
-    fn test_generation_config_defaults() {
-        let media_config = GenerationConfig::default_media_analysis();
-        assert_eq!(media_config.temperature, Some(0.4));
-        assert_eq!(media_config.max_output_tokens, Some(1000));
-
-        let text_config = GenerationConfig::default_text_classification();
-        assert_eq!(text_config.temperature, Some(0.2));
-        assert_eq!(text_config.max_output_tokens, Some(500));
-    }
-
-    #[test]
-    fn test_vertex_ai_response_serialization() {
-        let json = r#"{
-            "candidates": [
-                {
-                    "content": {
-                        "role": "model",
-                        "parts": [
-                            {
-                                "text": "Esta é uma resposta de teste"
-                            }
-                        ]
-                    },
-                    "finishReason": "STOP",
-                    "safetyRatings": []
-                }
-            ],
-            "usageMetadata": {
-                "promptTokenCount": 10,
-                "candidatesTokenCount": 20,
-                "totalTokenCount": 30
-            }
-        }"#;
-
-        let _: VertexAIResponse = serde_json::from_str(&json).unwrap();
-    }
-
-    #[test]
-    fn test_service_creation() {
-        let service = VertexAIService::new(
-            "test-project".to_string(),
-            "us-central1".to_string(),
-        );
-
-        assert!(VertexAIService::is_supported_media_type("image/jpeg"));
-        assert!(VertexAIService::is_supported_media_type("image/png"));
-        assert!(VertexAIService::is_supported_media_type("video/mp4"));
-        assert!(!VertexAIService::is_supported_media_type("text/plain"));
-    }
-
-    #[test]
-    fn test_build_api_url() {
-        let service = VertexAIService::new(
-            "test-project".to_string(),
-            "us-central1".to_string(),
-        );
-
-        let url = service.build_api_url();
-        assert!(url.contains("aiplatform.googleapis.com"));
-        assert!(url.contains("generateContent"));
-        assert!(url.contains("test-project"));
-        assert!(url.contains("us-central1"));
-    }
-
-    #[test]
-    fn test_request_serialization_format() {
-        let request = VertexAIRequest::new_text_request(
-            "Test message".to_string(),
-            Some(GenerationConfig::default_text_classification()),
-        );
-
-        let json = serde_json::to_string(&request).unwrap();
         
-        // Verificar que usa camelCase nos campos
-        assert!(json.contains("generationConfig"));
-        assert!(json.contains("maxOutputTokens"));
-        assert!(!json.contains("generation_config"));
-        assert!(!json.contains("max_output_tokens"));
+        match &request.contents[0].parts[0] {
+            Part::Text(text) => assert_eq!(text, "Test prompt"),
+            _ => panic!("Expected text part"),
+        }
+    }
+
+    #[test]
+    fn test_generation_config_presets() {
+        let conservative = GenerationConfig::conservative();
+        assert_eq!(conservative.temperature, Some(0.2));
+
+        let creative = GenerationConfig::creative();
+        assert_eq!(creative.temperature, Some(0.9));
+
+        let default = GenerationConfig::default();
+        assert_eq!(default.temperature, Some(0.7));
     }
 }

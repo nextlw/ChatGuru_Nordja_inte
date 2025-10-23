@@ -14,10 +14,9 @@ WORKDIR /app
 # Copy Cargo files first to cache dependencies
 COPY Cargo.toml Cargo.lock ./
 
-# Copy source code, config and migrations
+# Copy source code and config (migrations não são necessárias no runtime)
 COPY src ./src
 COPY config ./config
-COPY migrations ./migrations
 
 # Build normally (Rust 1.90 debian has compatible GLIBC)
 RUN cargo build --release
@@ -41,7 +40,6 @@ RUN chown app:app /app
 # Copy binary from builder stage
 COPY --from=builder /app/target/release/chatguru-clickup-middleware .
 COPY --from=builder /app/config ./config
-COPY --from=builder /app/migrations ./migrations
 
 # Change to app user
 USER app

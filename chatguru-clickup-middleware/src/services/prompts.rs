@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
+// use sqlx::PgPool; // DESABILITADO - sem PostgreSQL
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -104,8 +104,10 @@ pub struct FieldIds {
 }
 
 impl AiPromptConfig {
-    /// NOVO: Carrega configuração do banco de dados PostgreSQL
-    pub async fn from_database(db: &PgPool) -> AppResult<Self> {
+    // FUNÇÃO DESABILITADA - Sem PostgreSQL
+    // pub async fn from_database(db: &PgPool) -> AppResult<Self> {
+    /*
+    pub async fn from_database_DISABLED(db: &PgPool) -> AppResult<Self> {
         use crate::utils::logging::{log_info, log_error};
 
         log_info("🗄️  Loading AI prompt config from PostgreSQL database");
@@ -313,8 +315,9 @@ impl AiPromptConfig {
             }),
         })
     }
+    */
 
-    /// Carrega a configuração do prompt de um arquivo YAML (fallback/legacy)
+    /// Carrega a configuração do prompt de um arquivo YAML
     pub fn from_file<P: AsRef<Path>>(path: P) -> AppResult<Self> {
         use crate::utils::logging::log_info;
 
@@ -536,39 +539,90 @@ impl AiPromptConfig {
             })
     }
 
-    /// Obtém o ID do cliente solicitante pelo nome (com normalização)
+    /// Obtém o ID do cliente solicitante pelo nome (com normalização + fuzzy matching)
+    ///
+    /// Estratégia de matching em 3 níveis:
+    /// 1. Match exato (normalizado)
+    /// 2. Match por normalização de chaves
+    /// 3. Fuzzy matching com Jaro-Winkler (threshold 85%)
     pub fn get_cliente_solicitante_id(&self, name: &str) -> Option<String> {
-        // Normalizar: remover parênteses, números e acentos
-        let normalized = Self::normalize_client_name(name);
+        use strsim::jaro_winkler;
 
-        // Tentar match exato primeiro
-        if let Some(id) = self.cliente_solicitante_mappings.get(&normalized) {
+        let normalized_input = Self::normalize_client_name(name);
+
+        tracing::debug!("🔍 Buscando cliente: '{}' → normalizado: '{}'", name, normalized_input);
+
+        // 1. Tentar match exato com nome normalizado
+        if let Some(id) = self.cliente_solicitante_mappings.get(&normalized_input) {
+            tracing::info!("✅ Match exato encontrado: '{}' → '{}'", name, id);
             return Some(id.clone());
         }
 
-        // Tentar match com normalização nas chaves
-        self.cliente_solicitante_mappings.iter()
-            .find(|(key, _)| Self::normalize_client_name(key) == normalized)
-            .map(|(_, id)| id.clone())
+        // 2. Tentar match com normalização nas chaves do mapeamento
+        for (key, id) in &self.cliente_solicitante_mappings {
+            let normalized_key = Self::normalize_client_name(key);
+            if normalized_key == normalized_input {
+                tracing::info!("✅ Match por normalização: '{}' → '{}' (chave original: '{}')",
+                    name, id, key);
+                return Some(id.clone());
+            }
+        }
+
+        // 3. Fuzzy matching com Jaro-Winkler (threshold configurável)
+        const FUZZY_THRESHOLD: f64 = 0.85; // 85% de similaridade mínima
+
+        let mut best_match: Option<(&str, &String, f64)> = None;
+
+        for (key, id) in &self.cliente_solicitante_mappings {
+            let normalized_key = Self::normalize_client_name(key);
+            let similarity = jaro_winkler(&normalized_input, &normalized_key);
+
+            if similarity >= FUZZY_THRESHOLD {
+                match best_match {
+                    Some((_, _, best_score)) if similarity > best_score => {
+                        best_match = Some((key, id, similarity));
+                    }
+                    None => {
+                        best_match = Some((key, id, similarity));
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if let Some((matched_key, id, score)) = best_match {
+            tracing::info!(
+                "✨ Fuzzy match encontrado: '{}' → '{}' (score: {:.1}%, chave: '{}')",
+                name, id, score * 100.0, matched_key
+            );
+            return Some(id.clone());
+        }
+
+        // Não encontrado - log para debug
+        tracing::warn!(
+            "❌ Cliente '{}' não encontrado (normalizado: '{}'). Threshold: {:.0}%",
+            name, normalized_input, FUZZY_THRESHOLD * 100.0
+        );
+
+        None
     }
 
-    /// Normalizar nome de cliente: remover parênteses, números, acentos
+    /// Normalizar nome de cliente usando deunicode + limpeza
+    ///
+    /// Processo:
+    /// 1. Remove acentos (deunicode): "José" → "Jose", "Dadá" → "Dada"
+    /// 2. Lowercase: "Jose" → "jose"
+    /// 3. Remove parênteses e números: "Agência (2)" → "agencia"
+    /// 4. Trim whitespace e normaliza espaços
     fn normalize_client_name(name: &str) -> String {
-        name.trim()
+        use deunicode::deunicode;
+
+        deunicode(name)  // Remove acentos primeiro
             .to_lowercase()
             .chars()
             .filter(|c| !c.is_numeric() && *c != '(' && *c != ')')
-            .map(|c| match c {
-                'á' | 'à' | 'â' | 'ã' => 'a',
-                'é' | 'è' | 'ê' => 'e',
-                'í' | 'ì' | 'î' => 'i',
-                'ó' | 'ò' | 'ô' | 'õ' => 'o',
-                'ú' | 'ù' | 'û' => 'u',
-                'ç' => 'c',
-                _ => c,
-            })
             .collect::<String>()
-            .split_whitespace()
+            .split_whitespace()  // Remove espaços extras
             .collect::<Vec<&str>>()
             .join(" ")
     }
