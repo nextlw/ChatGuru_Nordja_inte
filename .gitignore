@@ -7,3 +7,4 @@ chatguru-clickup-middleware/scripts
 chatguru-clickup-middleware/src/services/config_db.rs.bak
 chatguru-clickup-middleware/src/services/estrutura.rs.disabled
 chatguru-clickup-middleware/src/services/prompts.rs.disabled
+.DS_Store
