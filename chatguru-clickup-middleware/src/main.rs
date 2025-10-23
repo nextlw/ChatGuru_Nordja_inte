@@ -277,15 +277,48 @@ async fn publish_batch_to_pubsub(
         ..Default::default()
     };
 
-    // 8. Publicar mensagem
-    let awaiter = publisher.publish(msg).await;
-    awaiter.get().await?;
+    // 8. Publicar mensagem com retry (máximo 3 tentativas)
+    const MAX_RETRIES: u32 = 3;
+    const INITIAL_BACKOFF_MS: u64 = 100;
 
-    tracing::info!(
-        "📤 Payload agregado publicado no tópico '{}' (chat: {})",
-        topic_name,
-        chat_id
-    );
+    let mut last_error = None;
 
-    Ok(())
+    for attempt in 1..=MAX_RETRIES {
+        match publisher.publish(msg.clone()).await.get().await {
+            Ok(_) => {
+                if attempt > 1 {
+                    tracing::info!(
+                        "✅ Payload publicado no Pub/Sub após {} tentativa(s) - tópico: '{}', chat: {}",
+                        attempt, topic_name, chat_id
+                    );
+                } else {
+                    tracing::info!(
+                        "📤 Payload agregado publicado no tópico '{}' (chat: {})",
+                        topic_name, chat_id
+                    );
+                }
+                return Ok(());
+            }
+            Err(e) => {
+                last_error = Some(e);
+
+                if attempt < MAX_RETRIES {
+                    let backoff_ms = INITIAL_BACKOFF_MS * 2u64.pow(attempt - 1);
+                    tracing::warn!(
+                        "⚠️ Tentativa {}/{} falhou ao publicar no Pub/Sub (chat: {}). Tentando novamente em {}ms...",
+                        attempt, MAX_RETRIES, chat_id, backoff_ms
+                    );
+                    tokio::time::sleep(tokio::time::Duration::from_millis(backoff_ms)).await;
+                } else {
+                    tracing::error!(
+                        "❌ Todas as {} tentativas falharam ao publicar no Pub/Sub para chat '{}'",
+                        MAX_RETRIES, chat_id
+                    );
+                }
+            }
+        }
+    }
+
+    // Se chegou aqui, todas as tentativas falharam
+    Err(last_error.unwrap().into())
 }

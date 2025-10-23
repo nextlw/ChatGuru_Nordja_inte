@@ -549,6 +549,11 @@ impl SmartFolderFinder {
             .ok_or_else(|| AppError::InternalError("Lista criada sem ID".to_string()))?;
 
         tracing::info!("✅ Lista criada com sucesso: {} (id: {})", list_name, list_id);
+
+        // Aguardar 2 segundos para ClickUp configurar custom fields da lista
+        tracing::debug!("⏳ Aguardando 2s para custom fields serem configurados...");
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
         Ok((list_id.to_string(), list_name.to_string()))
     }
 
