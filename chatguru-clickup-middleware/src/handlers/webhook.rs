@@ -42,24 +42,45 @@ pub async fn handle_webhook(
     let body_str = String::from_utf8(body_bytes.to_vec())
         .map_err(|e| AppError::ValidationError(format!("Invalid UTF-8 in request body: {}", e)))?;
 
-    // Validar JSON básico (não parsear estrutura complexa)
-    let _: Value = serde_json::from_str(&body_str)
+    // Parsear JSON para extrair chat_id
+    let payload: Value = serde_json::from_str(&body_str)
         .map_err(|e| AppError::ValidationError(format!("Invalid JSON payload: {}", e)))?;
 
     log_info(&format!("📥 Webhook payload recebido ({} bytes)", body_str.len()));
 
-    // DEBUG: Log payload completo para investigar campos de mídia
-    log_info(&format!("🔍 DEBUG - Payload RAW do ChatGuru:\n{}", body_str));
+    // Extrair chat_id do payload
+    let chat_id = payload
+        .get("chat_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
 
-    // Enviar RAW para Pub/Sub de forma assíncrona
+    log_info(&format!("📬 Adicionando mensagem do chat '{}' à fila", chat_id));
+
+    // Adicionar à fila (processa quando atingir 5 msgs ou 100s)
     let state_clone = Arc::clone(&state);
-    let body_clone = body_str.clone();
+    let payload_clone = payload.clone();
+    let chat_id_clone = chat_id.clone();
 
     tokio::spawn(async move {
-        if let Err(e) = send_raw_to_pubsub(&state_clone, &body_clone).await {
-            log_error(&format!("❌ Erro ao enviar para Pub/Sub: {}", e));
-        } else {
-            log_info("✅ Payload enviado para Pub/Sub com sucesso");
+        match state_clone.message_queue.enqueue(chat_id_clone.clone(), payload_clone).await {
+            Some(messages) => {
+                // Fila pronta - processar batch
+                log_info(&format!(
+                    "🚀 Chat '{}': Fila pronta com {} mensagens - enviando para processamento",
+                    chat_id_clone,
+                    messages.len()
+                ));
+                
+                // Enviar batch para Pub/Sub
+                if let Err(e) = send_batch_to_pubsub(&state_clone, chat_id_clone, messages).await {
+                    log_error(&format!("❌ Erro ao enviar batch para Pub/Sub: {}", e));
+                }
+            }
+            None => {
+                // Ainda aguardando mais mensagens
+                log_info(&format!("⏳ Chat '{}': Aguardando mais mensagens...", chat_id_clone));
+            }
         }
     });
 
@@ -72,19 +93,33 @@ pub async fn handle_webhook(
     })))
 }
 
-/// Envia payload RAW para Pub/Sub
-async fn send_raw_to_pubsub(state: &Arc<AppState>, raw_payload: &str) -> AppResult<()> {
+/// Envia batch de mensagens agregadas para Pub/Sub
+async fn send_batch_to_pubsub(
+    state: &Arc<AppState>,
+    chat_id: String,
+    messages: Vec<chatguru_clickup_middleware::services::QueuedMessage>,
+) -> AppResult<()> {
     use google_cloud_pubsub::client::{Client, ClientConfig};
     use google_cloud_googleapis::pubsub::v1::PubsubMessage;
+    use chatguru_clickup_middleware::services::MessageQueueService;
 
-    // Configurar cliente Pub/Sub (usa metadata server do GCP em Cloud Run)
+    // 1. Agregar mensagens em um único payload (usa PRIMEIRA mensagem como base)
+    let aggregated_payload = MessageQueueService::process_batch_sync(chat_id.clone(), messages)
+        .map_err(|e| AppError::InternalError(format!("Failed to aggregate messages: {}", e)))?;
+
+    log_info(&format!(
+        "📦 Payload agregado para chat '{}' criado com sucesso",
+        chat_id
+    ));
+
+    // 2. Configurar cliente Pub/Sub (usa metadata server do GCP em Cloud Run)
     let config = ClientConfig::default().with_auth().await
         .map_err(|e| AppError::InternalError(format!("Failed to configure Pub/Sub client: {}", e)))?;
 
     let client = Client::new(config).await
         .map_err(|e| AppError::InternalError(format!("Failed to create Pub/Sub client: {}", e)))?;
 
-    // Obter nome do tópico
+    // 3. Obter nome do tópico
     let default_topic = "chatguru-webhook-raw".to_string();
     let topic_name = state.settings.gcp.pubsub_topic
         .as_ref()
@@ -92,37 +127,44 @@ async fn send_raw_to_pubsub(state: &Arc<AppState>, raw_payload: &str) -> AppResu
 
     let topic = client.topic(topic_name);
 
-    // Verificar se tópico existe
+    // 4. Verificar se tópico existe
     if !topic.exists(None).await
         .map_err(|e| AppError::InternalError(format!("Failed to check topic existence: {}", e)))? {
         return Err(AppError::InternalError(format!("Topic '{}' does not exist", topic_name)));
     }
 
-    // Criar publisher
+    // 5. Criar publisher
     let publisher = topic.new_publisher(None);
 
-    // Preparar mensagem com timestamp
+    // 6. Preparar envelope com payload agregado (formato compatível com worker)
     let envelope = json!({
-        "raw_payload": raw_payload,
+        "raw_payload": serde_json::to_string(&aggregated_payload)
+            .map_err(|e| AppError::InternalError(format!("Failed to serialize aggregated payload: {}", e)))?,
         "received_at": chrono::Utc::now().to_rfc3339(),
-        "source": "chatguru-webhook"
+        "source": "chatguru-webhook-queue",
+        "chat_id": chat_id,
+        "is_batch": true
     });
 
     let msg_bytes = serde_json::to_vec(&envelope)
-        .map_err(|e| AppError::InternalError(format!("Failed to serialize message: {}", e)))?;
+        .map_err(|e| AppError::InternalError(format!("Failed to serialize envelope: {}", e)))?;
 
-    // Criar mensagem Pub/Sub
+    // 7. Criar mensagem Pub/Sub
     let msg = PubsubMessage {
         data: msg_bytes.into(),
         ..Default::default()
     };
 
-    // Publicar mensagem
+    // 8. Publicar mensagem
     let awaiter = publisher.publish(msg).await;
     awaiter.get().await
         .map_err(|e| AppError::InternalError(format!("Failed to publish message: {}", e)))?;
 
-    log_info(&format!("📤 Mensagem publicada no tópico '{}'", topic_name));
+    log_info(&format!(
+        "📤 Payload agregado publicado no tópico '{}' (chat: {})",
+        topic_name,
+        chat_id
+    ));
 
     Ok(())
 }

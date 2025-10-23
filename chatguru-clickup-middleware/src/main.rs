@@ -129,16 +129,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    // Inicializar estado da aplicação (SEM scheduler, SEM database)
+    // Inicializar fila de mensagens por chat
+    let message_queue = Arc::new(services::MessageQueueService::new());
+    
+    // Iniciar scheduler da fila (verifica a cada 10s)
+    message_queue.clone().start_scheduler();
+    log_info("✅ Message Queue Scheduler iniciado (5 msgs ou 100s por chat)");
+
+    // Inicializar estado da aplicação
     let app_state = Arc::new(AppState {
         clickup_client: reqwest::Client::new(),
         clickup: clickup_service,
         settings: settings.clone(),
         vertex: vertex_service,
         media_sync: media_sync_service,
+        message_queue,
     });
 
-    log_info("Event-driven architecture - No scheduler needed");
+    log_info("Event-driven architecture com Message Queue");
 
     // Configurar rotas base
     let mut app = Router::new()

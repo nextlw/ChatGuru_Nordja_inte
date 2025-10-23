@@ -9,6 +9,8 @@ pub mod auth; // Novo módulo OAuth2 isolado
 
 // AppState é definido aqui para ser compartilhado
 // Versão event-driven: SEM scheduler, SEM database
+use std::sync::Arc;
+
 #[derive(Clone)]
 pub struct AppState {
     pub settings: config::Settings,
@@ -16,4 +18,5 @@ pub struct AppState {
     pub clickup: services::ClickUpService,
     pub vertex: Option<services::VertexAIService>,
     pub media_sync: Option<services::MediaSyncService>,
+    pub message_queue: Arc<services::MessageQueueService>,  // Fila de mensagens por chat
 }
