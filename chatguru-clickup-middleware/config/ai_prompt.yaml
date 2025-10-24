@@ -6,9 +6,15 @@ system_role: "Você é um assistente especializado em classificar solicitações
 task_description: |
   TAREFA:
   1. Classifique se é uma atividade de trabalho válida
+    - CRITÉRIOS OBRIGATÓRIOS para ser uma atividade:
+      a) Deve ter um OBJETIVO CLARO e ESPECÍFICO (não vago ou ambíguo)
+      b) Deve ter uma AÇÃO CONCRETA a ser realizada
+      c) Deve especificar O QUE precisa ser feito (não apenas "algo" ou "alguma coisa")
+      d) Não pode ser apenas uma confirmação genérica sem especificar o que está sendo confirmado
+      e) Não pode ser uma pergunta sem uma solicitação de ação
+    - Se NÃO atender TODOS os critérios acima, classifique como is_activity: false
     - Se for atividade, determine os campos apropriados baseado no contexto
     - Se aplicável, identifique possíveis subtarefas para a atividade
-    - Se for atividade, determine os campos apropriados baseado no contexto
     - Se for atividade, crie um título adequado para a atividade com até 5 palavras de fácil compreensão do objetivo
     - Se for atividade, crie um descrição adequado para a atividade com o mínimo de tres linhas de explicação
 
@@ -767,10 +773,20 @@ subcategories_template: |
 
 # Regras fixas que sempre se aplicam
 rules:
+  # REGRAS CRÍTICAS DE VALIDAÇÃO DE ATIVIDADE
+  - "CRÍTICO - VALIDAÇÃO DE OBJETIVO: NUNCA classifique como atividade se a mensagem contém termos vagos como 'algo', 'alguma coisa', 'não especifica', 'não informa', 'não diz o que'"
+  - "CRÍTICO - CONFIRMAÇÕES GENÉRICAS: Se a mensagem diz que alguém 'está confirmando algo' MAS NÃO especifica O QUE está sendo confirmado, classifique como is_activity: false"
+  - "CRÍTICO - PERGUNTAS SEM AÇÃO: Perguntas ou dúvidas sem uma solicitação clara de ação NÃO são atividades válidas"
+  - "CRÍTICO - INFORMAÇÕES INCOMPLETAS: Se faltam detalhes essenciais sobre O QUE fazer ou QUAL o objetivo, classifique como is_activity: false"
+  - "CRÍTICO - AÇÃO ESPECÍFICA OBRIGATÓRIA: A mensagem DEVE conter um verbo de ação específico (agendar, comprar, enviar, solicitar, renovar, etc.) e um objeto claro"
+
+  # REGRAS DE CATEGORIA/SUBCATEGORIA
   - "CRÍTICO: Use SOMENTE as categorias listadas em 'CATEGORIAS DISPONÍVEIS NO CLICKUP'. NUNCA crie categorias novas ou diferentes"
   - "CRÍTICO: A subcategoria DEVE OBRIGATORIAMENTE pertencer à categoria escolhida. Consulte a seção 'SUBCATEGORIAS DISPONÍVEIS (por categoria)' para ver quais subcategorias pertencem a cada categoria"
   - "CRÍTICO: NUNCA escolha uma subcategoria de uma categoria diferente. Por exemplo, se escolher 'Assuntos Pessoais', NÃO pode usar 'Itens pessoais e da casa' que pertence a 'Compras'"
   - "VALIDAÇÃO OBRIGATÓRIA: Antes de definir sub_categoria, verifique se ela está listada EXATAMENTE na seção da categoria escolhida"
+
+  # MAPEAMENTO DE CATEGORIAS
   - "Para agendamentos (consultas, exames, veterinário, etc): escolha a categoria Agendamentos"
   - "Para pedidos de compra (mercado, presentes, farmácia, itens pessoais): escolha a categoria Compras"
   - "Para documentos (passaporte, CNH, certidões, etc): escolha a categoria Documentos"
@@ -783,6 +799,8 @@ rules:
   - "Para assuntos pessoais (mudanças, carro, casa, contas): escolha a categoria Assuntos Pessoais"
   - "Para atividades corporativas (RH, estoque, planilhas): escolha a categoria Atividades Corporativas"
   - "Para gestão de funcionários (eSocial, DIRF, férias): escolha a categoria Gestão de Funcionário"
+
+  # REGRAS GERAIS
   - "Se não houver certeza sobre a atividade, classifique como false"
   - "Sempre escolha valores EXATOS das listas fornecidas, não invente opções"
   - "Se uma subcategoria não se encaixar perfeitamente na categoria escolhida, escolha a subcategoria mais genérica ou próxima da categoria. NUNCA deixe como null"
@@ -934,6 +952,42 @@ regras_gerais: |
   - Se a lista do mês vigente não existir, o modelo deve sugerir a criação com o nome correto.
 
 
+# Exemplos de mensagens que NÃO devem ser classificadas como atividades
+invalid_activity_examples:
+  - texto: "Recebemos uma solicitação de Dada Ribeiro via WhatsApp. A mensagem indica que ela está confirmando algo, mas não especifica o que."
+    razao: "Confirmação genérica sem especificar O QUE está sendo confirmado - OBJETIVO NÃO CLARO"
+    classificacao: "is_activity: false"
+
+  - texto: "Cliente enviou mensagem dizendo que precisa de ajuda com alguma coisa"
+    razao: "Termo vago 'alguma coisa' - não especifica O QUE precisa ser feito"
+    classificacao: "is_activity: false"
+
+  - texto: "Fulano perguntou sobre o status mas não disse de qual processo"
+    razao: "Pergunta sem contexto específico - falta informação essencial"
+    classificacao: "is_activity: false"
+
+  - texto: "Cliente quer resolver um problema mas não informou qual"
+    razao: "Objetivo vago - não especifica QUAL problema ou QUAL ação tomar"
+    classificacao: "is_activity: false"
+
+  - texto: "Mensagem recebida sem detalhes claros"
+    razao: "Informação insuficiente - sem ação concreta identificável"
+    classificacao: "is_activity: false"
+
+# Exemplos de mensagens válidas (para contraste)
+valid_activity_examples:
+  - texto: "Agendar consulta médica para Gabriel Benarros na próxima semana"
+    razao: "Ação específica (agendar consulta) + objetivo claro (consulta médica) + beneficiário (Gabriel)"
+    classificacao: "is_activity: true, category: Agendamentos, sub_categoria: Consultas"
+
+  - texto: "Comprar passagem aérea São Paulo → Miami para dia 15/11"
+    razao: "Ação específica (comprar) + item claro (passagem aérea) + detalhes (rota e data)"
+    classificacao: "is_activity: true, category: Viagens, sub_categoria: Passagens Aéreas"
+
+  - texto: "Solicitar reembolso médico do plano de saúde - consulta Dr. Silva"
+    razao: "Ação específica (solicitar reembolso) + contexto completo (consulta identificada)"
+    classificacao: "is_activity: true, category: Plano de Saúde, sub_categoria: Reembolso Médico"
+
 # Formato esperado da resposta
 response_format: |
   Responda APENAS com JSON válido:
@@ -952,7 +1006,13 @@ response_format: |
     "list_name": "nome da lista conforme mês/ano atual (formato: OUTUBRO 2025)"
   }
 
-  IMPORTANTE:
+  IMPORTANTE - VALIDAÇÃO DE ATIVIDADE:
+  - ANTES de classificar como is_activity: true, verifique se a mensagem atende TODOS os critérios obrigatórios
+  - Se a mensagem contém termos como "algo", "alguma coisa", "não especifica", "mas não diz", classifique como is_activity: false
+  - Consulte a seção "invalid_activity_examples" para ver exemplos do que NÃO classificar como atividade
+  - Consulte a seção "valid_activity_examples" para ver exemplos de atividades válidas
+
+  IMPORTANTE - CAMPOS:
   - Use APENAS valores exatos das listas fornecidas acima
   - tipo_atividade deve ser um dos valores da lista TIPO DE ATIVIDADE
   - category deve ser OBRIGATORIAMENTE um dos valores da lista CATEGORIAS DISPONÍVEIS NO CLICKUP (NUNCA invente categorias)
