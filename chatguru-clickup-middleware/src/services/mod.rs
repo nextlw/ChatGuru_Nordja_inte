@@ -13,18 +13,18 @@ pub mod smart_assignee_finder;  // Busca inteligente de assignees (responsáveis
 pub mod custom_field_manager;  // Gerenciamento de campos personalizados (Cliente Solicitante)
 pub mod message_queue;  // Fila de mensagens por chat (5 msgs ou 100s)
 
-// Re-exports
-pub use clickup::*;
-pub use chatguru::*;
-pub use openai::*;
-pub use prompts::*;
-pub use vertex::*;
-pub use hybrid_ai::*;
-pub use media_sync::*;
-pub use folder_resolver::*;
-pub use smart_folder_finder::*;
-pub use smart_assignee_finder::*;
-pub use custom_field_manager::*;
-pub use message_queue::*;
+// Re-exports (explícitos para evitar ambiguidade)
+pub use clickup::ClickUpService;
+pub use chatguru::ChatGuruApiService;
+pub use openai::{OpenAIService, OpenAIClassification};
+pub use prompts::AiPromptConfig;
+pub use vertex::VertexAIService;
+pub use hybrid_ai::{HybridAIService, HybridAIResult};
+pub use media_sync::MediaSyncService;
+pub use folder_resolver::FolderResolver;
+pub use smart_folder_finder::{SmartFolderFinder, FolderSearchResult};
+pub use smart_assignee_finder::{SmartAssigneeFinder, AssigneeSearchResult};
+pub use custom_field_manager::CustomFieldManager;
+pub use message_queue::{MessageQueueService, QueuedMessage};
 
 // OAuth2 module agora está em src/auth/ (módulo separado e isolado)

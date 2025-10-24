@@ -925,6 +925,7 @@ impl ClickUpService {
 
     /// Obtém ID da lista de fallback - agora apenas usa configuração
     /// Não tenta mais criar estrutura dinâmica
+    #[allow(dead_code)]
     async fn get_fallback_list_id(&self, _client_name: Option<&str>, _attendant_name: Option<&str>) -> String {
         // Usar ID da env var ou config (sem tentar criar dinamicamente)
         std::env::var("FALLBACK_LIST_ID")

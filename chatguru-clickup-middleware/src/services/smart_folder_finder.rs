@@ -71,7 +71,9 @@ struct ClickUpFolder {
 #[derive(Debug, Deserialize, Clone)]
 struct ClickUpList {
     #[serde(deserialize_with = "deserialize_id_flexible")]
+    #[allow(dead_code)]
     id: String,
+    #[allow(dead_code)]
     name: String,
 }
 

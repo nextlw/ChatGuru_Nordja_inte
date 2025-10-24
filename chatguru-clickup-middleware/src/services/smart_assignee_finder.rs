@@ -91,6 +91,7 @@ struct ClickUpTasksResponse {
 #[derive(Debug, Deserialize)]
 struct ClickUpTask {
     #[serde(deserialize_with = "deserialize_id_flexible")]
+    #[allow(dead_code)]
     id: String,
     assignees: Vec<ClickUpUser>,
 }

@@ -14,6 +14,7 @@ const CLIENT_SOLICITANTE_FIELD_ID: &str = "0ed63eec-1c50-4190-91c1-59b4b17557f6"
 #[derive(Debug, Deserialize)]
 struct ClickUpCustomField {
     id: String,
+    #[allow(dead_code)]
     name: String,
     #[allow(dead_code)]
     #[serde(rename = "type")]
@@ -30,6 +31,7 @@ struct CustomFieldTypeConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 struct CustomFieldOption {
+    #[allow(dead_code)]
     id: Option<String>,
     name: String,
     #[allow(dead_code)]
