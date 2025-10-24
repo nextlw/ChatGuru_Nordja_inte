@@ -253,58 +253,56 @@ pub async fn handle_worker(
                 log_info(&format!("📎 Mídia detectada ({}: {}), iniciando processamento: {}",
                     processing_type, media_type, media_url));
 
-                // TEMPORÁRIO: Vertex AI está sendo refatorado - usar apenas OpenAI por enquanto
-                log_info("🔄 Vertex AI em refatoração - usando apenas OpenAI por enquanto");
-                let media_result = None; // Placeholder para nova implementação
-
-                // Fallback para OpenAI se Vertex AI falhar
-                let final_result = if media_result.is_none() {
+                // Usar HybridAI se disponível, senão fallback para OpenAI direto
+                let final_result = if let Some(ref hybrid_ai) = state.hybrid_ai {
+                    log_info("🚀 Processando mídia com HybridAI Service (Vertex AI + OpenAI fallback)");
+                    match hybrid_ai.process_media(media_url, media_type).await {
+                        Ok(result) => {
+                            log_info(&format!("✅ Mídia processada com sucesso: {}", result));
+                            Some(result)
+                        }
+                        Err(e) => {
+                            log_error(&format!("❌ Erro ao processar mídia: {}", e));
+                            None
+                        }
+                    }
+                } else {
+                    // Fallback: usar OpenAI direto se HybridAI não estiver disponível
+                    log_info("🔄 HybridAI indisponível, usando OpenAI direto");
                     match OpenAIService::new(None).await {
                         Some(openai_service) => {
                             if processing_type == "audio" {
-                                log_info("🔄 Fallback para OpenAI Whisper");
                                 match openai_service.download_audio(media_url).await {
                                     Ok(audio_bytes) => {
-                                        let extension = media_url
-                                            .split('.')
-                                            .last()
+                                        let extension = media_url.split('.').last()
                                             .and_then(|ext| ext.split('?').next())
                                             .unwrap_or("ogg");
-
                                         match openai_service.transcribe_audio(&audio_bytes, extension).await {
-                                            Ok(transcription) => {
-                                                log_info(&format!("✅ Transcrição OpenAI concluída: {}", transcription));
-                                                Some(transcription)
-                                            }
+                                            Ok(transcription) => Some(transcription),
                                             Err(e) => {
-                                                log_error(&format!("❌ Erro OpenAI Whisper: {}", e));
+                                                log_error(&format!("❌ Erro Whisper: {}", e));
                                                 None
                                             }
                                         }
                                     }
                                     Err(e) => {
-                                        log_error(&format!("❌ Erro ao baixar áudio: {}", e));
+                                        log_error(&format!("❌ Erro download áudio: {}", e));
                                         None
                                     }
                                 }
                             } else {
-                                // Fallback para OpenAI Vision (imagem)
-                                log_info("🔄 Fallback para OpenAI Vision");
                                 match openai_service.download_image(media_url).await {
                                     Ok(image_bytes) => {
                                         match openai_service.describe_image(&image_bytes).await {
-                                            Ok(description) => {
-                                                log_info(&format!("✅ Descrição OpenAI concluída: {}", description));
-                                                Some(description)
-                                            }
+                                            Ok(description) => Some(description),
                                             Err(e) => {
-                                                log_error(&format!("❌ Erro OpenAI Vision: {}", e));
+                                                log_error(&format!("❌ Erro Vision: {}", e));
                                                 None
                                             }
                                         }
                                     }
                                     Err(e) => {
-                                        log_error(&format!("❌ Erro ao baixar imagem: {}", e));
+                                        log_error(&format!("❌ Erro download imagem: {}", e));
                                         None
                                     }
                                 }
@@ -315,8 +313,6 @@ pub async fn handle_worker(
                             None
                         }
                     }
-                } else {
-                    media_result
                 };
 
                 // Atualizar payload com resultado

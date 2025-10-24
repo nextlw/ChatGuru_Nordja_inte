@@ -160,6 +160,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     message_queue.clone().start_scheduler();
     log_info("✅ Message Queue Scheduler iniciado - COM CALLBACK para Pub/Sub (5 msgs ou 100s por chat)");
 
+    // Inicializar HybridAI service se habilitado
+    let hybrid_ai_service = if settings.ai.as_ref().and_then(|ai| ai.use_hybrid).unwrap_or(false) {
+        match services::HybridAIService::new(&settings).await {
+            Ok(service) => {
+                log_info("✅ HybridAI Service inicializado (Vertex AI + OpenAI fallback)");
+                Some(Arc::new(service))
+            }
+            Err(e) => {
+                log_warning(&format!("⚠️ Falha ao inicializar HybridAI: {}. Worker usará OpenAI direto.", e));
+                None
+            }
+        }
+    } else {
+        log_info("HybridAI Service desabilitado na configuração");
+        None
+    };
+
     // Inicializar estado da aplicação
     let app_state = Arc::new(AppState {
         clickup_client: reqwest::Client::new(),
@@ -167,6 +184,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         settings: settings.clone(),
         vertex: vertex_service,
         media_sync: media_sync_service,
+        hybrid_ai: hybrid_ai_service,
         message_queue,
     });
 
