@@ -311,11 +311,13 @@ impl MediaProcessor {
     /// Cria Part para Vertex AI com mídia
     pub async fn create_media_part(&self, url: &str) -> Result<Part, AppError> {
         let (base64_data, mime_type) = self.download_and_encode(url).await?;
-        
-        Ok(Part::InlineData(InlineData {
-            mime_type: mime_type.to_string().to_string(),
-            data: base64_data,
-        }))
+
+        Ok(Part::InlineData {
+            inline_data: InlineData {
+                mime_type: mime_type.to_string().to_string(),
+                data: base64_data,
+            },
+        })
     }
 
     /// Valida se URL é acessível
