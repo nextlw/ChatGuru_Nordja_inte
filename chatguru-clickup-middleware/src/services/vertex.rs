@@ -1,13 +1,16 @@
 /// Vertex AI Service: Integração completa com Google Cloud Vertex AI
 ///
-/// IMPLEMENTAÇÃO COMPLETA:
+/// IMPLEMENTAÇÃO COMPLETA (TODAS AS FASES):
 /// ✅ FASE 1: Estruturas de dados compatíveis com API oficial
 /// ✅ FASE 2: Autenticação OAuth2/ADC com cache de tokens
 /// ✅ FASE 3: Processamento de mídia (download + base64)
-/// 
-/// TODO Próximas fases:
-/// - Fase 4: Cliente HTTP (chamadas à API)
-/// - Fase 5: Service principal (integração completa)
+/// ✅ FASE 4: Cliente HTTP (chamadas à API Vertex AI) - implementado em send_request()
+/// ✅ FASE 5: Service principal (process_text, process_multimodal, validações)
+///
+/// INTEGRAÇÃO COM HYBRIDAI:
+/// - Classificação de atividades: hybrid_ai.rs::try_vertex_classification()
+/// - Processamento multimodal: hybrid_ai.rs::try_vertex_media_processing()
+/// - Fallback automático para OpenAI em caso de falha
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

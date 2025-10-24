@@ -296,21 +296,41 @@ impl HybridAIService {
     
     /// Tenta classificação com Vertex AI (com timeout)
     async fn try_vertex_classification(&self, context: &str) -> AppResult<OpenAIClassification> {
-        let _vertex_service = self.vertex_service.as_ref()
+        let vertex_service = self.vertex_service.as_ref()
             .ok_or_else(|| AppError::InternalError("Vertex AI service not available".to_string()))?;
-        
-        // TODO: Implementar conversão Vertex AI → OpenAIClassification
-        // Por enquanto, returna erro para forçar fallback para OpenAI
-        // Isso será implementado na próxima fase
-        
-        let _vertex_prompt = format!(
-            "Classifique se a seguinte mensagem representa uma atividade de trabalho válida.\n\nContexto: {}\n\nResponda em JSON com: is_activity, reason, category, sub_categoria",
-            context
-        );
-        
-        // Placeholder: Na implementação real, chamaria vertex_service.process_text()
-        // e converteria o resultado para OpenAIClassification
-        Err(AppError::VertexError("Vertex AI classification not implemented yet".to_string()))
+
+        // Carregar configuração de prompt (mesma usada pelo OpenAI)
+        let prompt_config = crate::services::prompts::AiPromptConfig::load_default()
+            .map_err(|e| {
+                log_warning(&format!("⚠️ Falha ao carregar AI prompt config: {}", e));
+                AppError::VertexError(format!("Prompt config unavailable: {}", e))
+            })?;
+
+        // Gerar prompt estruturado (mesma lógica OpenAI)
+        let vertex_prompt = prompt_config.generate_prompt(context);
+
+        if self.config.verbose_logging {
+            log_info(&format!("🤖 Enviando prompt para Vertex AI ({} chars)", vertex_prompt.len()));
+        }
+
+        // Chamar Vertex AI
+        let vertex_response = vertex_service.process_text(&vertex_prompt).await
+            .map_err(|e| AppError::VertexError(format!("Vertex AI API call failed: {}", e)))?;
+
+        if self.config.verbose_logging {
+            log_info(&format!("✅ Vertex AI response recebida ({} chars)", vertex_response.len()));
+        }
+
+        // Parse JSON response → OpenAIClassification
+        let classification: OpenAIClassification = serde_json::from_str(&vertex_response)
+            .map_err(|e| AppError::VertexError(format!("Failed to parse Vertex AI response as JSON: {}. Response: {}", e, vertex_response)))?;
+
+        if self.config.verbose_logging {
+            log_info(&format!("🎯 Vertex AI classification: is_activity={}, category={:?}, subcategory={:?}",
+                classification.is_activity, classification.category, classification.sub_categoria));
+        }
+
+        Ok(classification)
     }
     
     /// Processa mídia com fallback automático
@@ -370,10 +390,34 @@ impl HybridAIService {
     }
     
     /// Tenta processamento de mídia com Vertex AI
-    async fn try_vertex_media_processing(&self, _media_url: &str, _media_type: &str) -> AppResult<String> {
-        // TODO: Implementar processamento multimodal real
-        // Por enquanto, força fallback para OpenAI
-        Err(AppError::VertexError("Vertex AI media processing not implemented yet".to_string()))
+    async fn try_vertex_media_processing(&self, media_url: &str, media_type: &str) -> AppResult<String> {
+        let vertex_service = self.vertex_service.as_ref()
+            .ok_or_else(|| AppError::InternalError("Vertex AI service not available".to_string()))?;
+
+        // Definir prompt baseado no tipo de mídia
+        let prompt = if media_type.contains("audio") {
+            "Transcreva este áudio em texto, preservando o conteúdo exato da fala."
+        } else if media_type.contains("image") {
+            "Descreva esta imagem em detalhes, identificando objetos, texto visível, pessoas e contexto relevante."
+        } else if media_type.contains("video") {
+            "Descreva este vídeo, incluindo ações, objetos, pessoas e áudio se houver."
+        } else {
+            "Analise este arquivo e extraia todo o conteúdo relevante."
+        };
+
+        if self.config.verbose_logging {
+            log_info(&format!("🎬 Processando mídia com Vertex AI: {} ({})", media_url, media_type));
+        }
+
+        // Chamar Vertex AI multimodal
+        let result = vertex_service.process_multimodal(prompt, &[media_url.to_string()]).await
+            .map_err(|e| AppError::VertexError(format!("Vertex AI multimodal processing failed: {}", e)))?;
+
+        if self.config.verbose_logging {
+            log_info(&format!("✅ Vertex AI processamento de mídia completo ({} chars)", result.len()));
+        }
+
+        Ok(result)
     }
     
     /// Retorna status dos serviços disponíveis
