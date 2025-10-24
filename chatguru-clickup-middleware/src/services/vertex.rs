@@ -357,18 +357,17 @@ pub struct InlineData {
     pub data: String, // Base64
 }
 
-/// Parte de texto (formato correto da API Vertex AI)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TextPart {
-    pub text: String,
-}
-
-/// Parte do conteúdo (texto ou mídia)
+/// Parte do conteúdo (texto ou mídia) - formato estruturado da API
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Part {
-    Text(TextPart),
-    InlineData(InlineData),
+    Text {
+        text: String,
+    },
+    InlineData {
+        #[serde(rename = "inlineData")]
+        inline_data: InlineData,
+    },
 }
 
 /// Conteúdo da mensagem
@@ -443,7 +442,7 @@ impl VertexAIRequest {
         Self {
             contents: vec![Content {
                 role: "user".to_string(),
-                parts: vec![Part::Text(TextPart { text: prompt.to_string() })],
+                parts: vec![Part::Text { text: prompt.to_string() }],
             }],
             generation_config: Some(GenerationConfig::default()),
         }
@@ -451,7 +450,7 @@ impl VertexAIRequest {
 
     /// Cria request multimodal (texto + mídia)
     pub fn new_multimodal(prompt: &str, media_parts: Vec<Part>) -> Self {
-        let mut parts = vec![Part::Text(TextPart { text: prompt.to_string() })];
+        let mut parts = vec![Part::Text { text: prompt.to_string() }];
         parts.extend(media_parts);
 
         Self {
@@ -515,7 +514,7 @@ impl VertexAIResponse {
             .parts
             .iter()
             .find_map(|part| match part {
-                Part::Text(TextPart { text }) => Some(text.clone()),
+                Part::Text { text } => Some(text.clone()),
                 _ => None,
             })
     }
@@ -733,7 +732,7 @@ mod tests {
         assert_eq!(request.contents[0].parts.len(), 1);
 
         match &request.contents[0].parts[0] {
-            Part::Text(TextPart { text }) => assert_eq!(text, "Test prompt"),
+            Part::Text { text } => assert_eq!(text, "Test prompt"),
             _ => panic!("Expected text part"),
         }
     }
