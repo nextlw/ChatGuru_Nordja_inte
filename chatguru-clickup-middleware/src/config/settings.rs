@@ -127,7 +127,20 @@ impl Settings {
         if let Ok(list_id) = std::env::var("CLICKUP_LIST_ID") {
             builder = builder.set_override("clickup.list_id", list_id)?;
         }
-        
+
+        // Variáveis de ambiente para Vertex AI (permite trocar modelo sem rebuild!)
+        if let Ok(model) = std::env::var("VERTEX_AI_MODEL") {
+            builder = builder.set_override("vertex.model", model)?;
+        }
+        if let Ok(location) = std::env::var("VERTEX_AI_LOCATION") {
+            builder = builder.set_override("vertex.location", location)?;
+        }
+        if let Ok(timeout) = std::env::var("VERTEX_AI_TIMEOUT") {
+            if let Ok(timeout_val) = timeout.parse::<u64>() {
+                builder = builder.set_override("vertex.timeout_seconds", timeout_val)?;
+            }
+        }
+
         // Também suportar o prefixo antigo
         builder = builder.add_source(Environment::with_prefix("CHATGURU_CLICKUP"));
         
