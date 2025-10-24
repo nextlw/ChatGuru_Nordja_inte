@@ -536,6 +536,7 @@ dependencies = [
  "config",
  "deunicode",
  "dotenvy",
+ "futures-util",
  "google-cloud-auth 1.0.0",
  "google-cloud-googleapis",
  "google-cloud-pubsub",

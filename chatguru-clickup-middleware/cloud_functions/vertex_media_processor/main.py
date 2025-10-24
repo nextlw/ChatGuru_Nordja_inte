@@ -183,8 +183,8 @@ def transcribe_audio_with_vertex(audio_bytes: bytes, mime_type: str, media_url: 
 
         logger.info(f"Transcribing audio with Vertex AI Gemini (mime_type: {normalized_mime}, size: {len(audio_bytes)} bytes)")
 
-        # Initialize model (Gemini 1.5 Flash suporta áudio)
-        model = GenerativeModel("gemini-1.5-flash")
+        # Initialize model (Gemini 2.0 Flash suporta áudio e é o modelo estável atual)
+        model = GenerativeModel("gemini-2.0-flash-001")
 
         # Create audio part
         audio_part = Part.from_data(data=audio_bytes, mime_type=normalized_mime)
@@ -237,8 +237,8 @@ def describe_image_with_vertex(image_bytes: bytes, mime_type: str) -> str:
 
         logger.info(f"Describing image with Vertex AI Gemini (mime_type: {normalized_mime}, size: {len(image_bytes)} bytes)")
 
-        # Initialize model (Gemini 1.5 Flash suporta imagem)
-        model = GenerativeModel("gemini-1.5-flash")
+        # Initialize model (Gemini 2.0 Flash suporta imagem e é o modelo estável atual)
+        model = GenerativeModel("gemini-2.0-flash-001")
 
         # Create image part
         image_part = Part.from_data(data=image_bytes, mime_type=normalized_mime)

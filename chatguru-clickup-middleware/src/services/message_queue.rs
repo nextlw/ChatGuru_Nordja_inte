@@ -21,8 +21,8 @@ use tokio::sync::RwLock;
 use serde_json::Value;
 
 /// Configuração da fila
-const MAX_MESSAGES_PER_CHAT: usize = 5;
-const MAX_WAIT_SECONDS: u64 = 100;
+const MAX_MESSAGES_PER_CHAT: usize = 10;  // Aumentado de 5 para 10 mensagens
+const MAX_WAIT_SECONDS: u64 = 180;  // Aumentado de 100s para 180s (3 minutos)
 const SCHEDULER_INTERVAL_SECONDS: u64 = 10;
 
 /// Mensagem na fila
