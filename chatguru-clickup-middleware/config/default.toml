@@ -47,7 +47,7 @@ enabled = true  # HABILITADO para processamento multimodal
 timeout_seconds = 30  # Timeout de 30s para processamento de mídia (fail-fast para fallback OpenAI)
 project_id = "buzzlightear"
 location = "us-central1"
-model = "gemini-1.5-flash-001"  # Modelo Gemini 1.5 Flash (rápido e estável)
+model = "gemini-2.0-flash-001"  # Modelo Gemini 2.0 Flash (stable, Feb 2025 - pode ser sobrescrito via ENV VAR: VERTEX_AI_MODEL)
 
 [hybrid_ai]
 enabled = true  # NOVO: Feature flag para serviço híbrido - HABILITADO
