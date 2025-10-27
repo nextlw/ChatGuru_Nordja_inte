@@ -1,3 +1,11 @@
+[workspace]
+members = [
+    ".",
+    "crates/mensageria",
+    "crates/ia-service",
+]
+resolver = "2"
+
 [package]
 name = "chatguru-clickup-middleware"
 version = "0.1.0"
@@ -14,6 +22,10 @@ name = "chatguru-clickup-middleware"
 path = "src/main.rs"
 
 [dependencies]
+# Local crates
+mensageria = { path = "crates/mensageria" }
+ia-service = { path = "crates/ia-service" }
+
 # Web framework
 axum = { version = "0.7", features = ["json", "macros", "tokio"] }
 tokio = { version = "1.0", features = ["full"] }

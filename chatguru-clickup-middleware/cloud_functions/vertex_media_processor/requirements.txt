@@ -1,3 +1,5 @@
 google-cloud-pubsub==2.23.1
 google-cloud-aiplatform==1.71.1
+google-cloud-secret-manager==2.20.2
 requests==2.32.3
+openai==1.54.5

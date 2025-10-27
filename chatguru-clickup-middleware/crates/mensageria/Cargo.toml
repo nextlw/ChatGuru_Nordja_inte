@@ -1,0 +1,20 @@
+[package]
+name = "mensageria"
+version = "0.1.0"
+edition = "2021"
+authors = ["eLai Integration Team"]
+description = "Serviço de mensageria para agrupar e processar mensagens do ChatGuru em lotes"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.0", features = ["sync", "time", "macros"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Logging
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["full", "test-util"] }

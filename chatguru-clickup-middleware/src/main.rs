@@ -57,47 +57,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let clickup_service = ClickUpService::new(settings.clone(), None);
 
-    // Inicializar Vertex AI service se habilitado
-    let vertex_service = if let Some(ref vertex_config) = settings.vertex {
-        if vertex_config.enabled {
-            let topic_name = settings.gcp.media_processing_topic
-                .clone()
-                .unwrap_or_else(|| "media-processing-requests".to_string());
+    // Inicializar IA Service (OpenAI)
+    let ia_service = match std::env::var("OPENAI_API_KEY").or_else(|_| std::env::var("openai_api_key")) {
+        Ok(api_key) => {
+            let config = services::IaServiceConfig::new(api_key)
+                .with_chat_model("gpt-4o-mini")
+                .with_temperature(0.1)
+                .with_max_tokens(500);
 
-            match services::VertexAIService::new(
-                vertex_config.project_id.clone(),
-                vertex_config.location.clone(),
-                Some(topic_name)
-            ).await {
+            match services::IaService::new(config) {
                 Ok(service) => {
-                    log_info("✅ Vertex AI service initialized with authentication");
-                    Some(service)
+                    log_info("✅ IaService inicializado com OpenAI (gpt-4o-mini)");
+                    Some(Arc::new(service))
                 }
                 Err(e) => {
-                    log_warning(&format!("⚠️ Failed to initialize Vertex AI service: {}. Service disabled.", e));
+                    log_warning(&format!("⚠️ Falha ao inicializar IaService: {}. Serviço desabilitado.", e));
                     None
                 }
             }
-        } else {
-            log_info("Vertex AI service disabled in config");
+        }
+        Err(_) => {
+            log_warning("⚠️ OPENAI_API_KEY não configurada. IaService desabilitado.");
             None
         }
-    } else {
-        log_info("Vertex AI service not configured");
-        None
-    };
-
-    // Inicializar MediaSync service se Vertex AI estiver habilitado
-    let media_sync_service = if vertex_service.is_some() {
-        let timeout = settings.vertex.as_ref()
-            .map(|v| v.timeout_seconds)
-            .unwrap_or(30);
-
-        let service = services::MediaSyncService::new(timeout);
-        log_info("Media Sync service initialized");
-        Some(service)
-    } else {
-        None
     };
 
     // ConfigService desabilitado (sem banco de dados)
@@ -160,31 +142,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     message_queue.clone().start_scheduler();
     log_info("✅ Message Queue Scheduler iniciado - COM CALLBACK para Pub/Sub (5 msgs ou 100s por chat)");
 
-    // Inicializar HybridAI service se habilitado
-    let hybrid_ai_service = if settings.ai.as_ref().and_then(|ai| ai.use_hybrid).unwrap_or(false) {
-        match services::HybridAIService::new(&settings).await {
-            Ok(service) => {
-                log_info("✅ HybridAI Service inicializado (Vertex AI + OpenAI fallback)");
-                Some(Arc::new(service))
-            }
-            Err(e) => {
-                log_warning(&format!("⚠️ Falha ao inicializar HybridAI: {}. Worker usará OpenAI direto.", e));
-                None
-            }
-        }
-    } else {
-        log_info("HybridAI Service desabilitado na configuração");
-        None
-    };
-
     // Inicializar estado da aplicação
     let app_state = Arc::new(AppState {
         clickup_client: reqwest::Client::new(),
         clickup: clickup_service,
         settings: settings.clone(),
-        vertex: vertex_service,
-        media_sync: media_sync_service,
-        hybrid_ai: hybrid_ai_service,
+        ia_service,
         message_queue,
     });
 
@@ -353,7 +316,7 @@ async fn process_media_in_batch(
 ) -> Result<Vec<services::QueuedMessage>, Box<dyn std::error::Error + Send + Sync>> {
     use google_cloud_pubsub::client::{Client, ClientConfig};
     use google_cloud_googleapis::pubsub::v1::PubsubMessage;
-    use serde_json::{json, Value};
+    use serde_json::{json};
     use uuid::Uuid;
 
     let mut processed_messages = Vec::new();

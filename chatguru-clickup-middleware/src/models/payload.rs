@@ -213,7 +213,7 @@ impl WebhookPayload {
     /// Converte payload para dados do ClickUp com classificação AI
     pub fn to_clickup_task_data_with_ai(
         &self, 
-        ai_classification: Option<&crate::services::openai::OpenAIClassification>
+        ai_classification: Option<&crate::services::OpenAIClassification>
     ) -> serde_json::Value {
         match self {
             WebhookPayload::ChatGuru(payload) => {
@@ -232,7 +232,7 @@ impl WebhookPayload {
     fn chatguru_to_clickup_with_ai(
         &self,
         payload: &ChatGuruPayload,
-        ai_classification: Option<&crate::services::openai::OpenAIClassification>
+        ai_classification: Option<&crate::services::OpenAIClassification>
     ) -> serde_json::Value {
         // NOVO FORMATO: descrição focada na mensagem
         let mut description = String::new();

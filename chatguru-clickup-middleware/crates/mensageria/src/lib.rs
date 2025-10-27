@@ -1,18 +1,18 @@
-/// Message Queue Service: Agrupa mensagens por chat antes de processar
-///
-/// Comportamento Unificado:
-/// - Cada chat tem sua própria fila
-/// - Processa AUTOMATICAMENTE via callback quando:
-///   - 5 mensagens acumuladas (via enqueue)
-///   - 100 segundos transcorridos (via scheduler)
-/// - Scheduler roda a cada 10 segundos verificando timeouts
-/// - Callback centraliza todo envio para Pub/Sub
-///
-/// Exemplo:
-/// ```
-/// Chat A: msg1 → msg2 → msg3 → msg4 → msg5 → CALLBACK → Pub/Sub (5 mensagens)
-/// Chat B: msg1 → espera 100s → CALLBACK → Pub/Sub (timeout)
-/// ```
+//! Message Queue Service: Agrupa mensagens por chat antes de processar
+//!
+//! Comportamento Unificado:
+//! - Cada chat tem sua própria fila
+//! - Processa AUTOMATICAMENTE via callback quando:
+//!   - 10 mensagens acumuladas (via enqueue)
+//!   - 180 segundos transcorridos (via scheduler)
+//! - Scheduler roda a cada 10 segundos verificando timeouts
+//! - Callback centraliza todo envio para Pub/Sub
+//!
+//! Exemplo:
+//! ```text
+//! Chat A: msg1 -> msg2 -> msg3 -> ... -> msg10 -> CALLBACK -> Pub/Sub (10 mensagens)
+//! Chat B: msg1 -> espera 180s -> CALLBACK -> Pub/Sub (timeout)
+//! ```
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -86,7 +86,7 @@ impl MessageQueueService {
             on_batch_ready: None,
         }
     }
-    
+
     /// Define callback para quando um batch estiver pronto
     pub fn with_batch_callback<F>(mut self, callback: F) -> Self
     where
@@ -202,16 +202,16 @@ impl MessageQueueService {
     pub fn start_scheduler(self: Arc<Self>) {
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(SCHEDULER_INTERVAL_SECONDS));
-            
+
             loop {
                 interval.tick().await;
-                
+
                 if let Err(e) = self.check_timeouts().await {
                     tracing::error!("❌ Erro ao verificar timeouts: {}", e);
                 }
             }
         });
-        
+
         tracing::info!(
             "🕐 Scheduler iniciado: verifica filas a cada {}s",
             SCHEDULER_INTERVAL_SECONDS
@@ -296,7 +296,7 @@ impl MessageQueueService {
 
         Ok(())
     }
-    
+
     /// Processa um batch de mensagens e retorna o payload agregado
     pub fn process_batch_sync(
         chat_id: String,
@@ -330,21 +330,21 @@ fn aggregate_messages(
         chat_id,
         messages.len()
     );
-    
+
     if messages.is_empty() {
         return Ok(Value::Object(serde_json::Map::new()));
     }
-    
+
     // Usar PRIMEIRA mensagem como base
     let mut aggregated_payload = messages[0].payload.clone();
-    
+
     // Agregar todos os texto_mensagem
     let mut aggregated_text = String::new();
-    
+
     for (idx, msg) in messages.iter().enumerate() {
         // Calcular tempo decorrido
         let elapsed = msg.received_at.elapsed().as_secs();
-        
+
         // Extrair texto_mensagem (pode vir como "texto_mensagem", "mensagem", "message", ou "text")
         let text = msg.payload
             .get("texto_mensagem")
@@ -353,12 +353,12 @@ fn aggregate_messages(
             .or_else(|| msg.payload.get("text"))
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        
+
         if !text.is_empty() {
             if !aggregated_text.is_empty() {
                 aggregated_text.push_str("\n\n");
             }
-            
+
             // Adicionar timestamp relativo para contexto
             aggregated_text.push_str(&format!(
                 "[Mensagem {} - há {}s]\n{}",
@@ -367,7 +367,7 @@ fn aggregate_messages(
                 text
             ));
         }
-        
+
         tracing::debug!(
             "  Mensagem {}/{}: '{}' (recebida há {}s)",
             idx + 1,
@@ -376,22 +376,22 @@ fn aggregate_messages(
             elapsed
         );
     }
-    
+
     // Atualizar texto_mensagem no payload agregado
     if let Some(obj) = aggregated_payload.as_object_mut() {
         obj.insert("texto_mensagem".to_string(), Value::String(aggregated_text.clone()));
-        
+
         // Adicionar metadados do batch
         obj.insert("_batch_size".to_string(), Value::Number(messages.len().into()));
         obj.insert("_batch_chat_id".to_string(), Value::String(chat_id.clone()));
     }
-    
+
     tracing::info!(
         "✅ Batch agregado: {} mensagens → {} caracteres de texto",
         messages.len(),
         aggregated_text.len()
     );
-    
+
     // Log detalhado do payload final (debug)
     tracing::debug!(
         "📋 Payload final agregado para chat '{}' (batch_size={}):\n{}",
@@ -399,43 +399,63 @@ fn aggregate_messages(
         messages.len(),
         serde_json::to_string_pretty(&aggregated_payload).unwrap_or_default()
     );
-    
+
     Ok(aggregated_payload)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
     #[tokio::test]
     async fn test_queue_fills_up() {
-        let service = MessageQueueService::new();
+        // Capturar batches processados pelo callback
+        let processed_batches = Arc::new(Mutex::new(Vec::new()));
+        let processed_clone = Arc::clone(&processed_batches);
+
+        let service = MessageQueueService::new()
+            .with_batch_callback(move |chat_id, messages| {
+                processed_clone.lock().unwrap().push((chat_id, messages.len()));
+            });
+
         let chat_id = "test_chat".to_string();
-        
-        // Adicionar 4 mensagens - não deve processar
-        for i in 1..=4 {
-            let result = service.enqueue(
+
+        // Adicionar 9 mensagens - não deve processar
+        for i in 1..=9 {
+            service.enqueue(
                 chat_id.clone(),
                 serde_json::json!({"msg": i})
             ).await;
-            assert!(result.is_none(), "Não deve processar com {} mensagens", i);
         }
-        
-        // Adicionar 5ª mensagem - deve processar
-        let result = service.enqueue(
+
+        // Aguardar um pouco para garantir que callback não foi chamado
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(
+            processed_batches.lock().unwrap().len(),
+            0,
+            "Não deve processar com 9 mensagens"
+        );
+
+        // Adicionar 10ª mensagem - deve processar
+        service.enqueue(
             chat_id.clone(),
-            serde_json::json!({"msg": 5})
+            serde_json::json!({"msg": 10})
         ).await;
-        
-        assert!(result.is_some(), "Deve processar com 5 mensagens");
-        let messages = result.unwrap();
-        assert_eq!(messages.len(), 5, "Deve ter 5 mensagens no batch");
+
+        // Aguardar callback ser executado
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let batches = processed_batches.lock().unwrap();
+        assert_eq!(batches.len(), 1, "Deve processar com 10 mensagens");
+        assert_eq!(batches[0].0, chat_id, "Chat ID deve corresponder");
+        assert_eq!(batches[0].1, 10, "Deve ter 10 mensagens no batch");
     }
 
     #[tokio::test]
     async fn test_multiple_chats() {
         let service = MessageQueueService::new();
-        
+
         // Chat A: 3 mensagens
         for i in 1..=3 {
             service.enqueue(
@@ -443,7 +463,7 @@ mod tests {
                 serde_json::json!({"msg": i})
             ).await;
         }
-        
+
         // Chat B: 2 mensagens
         for i in 1..=2 {
             service.enqueue(
@@ -451,11 +471,29 @@ mod tests {
                 serde_json::json!({"msg": i})
             ).await;
         }
-        
+
         let stats = service.get_stats().await;
         assert_eq!(stats.get("chat_a"), Some(&3));
         assert_eq!(stats.get("chat_b"), Some(&2));
     }
-}
 
- 
+    #[tokio::test]
+    async fn test_batch_aggregation() {
+        let service = MessageQueueService::new();
+        let chat_id = "test_aggregation".to_string();
+
+        // Adicionar mensagens com texto
+        for i in 1..=3 {
+            service.enqueue(
+                chat_id.clone(),
+                serde_json::json!({
+                    "texto_mensagem": format!("Mensagem {}", i),
+                    "chat_id": chat_id
+                })
+            ).await;
+        }
+
+        let stats = service.get_stats().await;
+        assert_eq!(stats.get(&chat_id), Some(&3), "Deve ter 3 mensagens na fila");
+    }
+}

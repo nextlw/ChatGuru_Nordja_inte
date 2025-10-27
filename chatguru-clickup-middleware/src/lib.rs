@@ -16,8 +16,6 @@ pub struct AppState {
     pub settings: config::Settings,
     pub clickup_client: reqwest::Client,
     pub clickup: services::ClickUpService,
-    pub vertex: Option<services::VertexAIService>,
-    pub media_sync: Option<services::MediaSyncService>,
-    pub hybrid_ai: Option<Arc<services::HybridAIService>>,  // Serviço híbrido Vertex AI + OpenAI
+    pub ia_service: Option<Arc<services::IaService>>,  // Serviço de IA usando OpenAI (async-openai)
     pub message_queue: Arc<services::MessageQueueService>,  // Fila de mensagens por chat
 }

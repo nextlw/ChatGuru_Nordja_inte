@@ -27,13 +27,10 @@ use chatguru_clickup_middleware::models::WebhookPayload;
 use chatguru_clickup_middleware::utils::{AppResult, AppError};
 use chatguru_clickup_middleware::utils::logging::*;
 use chatguru_clickup_middleware::AppState;
-use chatguru_clickup_middleware::services::openai::OpenAIService;
 use chatguru_clickup_middleware::services::chatguru::ChatGuruApiService;
-use chatguru_clickup_middleware::services::hybrid_ai::HybridAIService;
 use chatguru_clickup_middleware::services::smart_folder_finder::SmartFolderFinder;
 use chatguru_clickup_middleware::services::smart_assignee_finder::SmartAssigneeFinder;
 use chatguru_clickup_middleware::services::custom_field_manager::CustomFieldManager;
-// use crate::services::{ClickUpService, VertexAIService};
 
 // Configuração de retry
 const MAX_RETRY_ATTEMPTS: u32 = 3;
@@ -253,10 +250,10 @@ pub async fn handle_worker(
                 log_info(&format!("📎 Mídia detectada ({}: {}), iniciando processamento: {}",
                     processing_type, media_type, media_url));
 
-                // Usar HybridAI se disponível, senão fallback para OpenAI direto
-                let final_result = if let Some(ref hybrid_ai) = state.hybrid_ai {
-                    log_info("🚀 Processando mídia com HybridAI Service (Vertex AI + OpenAI fallback)");
-                    match hybrid_ai.process_media(media_url, media_type).await {
+                // Usar IaService para processar mídia
+                log_info("🚀 Processando mídia com IaService (OpenAI)");
+                let final_result = if let Some(ref ia_service) = state.ia_service {
+                    match ia_service.process_media(media_url, media_type).await {
                         Ok(result) => {
                             log_info(&format!("✅ Mídia processada com sucesso: {}", result));
                             Some(result)
@@ -267,52 +264,8 @@ pub async fn handle_worker(
                         }
                     }
                 } else {
-                    // Fallback: usar OpenAI direto se HybridAI não estiver disponível
-                    log_info("🔄 HybridAI indisponível, usando OpenAI direto");
-                    match OpenAIService::new(None).await {
-                        Some(openai_service) => {
-                            if processing_type == "audio" {
-                                match openai_service.download_audio(media_url).await {
-                                    Ok(audio_bytes) => {
-                                        let extension = media_url.split('.').last()
-                                            .and_then(|ext| ext.split('?').next())
-                                            .unwrap_or("ogg");
-                                        match openai_service.transcribe_audio(&audio_bytes, extension).await {
-                                            Ok(transcription) => Some(transcription),
-                                            Err(e) => {
-                                                log_error(&format!("❌ Erro Whisper: {}", e));
-                                                None
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        log_error(&format!("❌ Erro download áudio: {}", e));
-                                        None
-                                    }
-                                }
-                            } else {
-                                match openai_service.download_image(media_url).await {
-                                    Ok(image_bytes) => {
-                                        match openai_service.describe_image(&image_bytes).await {
-                                            Ok(description) => Some(description),
-                                            Err(e) => {
-                                                log_error(&format!("❌ Erro Vision: {}", e));
-                                                None
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        log_error(&format!("❌ Erro download imagem: {}", e));
-                                        None
-                                    }
-                                }
-                            }
-                        }
-                        None => {
-                            log_error("❌ Não foi possível inicializar OpenAI service");
-                            None
-                        }
-                    }
+                    log_error("❌ IaService não está disponível no AppState");
+                    None
                 };
 
                 // Atualizar payload com resultado
@@ -437,7 +390,7 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
     let classification = if let Some(forced) = force_classification {
         log_info("🔧 Usando classificação forçada (bypass OpenAI)");
 
-        use crate::services::openai::OpenAIClassification;
+        use crate::services::OpenAIClassification;
         OpenAIClassification {
             reason: forced.get("description")
                 .and_then(|v| v.as_str())
@@ -476,25 +429,30 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
             status_back_office: None,
         }
     } else {
-        // Classificar com HybridAIService (Vertex AI + fallback OpenAI)
-        let hybrid_service = match HybridAIService::from_app_state(state).await {
-            Ok(service) => service,
-            Err(e) => {
-                log_error(&format!("❌ Erro ao inicializar HybridAIService: {}", e));
-                return Err(AppError::InternalError(format!("Failed to initialize HybridAIService: {}", e)));
-            }
-        };
+        // Classificar com IaService (OpenAI)
+        let ia_service = state.ia_service.as_ref()
+            .ok_or_else(|| AppError::InternalError("IaService não disponível no AppState".to_string()))?;
 
+        // Carregar configuração de prompt
+        use chatguru_clickup_middleware::services::prompts::AiPromptConfig;
+        let prompt_config = AiPromptConfig::load_default()
+            .map_err(|e| AppError::InternalError(format!("Failed to load prompt config: {}", e)))?;
+
+        // Montar contexto
         let context = format!(
             "Campanha: WhatsApp\nOrigem: whatsapp\nNome: {}\nMensagem: {}\nTelefone: {}",
             nome, message, phone.as_deref().unwrap_or("N/A")
         );
 
-        match hybrid_service.classify_activity_with_fallback(&context).await {
+        // Gerar prompt usando a configuração
+        let formatted_prompt = prompt_config.generate_prompt(&context);
+
+        // Classificar com IA
+        match ia_service.classify_activity(&formatted_prompt).await {
             Ok(c) => c,
             Err(e) => {
-                log_error(&format!("❌ Erro na classificação HybridAI: {}", e));
-                return Err(AppError::InternalError(format!("HybridAI classification failed: {}", e)));
+                log_error(&format!("❌ Erro na classificação IA: {}", e));
+                return Err(AppError::InternalError(format!("IA classification failed: {}", e)));
             }
         }
     };
@@ -834,7 +792,7 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
 async fn create_clickup_task(
     state: &Arc<AppState>,
     payload: &WebhookPayload,
-    classification: &chatguru_clickup_middleware::services::openai::OpenAIClassification,
+    classification: &chatguru_clickup_middleware::services::OpenAIClassification,
     _nome: &str,
     _message: &str,
 ) -> AppResult<Value> {
@@ -981,7 +939,7 @@ fn extract_responsavel_nome_from_payload(payload: &WebhookPayload) -> Option<Str
 #[allow(dead_code)]
 fn prepare_custom_fields(
     payload: &WebhookPayload,
-    classification: &chatguru_clickup_middleware::services::openai::OpenAIClassification,
+    classification: &chatguru_clickup_middleware::services::OpenAIClassification,
     _nome: &str,
 ) -> Vec<Value> {
     let mut custom_fields = Vec::new();
@@ -1024,7 +982,7 @@ fn prepare_custom_fields(
 /// A determinação de subcategorias agora é feita pela IA e mapeada via YAML,
 /// não mais por palavra-chave hardcoded
 #[allow(dead_code)]
-fn determine_subcategoria(classification: &chatguru_clickup_middleware::services::openai::OpenAIClassification) -> Option<String> {
+fn determine_subcategoria(classification: &chatguru_clickup_middleware::services::OpenAIClassification) -> Option<String> {
     // Análise de palavras-chave da mensagem/descrição para determinar subcategoria
     let message_text = classification.reason.to_lowercase();
     
@@ -1153,7 +1111,7 @@ fn determine_subcategoria(classification: &chatguru_clickup_middleware::services
 /// subcategoria retornada pela classificação IA
 #[allow(dead_code)]
 fn determine_estrelas(
-    classification: &chatguru_clickup_middleware::services::openai::OpenAIClassification,
+    classification: &chatguru_clickup_middleware::services::OpenAIClassification,
     _payload: &WebhookPayload,
 ) -> i32 {
     use chatguru_clickup_middleware::services::prompts::AiPromptConfig;

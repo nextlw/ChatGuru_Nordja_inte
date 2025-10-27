@@ -1,13 +1,16 @@
 """
 Vertex AI Media Processor - Cloud Function
 
-Este Cloud Function replica a mesma lógica do fallback OpenAI no worker Rust,
-mas usando Vertex AI Gemini SDK para processar áudio e imagem.
+Arquitetura Híbrida com Fallback OpenAI:
+1. Tenta processar com Vertex AI Gemini (primário)
+2. Se Vertex AI falha → fallback para OpenAI Whisper/Vision
+3. Publica resultado no Pub/Sub
 
-Lógica idêntica ao fallback:
+Lógica:
 1. Download da mídia da URL
 2. Processamento com Vertex AI (transcrição de áudio ou descrição de imagem)
-3. Publicação do resultado no Pub/Sub
+3. Se Vertex AI falha → OpenAI Whisper (áudio) ou Vision (imagem)
+4. Publicação do resultado no Pub/Sub
 
 Triggered by: Pub/Sub topic "media-processing-requests"
 Publishes to: Pub/Sub topic "media-processing-results"
@@ -17,8 +20,10 @@ import base64
 import json
 import requests
 from google.cloud import pubsub_v1
+from google.cloud import secretmanager
 import vertexai
 from vertexai.generative_models import GenerativeModel, Part
+from openai import OpenAI
 import logging
 import os
 
@@ -36,6 +41,39 @@ vertexai.init(project=PROJECT_ID, location=LOCATION)
 # Initialize Pub/Sub publisher
 publisher = pubsub_v1.PublisherClient()
 RESULTS_TOPIC = f"projects/{PROJECT_ID}/topics/media-processing-results"
+
+# OpenAI client (inicializado sob demanda com API key do Secret Manager)
+_openai_client = None
+
+
+def get_openai_client() -> OpenAI:
+    """
+    Retorna cliente OpenAI, buscando API key do Secret Manager
+    Cache do cliente em variável global para reusar entre invocações
+    """
+    global _openai_client
+
+    if _openai_client is not None:
+        return _openai_client
+
+    try:
+        # Buscar OpenAI API key do Secret Manager
+        client = secretmanager.SecretManagerServiceClient()
+        secret_name = f"projects/{PROJECT_ID}/secrets/openai-api-key/versions/latest"
+
+        logger.info(f"Fetching OpenAI API key from Secret Manager: {secret_name}")
+        response = client.access_secret_version(request={"name": secret_name})
+        api_key = response.payload.data.decode('UTF-8')
+
+        # Inicializar cliente OpenAI
+        _openai_client = OpenAI(api_key=api_key)
+        logger.info("✅ OpenAI client initialized successfully")
+
+        return _openai_client
+
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize OpenAI client: {str(e)}")
+        raise
 
 
 def publish_result(result_data: dict):
@@ -107,31 +145,60 @@ def process_media(data, context):
             })
             return
 
-        # Process based on media type (mesma lógica do fallback)
+        # Process based on media type (HYBRID: Vertex AI → OpenAI fallback)
         result_text = None
         error = None
+        service_used = None
 
+        # ESTRATÉGIA 1: Tentar Vertex AI primeiro
         try:
             if processing_type == 'audio':
-                logger.info("🔄 Transcrevendo áudio com Vertex AI Gemini")
+                logger.info("🚀 Tentando transcrever áudio com Vertex AI Gemini")
                 result_text = transcribe_audio_with_vertex(media_bytes, media_type, media_url)
+                service_used = "vertex_ai"
                 logger.info(f"✅ Transcrição Vertex AI concluída: {result_text}")
             else:
-                logger.info("🔄 Descrevendo imagem com Vertex AI Gemini")
+                logger.info("🚀 Tentando descrever imagem com Vertex AI Gemini")
                 result_text = describe_image_with_vertex(media_bytes, media_type)
+                service_used = "vertex_ai"
                 logger.info(f"✅ Descrição Vertex AI concluída: {result_text}")
 
-        except Exception as e:
-            error = str(e)
-            logger.error(f"❌ Erro ao processar mídia com Vertex AI: {error}")
+        except Exception as vertex_error:
+            logger.warning(f"⚠️ Vertex AI falhou: {str(vertex_error)}")
+            logger.info("🔄 Fazendo fallback para OpenAI...")
+
+            # ESTRATÉGIA 2: Fallback para OpenAI se Vertex AI falha
+            try:
+                if processing_type == 'audio':
+                    logger.info("🔄 Transcrevendo áudio com OpenAI Whisper (fallback)")
+                    result_text = transcribe_audio_with_openai(media_bytes, media_type, media_url)
+                    service_used = "openai_whisper"
+                    logger.info(f"✅ Transcrição OpenAI Whisper concluída: {result_text}")
+                else:
+                    logger.info("🔄 Descrevendo imagem com OpenAI Vision (fallback)")
+                    result_text = describe_image_with_openai(media_bytes, media_type)
+                    service_used = "openai_vision"
+                    logger.info(f"✅ Descrição OpenAI Vision concluída: {result_text}")
+
+            except Exception as openai_error:
+                # Ambos falharam - registrar erro
+                error = f"Vertex AI: {str(vertex_error)} | OpenAI: {str(openai_error)}"
+                logger.error(f"❌ FALHA TOTAL: Vertex AI e OpenAI falharam. {error}")
 
         # Publish result
         result_payload = {
             'correlation_id': correlation_id,
             'result': result_text or "",
             'media_type': processing_type,
+            'service_used': service_used,  # "vertex_ai", "openai_whisper", "openai_vision", ou None
             'error': error
         }
+
+        # Log do serviço usado
+        if service_used:
+            logger.info(f"📊 Mídia processada com sucesso usando: {service_used}")
+        elif error:
+            logger.error(f"❌ Nenhum serviço conseguiu processar a mídia")
 
         logger.info(f"Publishing result for: {correlation_id}")
         publish_result(result_payload)
@@ -266,4 +333,120 @@ def describe_image_with_vertex(image_bytes: bytes, mime_type: str) -> str:
 
     except Exception as e:
         logger.error(f"Error in describe_image_with_vertex: {str(e)}")
+        raise
+
+
+# ============================================================================
+# OPENAI FALLBACK FUNCTIONS
+# ============================================================================
+
+def transcribe_audio_with_openai(audio_bytes: bytes, mime_type: str, media_url: str) -> str:
+    """
+    Transcreve áudio usando OpenAI Whisper API (fallback quando Vertex AI falha)
+    Lógica idêntica ao src/services/openai.rs:173-219
+
+    Args:
+        audio_bytes: Bytes do áudio (já baixado)
+        mime_type: Tipo MIME original
+        media_url: URL original (para detectar extensão)
+    """
+    try:
+        # Detectar extensão do arquivo da URL
+        extension = media_url.split('.')[-1].split('?')[0].lower()
+
+        # Normalizar mime_type baseado na extensão (mesma lógica do Rust)
+        extension_map = {
+            'ogg': 'audio/ogg',
+            'oga': 'audio/ogg',
+            'mp3': 'audio/mpeg',
+            'mpeg': 'audio/mpeg',
+            'wav': 'audio/wav',
+            'webm': 'audio/webm',
+            'm4a': 'audio/mp4',
+            'mp4': 'audio/mp4'
+        }
+
+        normalized_mime = extension_map.get(extension, 'audio/mpeg')
+
+        logger.info(f"Transcribing audio with OpenAI Whisper (mime_type: {normalized_mime}, size: {len(audio_bytes)} bytes)")
+
+        # Criar arquivo temporário em memória (Whisper API precisa de file-like object)
+        import io
+        audio_file = io.BytesIO(audio_bytes)
+        audio_file.name = f"audio.{extension}"
+
+        # Chamar Whisper API
+        client = get_openai_client()
+        response = client.audio.transcriptions.create(
+            model="whisper-1",
+            file=audio_file,
+            language="pt",
+            response_format="text"
+        )
+
+        transcription = response.strip()
+        logger.info(f"OpenAI Whisper transcription completed: {len(transcription)} characters")
+        return transcription
+
+    except Exception as e:
+        logger.error(f"Error in transcribe_audio_with_openai: {str(e)}")
+        raise
+
+
+def describe_image_with_openai(image_bytes: bytes, mime_type: str) -> str:
+    """
+    Descreve imagem usando OpenAI Vision (GPT-4o-mini) - fallback quando Vertex AI falha
+    Lógica idêntica ao src/services/openai.rs:302-362
+
+    Args:
+        image_bytes: Bytes da imagem (já baixada)
+        mime_type: Tipo MIME original
+    """
+    try:
+        # Normalizar mime_type (mesma lógica do Rust)
+        if 'png' in mime_type.lower():
+            normalized_mime = "image/png"
+        elif 'jpeg' in mime_type.lower() or 'jpg' in mime_type.lower():
+            normalized_mime = "image/jpeg"
+        elif 'webp' in mime_type.lower():
+            normalized_mime = "image/webp"
+        else:
+            normalized_mime = "image/jpeg"  # default
+
+        logger.info(f"Describing image with OpenAI Vision (mime_type: {normalized_mime}, size: {len(image_bytes)} bytes)")
+
+        # Converter imagem para base64 (OpenAI Vision precisa de base64)
+        import base64
+        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+
+        # Chamar OpenAI Vision API
+        client = get_openai_client()
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Descreva detalhadamente esta imagem em português do Brasil. Foque em elementos relevantes para contexto de atendimento ao cliente ou solicitação de serviços. Inclua: o que está visível na imagem, texto que apareça na imagem (se houver), e contexto ou situação representada. Seja objetivo e claro."
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{normalized_mime};base64,{image_base64}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=500
+        )
+
+        description = response.choices[0].message.content.strip()
+        logger.info(f"OpenAI Vision description completed: {len(description)} characters")
+        return description
+
+    except Exception as e:
+        logger.error(f"Error in describe_image_with_openai: {str(e)}")
         raise

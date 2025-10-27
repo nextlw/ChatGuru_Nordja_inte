@@ -649,7 +649,7 @@ impl ClickUpService {
     pub async fn process_payload_with_ai(
         &self, 
         payload: &WebhookPayload,
-        ai_classification: Option<&crate::services::openai::OpenAIClassification>
+        ai_classification: Option<&crate::services::OpenAIClassification>
     ) -> AppResult<Value> {
         // Extrair título e dados da tarefa
         let task_title = payload.get_task_title();
