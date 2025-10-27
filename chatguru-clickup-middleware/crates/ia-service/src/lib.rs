@@ -15,17 +15,25 @@ use async_openai::{
         AudioInput, AudioResponseFormat, ChatCompletionRequestMessage,
         ChatCompletionRequestUserMessageArgs, ChatCompletionRequestUserMessageContent,
         CreateChatCompletionRequestArgs, CreateEmbeddingRequestArgs, CreateTranscriptionRequestArgs,
-        EmbeddingInput, ImageDetail, ImageUrl, ImageUrlArgs, ResponseFormat,
+        EmbeddingInput, ImageDetail, ImageUrl, ResponseFormat,
         ChatCompletionRequestUserMessageContentPart,
-        ChatCompletionRequestMessageContentPartTextArgs,
-        ChatCompletionRequestMessageContentPartImageArgs,
     },
     Client,
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use lopdf::Document;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt;
+
+/// Resultado do processamento de mídia com anotação separada
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MediaProcessingResult {
+    /// Conteúdo extraído/transcrito (para classificação AI)
+    pub extracted_content: String,
+    /// Anotação formatada para enviar ao ChatGuru (opcional)
+    pub annotation: Option<String>,
+}
 
 /// Erros do serviço de IA
 #[derive(Debug)]
@@ -34,6 +42,7 @@ pub enum IaServiceError {
     DownloadError(String),
     ParseError(String),
     ConfigError(String),
+    PdfError(String),
 }
 
 impl fmt::Display for IaServiceError {
@@ -43,6 +52,7 @@ impl fmt::Display for IaServiceError {
             IaServiceError::DownloadError(msg) => write!(f, "Download error: {}", msg),
             IaServiceError::ParseError(msg) => write!(f, "Parse error: {}", msg),
             IaServiceError::ConfigError(msg) => write!(f, "Config error: {}", msg),
+            IaServiceError::PdfError(msg) => write!(f, "PDF error: {}", msg),
         }
     }
 }
@@ -401,110 +411,106 @@ impl IaService {
         Ok(bytes)
     }
 
-    /// Processa PDF usando GPT-4 Vision (extração de texto completo para classificação)
+    /// Extrai texto de PDF usando lopdf (processamento local)
     ///
     /// # Argumentos
     /// * `pdf_bytes` - Bytes do arquivo PDF
-    pub async fn process_pdf(&self, pdf_bytes: &[u8]) -> IaResult<String> {
-        tracing::info!("📄 Processando PDF com GPT-4 Vision: {} bytes", pdf_bytes.len());
+    fn extract_pdf_text_local(pdf_bytes: &[u8]) -> IaResult<String> {
+        tracing::info!("📄 Extraindo texto do PDF localmente: {} bytes", pdf_bytes.len());
 
-        // Codificar PDF em base64
-        let base64_pdf = base64::prelude::BASE64_STANDARD.encode(pdf_bytes);
+        // Carregar PDF com lopdf
+        let document = Document::load_mem(pdf_bytes)
+            .map_err(|e| IaServiceError::PdfError(format!("Failed to load PDF: {}", e)))?;
 
-        // Criar mensagem para Vision API com PDF
-        let messages = vec![ChatCompletionRequestMessage::User(
-            ChatCompletionRequestUserMessageArgs::default()
-                .content(vec![
-                    ChatCompletionRequestUserMessageContentPart::Text(
-                        ChatCompletionRequestMessageContentPartTextArgs::default()
-                            .text("Extraia todo o texto deste documento PDF. Mantenha a formatação e estrutura. Se houver tabelas, descreva-as claramente.")
-                            .build()
-                            .map_err(|e| IaServiceError::OpenAIError(format!("Failed to build text part: {}", e)))?
-                    ),
-                    ChatCompletionRequestUserMessageContentPart::ImageUrl(
-                        ChatCompletionRequestMessageContentPartImageArgs::default()
-                            .image_url(
-                                ImageUrlArgs::default()
-                                    .url(format!("data:application/pdf;base64,{}", base64_pdf))
-                                    .build()
-                                    .map_err(|e| IaServiceError::OpenAIError(format!("Failed to build image url: {}", e)))?
-                            )
-                            .build()
-                            .map_err(|e| IaServiceError::OpenAIError(format!("Failed to build image part: {}", e)))?
-                    ),
-                ])
-                .build()
-                .map_err(|e| IaServiceError::OpenAIError(format!("Failed to build user message: {}", e)))?
-        )];
+        let mut extracted_text = String::new();
+        let pages = document.get_pages();
 
-        let request = CreateChatCompletionRequestArgs::default()
-            .model(&self.config.vision_model) // Usa vision_model (gpt-4-vision-preview ou gpt-4o)
-            .messages(messages)
-            .max_tokens(4096u32) // PDFs podem ter muito texto
-            .build()
-            .map_err(|e| IaServiceError::OpenAIError(format!("Failed to build PDF request: {}", e)))?;
+        // Iterar pelas páginas e extrair texto
+        for (page_num, _page_id) in pages.iter() {
+            if let Ok(text) = document.extract_text(&[*page_num]) {
+                if !extracted_text.is_empty() {
+                    extracted_text.push_str("\n\n");
+                }
+                extracted_text.push_str(&format!("--- Página {} ---\n", page_num));
+                extracted_text.push_str(&text);
+            }
+        }
 
-        let response = self
-            .client
-            .chat()
-            .create(request)
-            .await
-            .map_err(|e| IaServiceError::OpenAIError(format!("PDF processing failed: {}", e)))?;
+        if extracted_text.is_empty() {
+            tracing::warn!("⚠️ Nenhum texto extraído do PDF (pode ser PDF de imagens/escaneado)");
+            return Err(IaServiceError::PdfError(
+                "PDF não contém texto extraível (pode ser PDF escaneado/imagem)".to_string()
+            ));
+        }
 
-        let content = response
-            .choices
-            .get(0)
-            .and_then(|choice| choice.message.content.as_ref())
-            .ok_or_else(|| IaServiceError::OpenAIError("No content in PDF response".to_string()))?
-            .clone();
+        tracing::info!("✅ Texto extraído do PDF: {} caracteres", extracted_text.len());
 
-        tracing::info!("✅ PDF processado: {} caracteres extraídos", content.len());
-
-        Ok(content)
+        Ok(extracted_text)
     }
 
-    /// Descreve PDF usando GPT-4 Vision (descrição resumida interpretada para anotações)
+    /// Processa PDF extraindo texto localmente e analisando com GPT-4
     ///
     /// # Argumentos
     /// * `pdf_bytes` - Bytes do arquivo PDF
+    ///
+    /// # Retorna
+    /// Texto extraído do PDF (apenas o texto bruto para classificação)
+    pub async fn process_pdf(&self, pdf_bytes: &[u8]) -> IaResult<String> {
+        // Extrai texto localmente
+        let extracted_text = Self::extract_pdf_text_local(pdf_bytes)?;
+
+        tracing::info!("✅ PDF processado: {} caracteres extraídos", extracted_text.len());
+
+        Ok(extracted_text)
+    }
+
+    /// Descreve PDF usando extração local + GPT-4 (descrição resumida para anotações)
+    ///
+    /// # Argumentos
+    /// * `pdf_bytes` - Bytes do arquivo PDF
+    ///
+    /// # Retorna
+    /// Descrição resumida do conteúdo (para enviar como anotação ao ChatGuru)
     pub async fn describe_pdf(&self, pdf_bytes: &[u8]) -> IaResult<String> {
-        tracing::info!("📄 Descrevendo PDF com GPT-4 Vision: {} bytes", pdf_bytes.len());
+        // Extrai texto localmente
+        let extracted_text = Self::extract_pdf_text_local(pdf_bytes)?;
 
-        // Codificar PDF em base64
-        let base64_pdf = base64::prelude::BASE64_STANDARD.encode(pdf_bytes);
+        tracing::info!("📄 Gerando descrição do PDF com GPT-4: {} caracteres extraídos", extracted_text.len());
 
-        // Criar mensagem para Vision API com PDF
+        // Truncar texto se for muito longo (GPT-4 tem limite de tokens)
+        let text_for_analysis = if extracted_text.len() > 8000 {
+            format!("{}...\n\n[Texto truncado por tamanho]", &extracted_text[..8000])
+        } else {
+            extracted_text.clone()
+        };
+
+        // Gerar descrição resumida com GPT-4
+        let prompt = format!(
+            "Analise o seguinte texto extraído de um documento PDF e crie uma descrição resumida em português do Brasil.\n\n\
+            Foque em:\n\
+            - Tipo de documento (cotação, nota fiscal, contrato, relatório, etc.)\n\
+            - Assunto principal\n\
+            - Informações mais relevantes (valores, datas, nomes importantes)\n\n\
+            Seja conciso (máximo 4 frases).\n\n\
+            TEXTO DO PDF:\n{}\n\n\
+            DESCRIÇÃO:",
+            text_for_analysis
+        );
+
         let messages = vec![ChatCompletionRequestMessage::User(
             ChatCompletionRequestUserMessageArgs::default()
-                .content(vec![
-                    ChatCompletionRequestUserMessageContentPart::Text(
-                        ChatCompletionRequestMessageContentPartTextArgs::default()
-                            .text("Descreva resumidamente o conteúdo deste documento PDF em português do Brasil. Foque em: tipo de documento, assunto principal, informações relevantes. Seja conciso (máximo 3 frases).")
-                            .build()
-                            .map_err(|e| IaServiceError::OpenAIError(format!("Failed to build text part: {}", e)))?
-                    ),
-                    ChatCompletionRequestUserMessageContentPart::ImageUrl(
-                        ChatCompletionRequestMessageContentPartImageArgs::default()
-                            .image_url(
-                                ImageUrlArgs::default()
-                                    .url(format!("data:application/pdf;base64,{}", base64_pdf))
-                                    .build()
-                                    .map_err(|e| IaServiceError::OpenAIError(format!("Failed to build image url: {}", e)))?
-                            )
-                            .build()
-                            .map_err(|e| IaServiceError::OpenAIError(format!("Failed to build image part: {}", e)))?
-                    ),
-                ])
+                .content(ChatCompletionRequestUserMessageContent::Text(prompt))
                 .build()
-                .map_err(|e| IaServiceError::OpenAIError(format!("Failed to build user message: {}", e)))?
+                .map_err(|e| IaServiceError::OpenAIError(format!("Failed to build message: {}", e)))?
         )];
 
         let request = CreateChatCompletionRequestArgs::default()
-            .model(&self.config.vision_model)
+            .model(&self.config.chat_model) // Usa chat_model (gpt-4o-mini) para análise
             .messages(messages)
-            .max_tokens(300u32) // Descrição curta
+            .temperature(0.3)
+            .max_tokens(400u32)
             .build()
-            .map_err(|e| IaServiceError::OpenAIError(format!("Failed to build PDF description request: {}", e)))?;
+            .map_err(|e| IaServiceError::OpenAIError(format!("Failed to build request: {}", e)))?;
 
         let response = self
             .client
@@ -517,12 +523,40 @@ impl IaService {
             .choices
             .get(0)
             .and_then(|choice| choice.message.content.as_ref())
-            .ok_or_else(|| IaServiceError::OpenAIError("No description in PDF response".to_string()))?
+            .ok_or_else(|| IaServiceError::OpenAIError("No description in response".to_string()))?
             .clone();
 
         tracing::info!("✅ PDF descrito: {} caracteres", description.len());
 
         Ok(description)
+    }
+
+    /// Processa PDF com anotação separada (retorna texto extraído + descrição para anotação)
+    ///
+    /// # Argumentos
+    /// * `pdf_bytes` - Bytes do arquivo PDF
+    ///
+    /// # Retorna
+    /// `MediaProcessingResult` com texto extraído e anotação formatada
+    pub async fn process_pdf_with_annotation(&self, pdf_bytes: &[u8]) -> IaResult<MediaProcessingResult> {
+        // Extrai texto localmente
+        let extracted_text = Self::extract_pdf_text_local(pdf_bytes)?;
+
+        // Gera descrição para anotação
+        let description = self.describe_pdf(pdf_bytes).await?;
+
+        // Formata anotação para ChatGuru
+        let annotation = format!(
+            "📄 **Documento PDF Processado**\n\n\
+            {}\n\n\
+            ℹ️ O texto completo foi extraído e será usado para classificação da atividade.",
+            description
+        );
+
+        Ok(MediaProcessingResult {
+            extracted_content: extracted_text,
+            annotation: Some(annotation),
+        })
     }
 
     /// Processa mídia (áudio, imagem ou PDF) automaticamente
