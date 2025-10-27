@@ -1177,3 +1177,813 @@ cliente_solicitante_mappings:
   "Victor Carbone": "45ac5079-6af3-4445-987d-0d24a32ce64c"
   "William Duarte": "9ec4b6f3-3cf9-4b61-b7a0-1a9fe614283b"
   "Yoanna ": "b0dc12f8-8e88-4f28-a2c1-0cf71f67eea9"
+
+
+# ============================================================================
+# ESTRUTURA DO CLICKUP (Spaces, Folders e Listas Vigentes)
+# ============================================================================
+# Gerado automaticamente em: 2025-10-27
+# 
+# COMPLETO:
+# - 14 Spaces (TODOS os spaces do workspace)
+# - 190 Folders (TODAS as pastas de todos os spaces)
+# - 88 Listas ativas (apenas OUTUBRO 2025 em diante)
+#
+# IMPORTANTE: Esta estrutura é usada para mapear:
+# - space_name (vem de responsavel_nome via aliases_responsaveis)
+# - folder_name (vem de info_2 - Cliente Solicitante)
+# - list_name (mês vigente: OUTUBRO 2025, NOVEMBRO 2025, etc)
+# ============================================================================
+
+clickup_structure:
+  workspace_id: '9013037641'
+  spaces:
+  - id: '90130085983'
+    name: Clientes Inativos
+    folders:
+    - id: '90137860225'
+      name: Ille Cosmetics
+      lists:
+      - id: '901320755706'
+        name: OUTUBRO 2025
+    - id: '90131208472'
+      name: Isabella Benarros (5)
+      lists:
+      - id: '901320740165'
+        name: OUTUBRO 2025
+    - id: '90130246641'
+      name: Gabriel Benarros
+      lists:
+      - id: '901321267425'
+        name: OUTUBRO 2025
+    - id: '90130246783'
+      name: Nicholas Vasconcellos (8)
+      lists:
+      - id: '901312551415'
+        name: OUTUBRO 2026
+      - id: '901320671347'
+        name: OUTUBRO 2025
+    - id: '90131179880'
+      name: Padaria dos Bebes (PJ)
+      lists: []
+    - id: '901311930977'
+      name: Victor Carbone (10)
+      lists: []
+    - id: '901311114156'
+      name: Amadeu e Rebeka (10)
+      lists: []
+    - id: '90132960392'
+      name: Alejandra Aguilera (10)
+      lists: []
+    - id: '90130246758'
+      name: Mariana Paixão (5)
+      lists:
+      - id: '901321615396'
+        name: OUTUBRO 2025
+    - id: '90130246625'
+      name: Hernandes Benevides (8)
+      lists: []
+    - id: '90130246936'
+      name: Gurgel D'Alfonso (Caio)
+      lists: []
+    - id: '90132801217'
+      name: Mauricio Carvalho (10)
+      lists: []
+    - id: '90138483332'
+      name: Silvia Villas Boas (10)
+      lists: []
+    - id: '90133156105'
+      name: Ian Ruschel (5)
+      lists: []
+    - id: '90139256492'
+      name: Leo Laranjeira (10)
+      lists: []
+    - id: '90130246458'
+      name: Alessandra Caiado (20)
+      lists: []
+    - id: '90131757532'
+      name: Ricardo Glass (Avulso)
+      lists: []
+    - id: '90130246868'
+      name: Repense (Diretores)
+      lists: []
+    - id: '90130246813'
+      name: Otávio Dias
+      lists: []
+    - id: '90132068712'
+      name: Bruno Assis (10)
+      lists: []
+    - id: '90137749003'
+      name: Fabiana Tallo
+      lists: []
+    - id: '90130246669'
+      name: Isadora Kimura (Nilo)
+      lists: []
+    - id: '90132542575'
+      name: Luan Teixeira (10)
+      lists: []
+    - id: '90135026540'
+      name: Darlann Costa (10)
+      lists: []
+    - id: '90133856275'
+      name: William Camara (5)
+      lists: []
+    - id: '90130473861'
+      name: Camila Mansano (5)
+      lists: []
+    - id: '90134159418'
+      name: Luciana Silveira (10)
+      lists: []
+    - id: '90133358405'
+      name: Mariana Sartor (3 desejos)
+      lists: []
+    - id: '90133342074'
+      name: Giovanna Rosa (3 desejos)
+      lists: []
+    - id: '90133031156'
+      name: Victor Carbone (3 desejos)
+      lists: []
+    - id: '90133588912'
+      name: Mário Neto (3 desejos)
+      lists: []
+    - id: '90133640579'
+      name: Luiz Guilherme Almeida (3 desejos)
+      lists: []
+    - id: '90133589055'
+      name: Cassio Kienen (3 desejos)
+      lists: []
+    - id: '90133588928'
+      name: Henrique Costa (3 desejos)
+      lists: []
+    - id: '90133588886'
+      name: Fernando Ferreira (3 desejos)
+      lists: []
+    - id: '90133552955'
+      name: Vinícius Santos (3 desejos)
+      lists: []
+    - id: '90133553010'
+      name: Danilo Buzar (3 desejos)
+      lists: []
+    - id: '90134150649'
+      name: 'Luis Paulo Teixeira Scassa de Souza (3 desejos) '
+      lists: []
+    - id: '90133588816'
+      name: Hadi Fahs (3 desejos)
+      lists: []
+    - id: '90133656810'
+      name: Luiza Yassin
+      lists: []
+    - id: '90134020160'
+      name: João Paulo Artuzzi (3 desejos)
+      lists: []
+    - id: '90132576894'
+      name: Cleivson Arruda (10)
+      lists: []
+    - id: '90133171697'
+      name: Marcelo Tupan (10)
+      lists: []
+    - id: '90131629952'
+      name: Maria e Eduardo Libano (3)
+      lists: []
+    - id: '90133095161'
+      name: Luci Hidal
+      lists: []
+    - id: '90133193115'
+      name: Elena Mariscal (3)
+      lists:
+      - id: '901321258587'
+        name: OUTUBRO 2025
+    - id: '90132896390'
+      name: João Henrique Bayer Medeiros (10)
+      lists: []
+    - id: '90132311742'
+      name: Renata Reis (10)
+      lists: []
+    - id: '90130246853'
+      name: Renata Andrade (8)
+      lists:
+      - id: '901306268755'
+        name: DEZEMBRO 2025
+    - id: '90130474276'
+      name: Tammy Daher
+      lists: []
+    - id: '90130246685'
+      name: Josué Silva (8)
+      lists: []
+    - id: '90132119389'
+      name: Adriana Correia
+      lists: []
+    - id: '90132734128'
+      name: Salvator Haim (3)
+      lists: []
+    - id: '90130246763'
+      name: Nathalia Trindade (8)
+      lists: []
+    - id: '90132967592'
+      name: Ana Paula Toledo
+      lists: []
+    - id: '90130977148'
+      name: Dani Hayoshi (10)
+      lists: []
+    - id: '90130246872'
+      name: 'Taissa Cruz '
+      lists: []
+    - id: '90132908444'
+      name: Fabiana Salatiel (10)
+      lists:
+      - id: '901321625090'
+        name: OUTUBRO 2025
+    - id: '90132064209'
+      name: Natassia Miller
+      lists: []
+    - id: '90130246878'
+      name: Richard Andrew Young (8)
+      lists: []
+    - id: '90133004852'
+      name: Pedro Vidigal (3 desejos)
+      lists: []
+    - id: '90130716724'
+      name: Amure Pinho (15)
+      lists:
+      - id: '901321270510'
+        name: OUTUBRO 2025
+    - id: '90130973985'
+      name: Eduardo Latache (10)
+      lists: []
+    - id: '90132726138'
+      name: Rafael (3)
+      lists: []
+    - id: '90130246510'
+      name: Bruno Sapienza (5)
+      lists: []
+    - id: '90131284318'
+      name: Veronica Stasiak
+      lists: []
+    - id: '90131798509'
+      name: Mariana Assunção (5)
+      lists: []
+    - id: '90131890991'
+      name: Karla Roberta
+      lists: []
+    - id: '90132542571'
+      name: Nalvio Cunha (10)
+      lists: []
+    - id: '90131551708'
+      name: 'Antonio Vieira (Gostei) '
+      lists: []
+    - id: '90130247052'
+      name: Ana Paula Toledo
+      lists: []
+    - id: '90130246535'
+      name: Maria Beatriz Alli
+      lists: []
+    - id: '90130246980'
+      name: 'Huna '
+      lists: []
+    - id: '90130247040'
+      name: Backline
+      lists: []
+    - id: '90130246899'
+      name: Tyler Eldridge (8)
+      lists: []
+    - id: '90130246605'
+      name: Fernanda Floret (8)
+      lists: []
+    - id: '90130246829'
+      name: Patrícia Nahas (8)
+      lists: []
+    - id: '90130575890'
+      name: Fernando Piton (5)
+      lists: []
+    - id: '90130999499'
+      name: Gisella Brasil (5)
+      lists: []
+    - id: '90130547138'
+      name: Mariana Langoni (5)
+      lists: []
+    - id: '90130487709'
+      name: Luci Hidal (10)
+      lists: []
+    - id: '90130380220'
+      name: Maria Amalia Gonçalves (1)
+      lists: []
+    - id: '90132751667'
+      name: Festa Facio
+      lists: []
+    - id: '90131850266'
+      name: Marina Agostini (10)
+      lists: []
+    - id: '90133516561'
+      name: Bianca Orsini (10)
+      lists: []
+    - id: '90133543927'
+      name: Leandro Piazza (10)
+      lists: []
+    - id: '90133591483'
+      name: Guilherme Junqueira (10)
+      lists: []
+    - id: '901314123361'
+      name: Teste Leo de Sa - DEBUG
+      lists:
+      - id: '901321079156'
+        name: OUTUBRO 2025 - DEBUG
+    - id: '901314124450'
+      name: Sem Identificação
+      lists:
+      - id: '901321080769'
+        name: OUTUBRO 2025
+    - id: '901314142257'
+      name: TEST_OAUTH2_VERIFICACAO
+      lists: []
+    - id: '901314161220'
+      name: Teste OAuth Token
+      lists: []
+    - id: '901314264207'
+      name: Célio Assistência Arbel
+      lists: []
+    folderless_lists:
+    - id: '901321292528'
+      name: OUTUBRO 2025
+  - id: '90130086319'
+    name: Georgia
+    folders:
+    - id: '90130246616'
+      name: Fernanda Munhoz
+      lists: []
+    - id: '901314084453'
+      name: Tarefas
+      lists:
+      - id: '901321021952'
+        name: OUTUBRO 2025
+  - id: '90130096830'
+    name: Intl Affairs
+    folders:
+    - id: '90132808349'
+      name: Telma Baptista
+      lists: []
+    - id: '90130246952'
+      name: Vistos  / Passaportes e Cidadanias
+      lists: []
+  - id: '90130160441'
+    name: Base de Conhecimento
+    folders:
+    - id: '90135571240'
+      name: Comunicados & Informações
+      lists: []
+    - id: '90130422375'
+      name: Comece por aqui
+      lists: []
+    - id: '90130422371'
+      name: Atendimento ao Cliente
+      lists: []
+    - id: '90130422681'
+      name: Ferramentas de Trabalho
+      lists: []
+    - id: '90130424419'
+      name: Team Meetings
+      lists: []
+    - id: '90130423398'
+      name: Intl Affairs
+      lists: []
+    - id: '90130478694'
+      name: TI Nordja
+      lists: []
+    - id: '90131699840'
+      name: Parcerias
+      lists: []
+    - id: '90132928964'
+      name: Treinamentos
+      lists: []
+    - id: '90133317092'
+      name: Modelo de Pasta Cliente (x)
+      lists: []
+    - id: '90135939794'
+      name: Interno
+      lists: []
+  - id: '90130187145'
+    name: Para utilizar
+    folders: []
+  - id: '90131713706'
+    name: Anne Souza
+    folders:
+    - id: '901313372522'
+      name: Plínio Freitas (10)
+      lists:
+      - id: '901320008799'
+        name: OUTUBRO 2025
+    - id: '90130246524'
+      name: Carolina Tavares (10)
+      lists:
+      - id: '901320223426'
+        name: OUTUBRO 2025
+    - id: '90130246531'
+      name: Claudia Leicand (8)
+      lists:
+      - id: '901320699229'
+        name: OUTUBRO 2025
+    - id: '90135929970'
+      name: Agencia Fluida
+      lists:
+      - id: '901319785967'
+        name: OUTUBRO 2025
+    - id: '90130687760'
+      name: Carolina Rosa (10)
+      lists:
+      - id: '901321003261'
+        name: OUTUBRO 2025
+    - id: '90130246496'
+      name: Ana Flávia Tavares
+      lists:
+      - id: '901318092484'
+        name: OUTUBRO 2025
+    - id: '90130246632'
+      name: Fernanda Cruz (5)
+      lists:
+      - id: '901320641412'
+        name: OUTUBRO 2025
+    - id: '90130246639'
+      name: Iara Biderman (8)
+      lists:
+      - id: '901321071597'
+        name: OUTUBRO 2025
+    - id: '90130246581'
+      name: Daniel Rodrigues
+      lists:
+      - id: '901320485887'
+        name: OUTUBRO 2025
+    - id: '90130246630'
+      name: Humberto Siuves (10)
+      lists:
+      - id: '901321102379'
+        name: OUTUBRO 2025
+    - id: '90130246921'
+      name: Alex e Yoanna
+      lists:
+      - id: '901320828420'
+        name: OUTUBRO 2025
+    - id: '90130246690'
+      name: Laynara Coelho (10)
+      lists:
+      - id: '901320785234'
+        name: OUTUBRO 2025
+    - id: '901314173267'
+      name: William Duarte
+      lists:
+      - id: '901321152509'
+        name: OUTUBRO 2025
+  - id: '90132952032'
+    name: Bruna Senhora
+    folders:
+    - id: '90133111522'
+      name: Andrew Reider (10)
+      lists:
+      - id: '901320669477'
+        name: OUTUBRO 2025
+    - id: '90130246428'
+      name: Adriana Tavares
+      lists:
+      - id: '901320669729'
+        name: OUTUBRO 2025
+    - id: '90130246564'
+      name: Claudio e Gabriela
+      lists:
+      - id: '901320589893'
+        name: OUTUBRO 2025
+    - id: '90133112188'
+      name: David Politanski
+      lists:
+      - id: '901320589598'
+        name: OUTUBRO 2025
+    - id: '90130246604'
+      name: Fabio Tiepolo (8)
+      lists:
+      - id: '901320827524'
+        name: OUTUBRO 2025
+    - id: '90130326632'
+      name: Henrique Caldeira (10)
+      lists:
+      - id: '901320577969'
+        name: OUTUBRO 2025
+    - id: '90139230927'
+      name: Ian Gallina (10)
+      lists:
+      - id: '901320436484'
+        name: OUTUBRO 2025
+    - id: '90130246650'
+      name: Igor Marchesini
+      lists:
+      - id: '901320287685'
+        name: OUTUBRO 2025
+    - id: '90131739124'
+      name: Mariana e David (10)
+      lists:
+      - id: '901320672305'
+        name: OUTUBRO 2025
+    - id: '90135567652'
+      name: Namari Capital
+      lists:
+      - id: '901320760692'
+        name: OUTUBRO 2025
+    - id: '90133183833'
+      name: Peter Fernandez (10)
+      lists:
+      - id: '901320744837'
+        name: OUTUBRO 2025
+    - id: '90130716682'
+      name: Renata Michaelis (20)
+      lists:
+      - id: '901320575724'
+        name: OUTUBRO 2025
+    - id: '90137147599'
+      name: Tivita (20)
+      lists:
+      - id: '901320668178'
+        name: OUTUBRO 2025
+    - id: '901314188449'
+      name: Leo de Sá
+      lists:
+      - id: '901321178287'
+        name: OUTUBRO 2025
+  - id: '90134254183'
+    name: Velma Fortes
+    folders:
+    - id: '90130246422'
+      name: Anabela Cunha (5)
+      lists:
+      - id: '901321304389'
+        name: DEZEMBRO 2025
+      - id: '901318959649'
+        name: OUTUBRO 2025
+    - id: '90136184805'
+      name: AL Digital (Aline Bak)
+      lists:
+      - id: '901320755450'
+        name: OUTUBRO 2025
+    - id: '90132451724'
+      name: Aline Hochman
+      lists:
+      - id: '901320761398'
+        name: OUTUBRO 2025
+    - id: '90133093038'
+      name: Carlos Secron (5)
+      lists:
+      - id: '901320752904'
+        name: OUTUBRO 2025
+    - id: '90131738946'
+      name: Fabricio Ramos (10)
+      lists:
+      - id: '901320683474'
+        name: OUTUBRO 2025
+    - id: '90130246662'
+      name: Isabella Vasconcellos (14)
+      lists:
+      - id: '901320761626'
+        name: OUTUBRO 2025
+    - id: '90133026855'
+      name: Jessica Joana Coral (10)
+      lists:
+      - id: '901320756513'
+        name: OUTUBRO 2025
+    - id: '90130246707'
+      name: Leticia e Breno
+      lists:
+      - id: '901321351984'
+        name: DEZEMBRO 2025
+      - id: '901321352159'
+        name: OUTUBRO 2025
+    - id: '90134925796'
+      name: Lilian Palacios (10)
+      lists:
+      - id: '901320709959'
+        name: OUTUBRO 2025
+    - id: '90130246796'
+      name: Nino Vashakidze
+      lists:
+      - id: '901320786531'
+        name: OUTUBRO 2025
+    - id: '90131180055'
+      name: Paula Mejia (5)
+      lists:
+      - id: '901320739830'
+        name: OUTUBRO 2025
+    - id: '90130246887'
+      name: Roberto Cerdeira (14)
+      lists:
+      - id: '901320756228'
+        name: OUTUBRO 2025
+    - id: '90138775437'
+      name: Samir Kerbage (10)
+      lists:
+      - id: '901320811299'
+        name: OUTUBRO 2025
+  - id: '90134505966'
+    name: Mariana Cruz
+    folders:
+    - id: '901311069030'
+      name: Arnaldo/Claudia
+      lists:
+      - id: '901320669965'
+        name: OUTUBRO 2025
+    - id: '901311066716'
+      name: Luft Shoes
+      lists:
+      - id: '901320670180'
+        name: OUTUBRO 2025
+    - id: '90134407092'
+      name: Margareth Darezzo
+      lists:
+      - id: '901320669933'
+        name: OUTUBRO 2025
+    - id: '90130786572'
+      name: Sandra Sinicco
+      lists:
+      - id: '901320555900'
+        name: OUTUBRO 2025
+  - id: '90134506045'
+    name: Nordja
+    folders:
+    - id: '901311010494'
+      name: Anarella (Avulso)
+      lists:
+      - id: '901321626226'
+        name: OUTUBRO 2025
+    - id: '90130246512'
+      name: Arcélia e Jorel Guilloty (14)
+      lists:
+      - id: '901320750944'
+        name: OUTUBRO 2025
+    - id: '90132808373'
+      name: Izabela Baptista (Avulso)
+      lists:
+      - id: '901321636735'
+        name: OUTUBRO 2025
+    - id: '90138421855'
+      name: Gabriela Avian (avulso)
+      lists:
+      - id: '901321273434'
+        name: OUTUBRO 2025
+    - id: '901313890978'
+      name: Leonardo Paraíso (7)
+      lists:
+      - id: '901320734208'
+        name: OUTUBRO 2025
+    - id: '90130246900'
+      name: Vicente Carrari (5)
+      lists: []
+    - id: '90131696648'
+      name: Marcelo Caldas (5)
+      lists:
+      - id: '901320785885'
+        name: OUTUBRO 2025
+    - id: '90132893319'
+      name: José Muritiba (10)
+      lists:
+      - id: '901321267441'
+        name: OUTUBRO 2025
+    - id: '90132893507'
+      name: Hurá Bittencourt (10)
+      lists:
+      - id: '901321371581'
+        name: OUTUBRO 2025
+    - id: '90132896368'
+      name: Emylia Chamorro (10)
+      lists: []
+    - id: '90132896384'
+      name: Ana Flávia Carrilo (10)
+      lists: []
+    - id: '90133367749'
+      name: Marco Bissi (10)
+      lists: []
+    - id: '90132893511'
+      name: Lucas Riani (10)
+      lists: []
+  - id: '90131779539'
+    name: Clientes Esporádicos
+    folders:
+    - id: '901312640635'
+      name: Thiago Vieira
+      lists: []
+    - id: '90135689566'
+      name: Consuelo Maia (avulso)
+      lists: []
+    - id: '90136713137'
+      name: 'Paty Nishimura (3 desejos) '
+      lists: []
+    - id: '90135509766'
+      name: Thiago Zanetti (3 desejos)
+      lists: []
+    - id: '90136714813'
+      name: Elad Revi (3 desejos)
+      lists: []
+    - id: '90138453504'
+      name: Karen Schafer (3 desejos)
+      lists: []
+    - id: '90138494870'
+      name: Fernando Henrique Pereiro (3 desejos) (cópia)
+      lists: []
+    - id: '90139748859'
+      name: Fernando (passaporte e visto)
+      lists: []
+    - id: '901313720868'
+      name: Leandro Costa (Lobby Tech)
+      lists: []
+  - id: '90131747001'
+    name: Thaís Cotts
+    folders:
+    - id: '901313942512'
+      name: Atividades
+      lists: []
+  - id: '90131747051'
+    name: Renata Schnoor
+    folders:
+    - id: '90132910348'
+      name: Amure Pinho (10) Nova Fase
+      lists:
+      - id: '901320750724'
+        name: OUTUBRO 2025
+    - id: '90130854101'
+      name: Dadá Ribeiro (5)
+      lists:
+      - id: '901320655648'
+        name: OUTUBRO 2025
+    - id: '90130246559'
+      name: Daniela Sitzer (8)
+      lists:
+      - id: '901320750777'
+        name: OUTUBRO 2025
+    - id: '90130246839'
+      name: Ricardo Sitzer (8)
+      lists:
+      - id: '901320751001'
+        name: OUTUBRO 2025
+    - id: '90130246595'
+      name: Edwilson / Thaina (10)
+      lists:
+      - id: '901321441851'
+        name: FEVEREIRO 2026
+      - id: '901321441831'
+        name: JANEIRO 2026
+      - id: '901321441771'
+        name: DEZEMBRO  2025
+      - id: '901320684099'
+        name: OUTUBRO 2025
+    - id: '90131180126'
+      name: Guilherme Lopes (5)
+      lists:
+      - id: '901320751031'
+        name: OUTUBRO 2025
+    - id: '90133258420'
+      name: Jack Sarvary (10)
+      lists:
+      - id: '901320736167'
+        name: OUTUBRO 2025
+    - id: '90132846771'
+      name: Julia Cambiaghi e Guilherme Lopes (10)
+      lists:
+      - id: '901306088592'
+        name: "DEZEMBRO\n 2025"
+      - id: '901306088590'
+        name: OUTUBRO 2025
+    - id: '901311115887'
+      name: Luciana Stracieri (10)
+      lists:
+      - id: '901320899014'
+        name: OUTUBRO 2025
+    - id: '90134919668'
+      name: NSA Global (10)
+      lists:
+      - id: '901320686640'
+        name: OUTUBRO 2025
+    - id: '90134635620'
+      name: Raphaela Spielberg (10)
+      lists:
+      - id: '901320643756'
+        name: OUTUBRO 2025
+    - id: '90130246905'
+      name: Stephanie Zalcman (7)
+      lists:
+      - id: '901320750834'
+        name: OUTUBRO 2025
+  - id: '901310948326'
+    name: Natália Branco
+    folders:
+    - id: '901312745423'
+      name: Kiko Augusto (Rei do Pitaco)
+      lists:
+      - id: '901320974673'
+        name: OUTUBRO 2025
+    - id: '901312405136'
+      name: Thiago Martins (Rei do Pitaco)
+      lists:
+      - id: '901320794245'
+        name: OUTUBRO 2025
+    - id: '901312033467'
+      name: Rafael Marcondes (Rei do Pitaco)
+      lists:
+      - id: '901320801387'
+        name: OUTUBRO 2025
+    - id: '901313894068'
+      name: Rodolfo e Claudia
+      lists:
+      - id: '901320739113'
+        name: OUTUBRO 2025
