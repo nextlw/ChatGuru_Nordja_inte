@@ -93,6 +93,7 @@ google-cloud-pubsub = "0.30"
 google-cloud-googleapis = { version = "0.16", features = ["pubsub"] }
 google-cloud-auth = "1.0"  # Para autenticação com Vertex AI (Application Default Credentials)
 google-cloud-secretmanager-v1 = "1.0"  # Secret Manager
+google-cloud-storage = "0.22"  # Cloud Storage para configs dinâmicos
 futures-util = "0.3"  # Para StreamExt (Pub/Sub subscriptions)
 
 # Database (DESABILITADO - usando apenas YAML)

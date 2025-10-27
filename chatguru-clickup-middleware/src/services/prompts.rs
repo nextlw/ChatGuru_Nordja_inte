@@ -374,13 +374,115 @@ impl AiPromptConfig {
         })
     }
 
-    /// Carrega a configuração padrão do diretório config (fallback/legacy)
-    pub fn load_default() -> AppResult<Self> {
-        use crate::utils::logging::log_warning;
+    /// Carrega a configuração de GCS (Google Cloud Storage)
+    pub async fn from_gcs(bucket: &str, object: &str) -> AppResult<Self> {
+        use crate::utils::logging::{log_info, log_error};
+        use google_cloud_storage::client::{Client, ClientConfig};
+        use google_cloud_storage::http::objects::get::GetObjectRequest;
+        use google_cloud_storage::http::objects::download::Range;
 
-        log_warning("⚠️  USING YAML FALLBACK: Loading AI prompt config from config/ai_prompt.yaml instead of database");
+        log_info(&format!("☁️  Loading AI prompt config from GCS: gs://{}/{}", bucket, object));
 
-        Self::from_file("config/ai_prompt.yaml")
+        // Create GCS client
+        let config = ClientConfig::default().with_auth().await
+            .map_err(|e| AppError::ConfigError(format!("Failed to create GCS client: {}", e)))?;
+
+        let client = Client::new(config);
+
+        // Download file
+        let data = client
+            .download_object(
+                &GetObjectRequest {
+                    bucket: bucket.to_string(),
+                    object: object.to_string(),
+                    ..Default::default()
+                },
+                &Range::default(),
+            )
+            .await
+            .map_err(|e| {
+                log_error(&format!("❌ Failed to download from GCS: {}", e));
+                AppError::ConfigError(format!("Failed to download from GCS: {}", e))
+            })?;
+
+        let contents = String::from_utf8(data)
+            .map_err(|e| AppError::ConfigError(format!("Invalid UTF-8 in GCS file: {}", e)))?;
+
+        // Parse usando a estrutura YAML auxiliar
+        let yaml_config: YamlAiPromptConfig = serde_yaml::from_str(&contents)
+            .map_err(|e| AppError::ConfigError(format!("Failed to parse YAML from GCS: {}", e)))?;
+
+        // Converter category_mappings de Vec<YamlCategoryField> para HashMap<String, CategoryMapping>
+        let mut category_mappings = HashMap::new();
+        for field in yaml_config.category_mappings {
+            for option in field.type_config.options {
+                category_mappings.insert(
+                    option.name.clone(),
+                    CategoryMapping {
+                        id: option.id.clone(),
+                    },
+                );
+            }
+        }
+
+        let categories = if yaml_config.categories.is_empty() {
+            category_mappings.keys().cloned().collect()
+        } else {
+            yaml_config.categories
+        };
+
+        log_info(&format!(
+            "✅ AI prompt config loaded from GCS successfully: {} categories, {} activity_types, {} rules",
+            categories.len(),
+            yaml_config.activity_types.len(),
+            yaml_config.rules.len()
+        ));
+
+        Ok(AiPromptConfig {
+            system_role: yaml_config.system_role,
+            task_description: yaml_config.task_description,
+            categories,
+            activity_types: yaml_config.activity_types,
+            status_options: yaml_config.status_options,
+            category_mappings,
+            subcategory_mappings: yaml_config.subcategory_mappings,
+            subcategory_examples: yaml_config.subcategory_examples,
+            rules: yaml_config.rules,
+            response_format: yaml_config.response_format,
+            field_ids: yaml_config.field_ids,
+            cliente_solicitante_mappings: yaml_config.cliente_solicitante_mappings,
+        })
+    }
+
+    /// Carrega a configuração padrão (GCS ou arquivo local)
+    pub async fn load_default() -> AppResult<Self> {
+        use crate::utils::logging::{log_info, log_warning};
+
+        // Verificar variável de ambiente para escolher fonte
+        let source = std::env::var("AI_PROMPT_SOURCE").unwrap_or_else(|_| "gcs".to_string());
+
+        match source.as_str() {
+            "gcs" => {
+                let bucket = std::env::var("AI_PROMPT_BUCKET")
+                    .unwrap_or_else(|_| "chatguru-clickup-configs".to_string());
+                let object = std::env::var("AI_PROMPT_OBJECT")
+                    .unwrap_or_else(|_| "ai_prompt.yaml".to_string());
+
+                log_info(&format!("🌐 Loading AI prompt from GCS: gs://{}/{}", bucket, object));
+
+                match Self::from_gcs(&bucket, &object).await {
+                    Ok(config) => Ok(config),
+                    Err(e) => {
+                        log_warning(&format!("⚠️  Failed to load from GCS: {}. Falling back to local file.", e));
+                        Self::from_file("config/ai_prompt.yaml")
+                    }
+                }
+            }
+            "file" | _ => {
+                log_warning("⚠️  USING LOCAL FILE: Loading AI prompt config from config/ai_prompt.yaml");
+                Self::from_file("config/ai_prompt.yaml")
+            }
+        }
     }
     
     /// Gera o prompt formatado para o Vertex AI
@@ -681,11 +783,11 @@ impl AiPromptConfig {
 mod tests {
     use super::*;
     
-    #[test]
-    fn test_load_prompt_config() {
+    #[tokio::test]
+    async fn test_load_prompt_config() {
         // Este teste só funcionará se o arquivo YAML existir
         if Path::new("config/ai_prompt.yaml").exists() {
-            let config = AiPromptConfig::load_default().unwrap();
+            let config = AiPromptConfig::load_default().await.unwrap();
             assert!(!config.categories.is_empty());
             assert!(!config.activity_types.is_empty());
         }

@@ -490,7 +490,7 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
 
         // Carregar configuração de prompt
         use chatguru_clickup_middleware::services::prompts::AiPromptConfig;
-        let prompt_config = AiPromptConfig::load_default()
+        let prompt_config = AiPromptConfig::load_default().await
             .map_err(|e| AppError::InternalError(format!("Failed to load prompt config: {}", e)))?;
 
         // Montar contexto
@@ -657,7 +657,7 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
         };
 
         // Criar task_data
-        let mut task_data = payload.to_clickup_task_data_with_ai(Some(&classification));
+        let mut task_data = payload.to_clickup_task_data_with_ai(Some(&classification)).await;
 
         // Adicionar assignee ao task_data se encontrado
         if let Some(assignee_info) = assignee_result {
@@ -1102,7 +1102,7 @@ fn extract_responsavel_nome_from_payload(payload: &WebhookPayload) -> Option<Str
 /// A preparação de campos personalizados agora usa configuração YAML
 /// e está integrada diretamente na conversão do payload
 #[allow(dead_code)]
-fn prepare_custom_fields(
+async fn prepare_custom_fields(
     payload: &WebhookPayload,
     classification: &chatguru_clickup_middleware::services::OpenAIClassification,
     _nome: &str,
@@ -1110,7 +1110,7 @@ fn prepare_custom_fields(
     let mut custom_fields = Vec::new();
 
     // IDs reais dos campos personalizados (do script categorize_tasks.js)
-    
+
     // 1. Campo: Categoria* (dropdown) - ID real do ClickUp
     if let Some(category) = &classification.category {
         custom_fields.push(json!({
@@ -1128,7 +1128,7 @@ fn prepare_custom_fields(
     }
 
     // 3. Campo: Estrelas (rating) - ID real do ClickUp
-    let stars = determine_estrelas(classification, payload);
+    let stars = determine_estrelas(classification, payload).await;
     custom_fields.push(json!({
         "id": "83afcb8c-2866-498f-9c62-8ea9666b104b", // ID real do campo Estrelas
         "value": stars // Valor numérico de 1 a 4
@@ -1275,14 +1275,14 @@ fn determine_subcategoria(classification: &chatguru_clickup_middleware::services
 /// As estrelas agora são determinadas pela configuração YAML baseada na
 /// subcategoria retornada pela classificação IA
 #[allow(dead_code)]
-fn determine_estrelas(
+async fn determine_estrelas(
     classification: &chatguru_clickup_middleware::services::OpenAIClassification,
     _payload: &WebhookPayload,
 ) -> i32 {
     use chatguru_clickup_middleware::services::prompts::AiPromptConfig;
 
     // Carregar configuração do YAML
-    let config = match AiPromptConfig::load_default() {
+    let config = match AiPromptConfig::load_default().await {
         Ok(cfg) => cfg,
         Err(e) => {
             log_warning(&format!("Failed to load AI prompt config for stars: {}, using fallback", e));

@@ -211,13 +211,13 @@ impl WebhookPayload {
     }
     
     /// Converte payload para dados do ClickUp com classificação AI
-    pub fn to_clickup_task_data_with_ai(
-        &self, 
+    pub async fn to_clickup_task_data_with_ai(
+        &self,
         ai_classification: Option<&crate::services::OpenAIClassification>
     ) -> serde_json::Value {
         match self {
             WebhookPayload::ChatGuru(payload) => {
-                self.chatguru_to_clickup_with_ai(payload, ai_classification)
+                self.chatguru_to_clickup_with_ai(payload, ai_classification).await
             },
             WebhookPayload::EventType(payload) => {
                 self.eventtype_to_clickup(payload)
@@ -227,9 +227,9 @@ impl WebhookPayload {
             }
         }
     }
-    
+
     /// Converte payload ChatGuru para ClickUp com classificação AI
-    fn chatguru_to_clickup_with_ai(
+    async fn chatguru_to_clickup_with_ai(
         &self,
         payload: &ChatGuruPayload,
         ai_classification: Option<&crate::services::OpenAIClassification>
@@ -370,7 +370,7 @@ impl WebhookPayload {
             
             // Tipo de Atividade (dropdown) - OTIMIZADO: usar YAML como única fonte
             if let Some(ref tipo) = ai.tipo_atividade {
-                if let Ok(config) = AiPromptConfig::load_default() {
+                if let Ok(config) = AiPromptConfig::load_default().await {
                     // Buscar ID do tipo de atividade
                     if let Some(activity_type) = config.activity_types.iter().find(|at| at.name == *tipo) {
                         let field_id = config.get_field_ids()
@@ -389,7 +389,7 @@ impl WebhookPayload {
             
             // Categoria (dropdown) - OTIMIZADO: usar YAML como única fonte
             if let Some(ref category) = ai.category {
-                if let Ok(config) = AiPromptConfig::load_default() {
+                if let Ok(config) = AiPromptConfig::load_default().await {
                     // Obter ID da categoria do YAML
                     if let Some(cat_id) = config.get_category_id(category) {
                         // Obter ID do campo categoria do YAML
@@ -412,7 +412,7 @@ impl WebhookPayload {
             // Subcategoria (dropdown) - OTIMIZADO: usar mapeamento com IDs e estrelas
             if let Some(ref sub_categoria) = ai.sub_categoria {
                 if let Some(ref category) = ai.category {
-                    if let Ok(config) = AiPromptConfig::load_default() {
+                    if let Ok(config) = AiPromptConfig::load_default().await {
                         if let Some(subcat_id) = config.get_subcategory_id(category, sub_categoria) {
                             let field_id = config.get_field_ids()
                                 .map(|ids| ids.subcategory_field_id.clone())
@@ -451,7 +451,7 @@ impl WebhookPayload {
 
             // GARANTIR PRESENÇA DOS CAMPOS CATEGORIA_NOVA E SUBCATEGORIA_NOVA SEMPRE
             // Estes campos usam o ID da opção, não o nome
-            if let Ok(config) = AiPromptConfig::load_default() {
+            if let Ok(config) = AiPromptConfig::load_default().await {
                 if let Some(field_ids) = config.get_field_ids() {
                     // Verificar se Categoria_nova já foi adicionada
                     if !custom_fields.iter().any(|f| f["id"] == field_ids.category_field_id) {
@@ -491,7 +491,7 @@ impl WebhookPayload {
             
             // Status Back Office (dropdown) - OTIMIZADO: usar YAML como única fonte
             if let Some(ref status) = ai.status_back_office {
-                if let Ok(config) = AiPromptConfig::load_default() {
+                if let Ok(config) = AiPromptConfig::load_default().await {
                     if let Some(status_id) = config.get_status_id(status) {
                         let field_id = config.get_field_ids()
                             .map(|ids| ids.status_field_id.clone())
@@ -518,7 +518,7 @@ impl WebhookPayload {
             if let Some(info_2_str) = info_2.as_str() {
                 tracing::info!("🔍 DEBUG Info_2 como string: '{}'", info_2_str);
 
-                match AiPromptConfig::load_default() {
+                match AiPromptConfig::load_default().await {
                     Ok(config) => {
                         tracing::info!("✅ Config carregado com sucesso, {} clientes mapeados",
                             config.cliente_solicitante_mappings.len());
