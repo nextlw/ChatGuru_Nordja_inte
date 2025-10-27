@@ -26,6 +26,16 @@ clickup = { path = "crates/clickup" }
 
 ## 🚀 Uso Rápido
 
+### ⚠️ IMPORTANTE: Configuração Segura
+
+**NUNCA hardcode tokens ou IDs no código!** Use variáveis de ambiente:
+
+```bash
+# Configure as variáveis de ambiente
+export CLICKUP_API_TOKEN="pk_your_token_here"
+export CLICKUP_WORKSPACE_ID="your_workspace_id"
+```
+
 ### 1. Criar Cliente
 
 ```rust
@@ -33,7 +43,11 @@ use clickup::ClickUpClient;
 
 #[tokio::main]
 async fn main() -> clickup::Result<()> {
-    let client = ClickUpClient::new("pk_your_api_token")?;
+    // Ler token de variável de ambiente (OBRIGATÓRIO)
+    let api_token = std::env::var("CLICKUP_API_TOKEN")
+        .expect("CLICKUP_API_TOKEN não configurado");
+
+    let client = ClickUpClient::new(api_token)?;
     Ok(())
 }
 ```
@@ -43,10 +57,14 @@ async fn main() -> clickup::Result<()> {
 ```rust
 use clickup::folders::SmartFolderFinder;
 
-let mut finder = SmartFolderFinder::from_token(
-    "pk_your_token".to_string(),
-    "9013037641".to_string() // workspace_id
-)?;
+// Ler configurações de variáveis de ambiente
+let api_token = std::env::var("CLICKUP_API_TOKEN")
+    .expect("CLICKUP_API_TOKEN não configurado");
+let workspace_id = std::env::var("CLICKUP_WORKSPACE_ID")
+    .or_else(|_| std::env::var("CLICKUP_TEAM_ID")) // Fallback
+    .expect("CLICKUP_WORKSPACE_ID ou CLICKUP_TEAM_ID não configurado");
+
+let mut finder = SmartFolderFinder::from_token(api_token, workspace_id)?;
 
 let result = finder.find_folder_for_client("Nexcode").await?;
 
@@ -61,10 +79,13 @@ if let Some(folder) = result {
 ```rust
 use clickup::assignees::SmartAssigneeFinder;
 
-let mut finder = SmartAssigneeFinder::from_token(
-    "pk_your_token".to_string(),
-    "9013037641".to_string()
-)?;
+// Ler de variáveis de ambiente
+let api_token = std::env::var("CLICKUP_API_TOKEN")
+    .expect("CLICKUP_API_TOKEN não configurado");
+let workspace_id = std::env::var("CLICKUP_WORKSPACE_ID")
+    .expect("CLICKUP_WORKSPACE_ID não configurado");
+
+let mut finder = SmartAssigneeFinder::from_token(api_token, workspace_id)?;
 
 let result = finder.find_assignee_by_name("William").await?;
 
@@ -78,7 +99,11 @@ if let Some(assignee) = result {
 ```rust
 use clickup::fields::CustomFieldManager;
 
-let manager = CustomFieldManager::from_token("pk_your_token".to_string())?;
+// Ler token de variável de ambiente
+let api_token = std::env::var("CLICKUP_API_TOKEN")
+    .expect("CLICKUP_API_TOKEN não configurado");
+
+let manager = CustomFieldManager::from_token(api_token)?;
 
 // Garante que a opção existe no dropdown e retorna o value
 let custom_field = manager
@@ -86,6 +111,22 @@ let custom_field = manager
     .await?;
 
 println!("{}", custom_field); // {"id": "...", "value": "Nexcode"}
+```
+
+### 5. Usar com Google Secret Manager (Produção)
+
+```rust
+use clickup::ClickUpClient;
+// Assumindo que você tem um SecretManagerService
+
+async fn create_client_from_secrets() -> clickup::Result<ClickUpClient> {
+    // Ler do Google Secret Manager
+    let secret_manager = SecretManagerService::new().await?;
+    let api_token = secret_manager.get_secret("clickup-api-token").await?;
+
+    let client = ClickUpClient::new(api_token)?;
+    Ok(client)
+}
 ```
 
 ## 🏗️ Arquitetura
@@ -145,13 +186,47 @@ cargo test -p clickup test_normalize_name
 
 ## 🔧 Variáveis de Ambiente
 
-```bash
-# Recomendado (v3-style)
-export CLICKUP_WORKSPACE_ID="9013037641"
-export CLICKUP_API_TOKEN="pk_xxxxx"
+### Configuração Obrigatória
 
-# Compatibilidade (v2-style, funciona como fallback)
-export CLICKUP_TEAM_ID="9013037641"
+```bash
+# Token de autenticação ClickUp (OBRIGATÓRIO)
+export CLICKUP_API_TOKEN="seu_token_aqui"
+
+# ID do Workspace/Team (OBRIGATÓRIO)
+export CLICKUP_WORKSPACE_ID="seu_workspace_id_aqui"
+```
+
+### Configuração com Fallback (Compatibilidade)
+
+```bash
+# Recomendado (v3-style) - Prioridade 1
+export CLICKUP_WORKSPACE_ID="seu_workspace_id"
+export CLICKUP_API_TOKEN="seu_token"
+
+# Compatibilidade (v2-style) - Prioridade 2 (fallback)
+export CLICKUP_TEAM_ID="seu_workspace_id"  # Mesmo valor, nome antigo
+```
+
+### Como Obter os Valores
+
+1. **CLICKUP_API_TOKEN**:
+   - Vá para: ClickUp → Settings → Apps → API Token
+   - Gere um Personal Token
+   - **NUNCA** commite este valor no git!
+
+2. **CLICKUP_WORKSPACE_ID**:
+   - Na URL do ClickUp: `https://app.clickup.com/<WORKSPACE_ID>/...`
+   - Ou via API: `GET https://api.clickup.com/api/v2/team`
+
+### Produção com Google Secret Manager
+
+```bash
+# Armazenar secrets no GCP
+gcloud secrets create clickup-api-token --data-file=- <<< "seu_token_aqui"
+gcloud secrets create clickup-workspace-id --data-file=- <<< "seu_workspace_id"
+
+# Usar no Cloud Run/Functions
+gcloud run deploy ... --set-secrets=CLICKUP_API_TOKEN=clickup-api-token:latest
 ```
 
 ## 📚 Documentação

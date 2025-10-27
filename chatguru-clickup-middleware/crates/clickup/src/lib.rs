@@ -43,10 +43,16 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> clickup::Result<()> {
-//!     let client = ClickUpClient::new("your-api-token")?;
+//!     // IMPORTANTE: Ler de variáveis de ambiente (NUNCA hardcode!)
+//!     let api_token = std::env::var("CLICKUP_API_TOKEN")
+//!         .expect("CLICKUP_API_TOKEN não configurado");
+//!     let workspace_id = std::env::var("CLICKUP_WORKSPACE_ID")
+//!         .expect("CLICKUP_WORKSPACE_ID não configurado");
+//!
+//!     let client = ClickUpClient::new(api_token)?;
 //!
 //!     // Usa internamente "workspace_id" mas chama API v2 com "team_id"
-//!     let mut finder = SmartFolderFinder::new(client, "9013037641".to_string());
+//!     let mut finder = SmartFolderFinder::new(client, workspace_id);
 //!     let result = finder.find_folder_for_client("Nexcode").await?;
 //!
 //!     Ok(())
