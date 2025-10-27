@@ -1,5 +1,5 @@
 // Serviços necessários para arquitetura event-driven (SEM BANCO DE DADOS)
-pub mod clickup;
+// NOTA: ClickUp agora é um crate separado em crates/clickup/
 pub mod chatguru;
 pub mod secrets;
 pub mod prompts;  // Configuração de prompts AI (YAML-only, sem PostgreSQL)
@@ -8,7 +8,6 @@ pub mod smart_assignee_finder;  // Busca inteligente de assignees (responsáveis
 pub mod custom_field_manager;  // Gerenciamento de campos personalizados (Cliente Solicitante)
 
 // Re-exports (explícitos para evitar ambiguidade)
-pub use clickup::ClickUpService;
 pub use chatguru::ChatGuruApiService;
 pub use prompts::AiPromptConfig;
 pub use smart_folder_finder::{SmartFolderFinder, FolderSearchResult};
