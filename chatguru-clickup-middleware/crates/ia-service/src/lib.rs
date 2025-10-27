@@ -315,6 +315,57 @@ impl IaService {
         Ok(description)
     }
 
+    /// Processa imagem com anotação separada (retorna descrição para classificação + anotação)
+    ///
+    /// # Argumentos
+    /// * `image_bytes` - Bytes da imagem
+    ///
+    /// # Retorna
+    /// `MediaProcessingResult` com descrição e anotação formatada
+    pub async fn process_image_with_annotation(&self, image_bytes: &[u8]) -> IaResult<MediaProcessingResult> {
+        // Gera descrição da imagem
+        let description = self.describe_image(image_bytes).await?;
+
+        // Formata anotação para ChatGuru
+        let annotation = format!(
+            "🖼️ **Imagem Processada**\n\n\
+            {}\n\n\
+            ℹ️ A descrição da imagem foi gerada e será usada para classificação da atividade.",
+            description
+        );
+
+        Ok(MediaProcessingResult {
+            extracted_content: description.clone(),
+            annotation: Some(annotation),
+        })
+    }
+
+    /// Processa áudio com anotação separada (retorna transcrição para classificação + anotação)
+    ///
+    /// # Argumentos
+    /// * `audio_bytes` - Bytes do áudio
+    /// * `filename` - Nome do arquivo (para extensão)
+    ///
+    /// # Retorna
+    /// `MediaProcessingResult` com transcrição e anotação formatada
+    pub async fn process_audio_with_annotation(&self, audio_bytes: &[u8], filename: &str) -> IaResult<MediaProcessingResult> {
+        // Transcreve áudio
+        let transcription = self.transcribe_audio(audio_bytes, filename).await?;
+
+        // Formata anotação para ChatGuru
+        let annotation = format!(
+            "🎵 **Áudio Transcrito**\n\n\
+            \"{}\"\n\n\
+            ℹ️ A transcrição do áudio foi gerada e será usada para classificação da atividade.",
+            transcription
+        );
+
+        Ok(MediaProcessingResult {
+            extracted_content: transcription,
+            annotation: Some(annotation),
+        })
+    }
+
     /// Gera embeddings para texto
     ///
     /// # Argumentos

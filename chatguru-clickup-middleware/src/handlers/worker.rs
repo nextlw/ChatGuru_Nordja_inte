@@ -253,70 +253,101 @@ pub async fn handle_worker(
 
         // Verificar se tem media_url e media_type
         if let (Some(media_url), Some(media_type)) = (&chatguru_payload.media_url, &chatguru_payload.media_type) {
-            // Verificar se é tipo de mídia suportado
-            let is_supported = media_type.contains("audio") || media_type.contains("image") || media_type.contains("video") || media_type.contains("pdf");
+            // Verificar se é tipo de mídia suportado (áudio, imagem, PDF)
+            let is_supported = media_type.contains("audio") || media_type.contains("image") || media_type.contains("pdf");
             if is_supported {
                 let processing_type = if media_type.contains("audio") {
                     "audio"
                 } else if media_type.contains("image") {
                     "image"
-                } else if media_type.contains("pdf") {
-                    "pdf"
                 } else {
-                    "video"
+                    "pdf"
                 };
 
                 log_info(&format!("📎 Mídia detectada ({}: {}), iniciando processamento: {}",
                     processing_type, media_type, media_url));
 
-                // Usar IaService para processar mídia
-                log_info("🚀 Processando mídia com IaService (OpenAI)");
-                let final_result = if let Some(ref ia_service) = state.ia_service {
-                    match ia_service.process_media(media_url, media_type).await {
-                        Ok(result) => {
-                            log_info(&format!("✅ Mídia processada com sucesso: {} caracteres", result.len()));
-                            Some(result)
+                // Processar mídia com anotação usando IaService
+                let (final_result, annotation_opt) = if let Some(ref ia_service) = state.ia_service {
+                    match processing_type {
+                        "audio" => {
+                            log_info("🎵 Processando áudio com transcrição + anotação");
+                            match ia_service.download_file(media_url, "Áudio").await {
+                                Ok(audio_bytes) => {
+                                    let extension = media_url
+                                        .split('.')
+                                        .last()
+                                        .and_then(|ext| ext.split('?').next())
+                                        .unwrap_or("ogg");
+                                    let filename = format!("audio.{}", extension);
+
+                                    match ia_service.process_audio_with_annotation(&audio_bytes, &filename).await {
+                                        Ok(result) => {
+                                            log_info(&format!("✅ Áudio processado: {} caracteres", result.extracted_content.len()));
+                                            (Some(result.extracted_content), result.annotation)
+                                        }
+                                        Err(e) => {
+                                            log_error(&format!("❌ Erro ao processar áudio: {}", e));
+                                            (None, None)
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    log_error(&format!("❌ Erro ao baixar áudio: {}", e));
+                                    (None, None)
+                                }
+                            }
                         }
-                        Err(e) => {
-                            log_error(&format!("❌ Erro ao processar mídia: {}", e));
-                            None
+                        "image" => {
+                            log_info("🖼️ Processando imagem com descrição + anotação");
+                            match ia_service.download_file(media_url, "Imagem").await {
+                                Ok(image_bytes) => {
+                                    match ia_service.process_image_with_annotation(&image_bytes).await {
+                                        Ok(result) => {
+                                            log_info(&format!("✅ Imagem processada: {} caracteres", result.extracted_content.len()));
+                                            (Some(result.extracted_content), result.annotation)
+                                        }
+                                        Err(e) => {
+                                            log_error(&format!("❌ Erro ao processar imagem: {}", e));
+                                            (None, None)
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    log_error(&format!("❌ Erro ao baixar imagem: {}", e));
+                                    (None, None)
+                                }
+                            }
                         }
+                        "pdf" => {
+                            log_info("📄 Processando PDF com extração + anotação");
+                            match ia_service.download_file(media_url, "PDF").await {
+                                Ok(pdf_bytes) => {
+                                    match ia_service.process_pdf_with_annotation(&pdf_bytes).await {
+                                        Ok(result) => {
+                                            log_info(&format!("✅ PDF processado: {} caracteres", result.extracted_content.len()));
+                                            (Some(result.extracted_content), result.annotation)
+                                        }
+                                        Err(e) => {
+                                            log_error(&format!("❌ Erro ao processar PDF: {}", e));
+                                            (None, None)
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    log_error(&format!("❌ Erro ao baixar PDF: {}", e));
+                                    (None, None)
+                                }
+                            }
+                        }
+                        _ => (None, None)
                     }
                 } else {
                     log_error("❌ IaService não está disponível no AppState");
-                    None
+                    (None, None)
                 };
 
-                // Para PDFs, gerar também uma descrição resumida (para anotações)
-                let pdf_description = if processing_type == "pdf" && final_result.is_some() {
-                    if let Some(ref ia_service) = state.ia_service {
-                        log_info("📄 Gerando descrição resumida do PDF para anotação");
-                        match ia_service.download_file(media_url, "PDF").await {
-                            Ok(pdf_bytes) => {
-                                match ia_service.describe_pdf(&pdf_bytes).await {
-                                    Ok(desc) => {
-                                        log_info(&format!("✅ Descrição do PDF gerada: {} caracteres", desc.len()));
-                                        Some(desc)
-                                    }
-                                    Err(e) => {
-                                        log_warning(&format!("⚠️ Falha ao gerar descrição do PDF: {}", e));
-                                        None
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                log_warning(&format!("⚠️ Falha ao baixar PDF para descrição: {}", e));
-                                None
-                            }
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                // Atualizar payload com resultado
+                // Atualizar payload com resultado PRIMEIRO
                 if let Some(result_text) = final_result {
                     let label = match processing_type {
                         "audio" => "Transcrição do áudio",
@@ -336,18 +367,20 @@ pub async fn handle_worker(
                         chatguru_payload.texto_mensagem = result_text;
                     }
 
-                    // Adicionar descrição do PDF se disponível (para anotações)
-                    if let Some(pdf_desc) = pdf_description {
-                        chatguru_payload.texto_mensagem = format!(
-                            "{}\n\n[Descrição do PDF]: {}",
-                            chatguru_payload.texto_mensagem,
-                            pdf_desc
-                        );
-                    }
-
                     log_info(&format!("📝 Payload enriquecido com {}", label));
                 } else {
                     log_warning("⚠️ Nenhum resultado de processamento de mídia disponível");
+                }
+
+                // ENVIAR ANOTAÇÃO IMEDIATAMENTE AO CHATGURU (independente de ser atividade ou não)
+                // Enviar DEPOIS de modificar o payload para evitar borrow checker issues
+                if let Some(annotation) = annotation_opt {
+                    log_info("📤 Enviando anotação de mídia ao ChatGuru...");
+                    if let Err(e) = send_annotation_to_chatguru(&state, &payload, &annotation).await {
+                        log_warning(&format!("⚠️ Não foi possível enviar anotação de mídia: {}", e));
+                    } else {
+                        log_info("✅ Anotação de mídia enviada com sucesso ao ChatGuru");
+                    }
                 }
             }
         }
