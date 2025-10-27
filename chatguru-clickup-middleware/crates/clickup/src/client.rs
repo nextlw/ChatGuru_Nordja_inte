@@ -84,7 +84,7 @@ impl ClickUpClient {
         let response = self
             .http_client
             .get(&url)
-            .header("Authorization", &self.api_token)
+            .header("Authorization", format!("Bearer {}", &self.api_token))
             .header("Content-Type", "application/json")
             .send()
             .await?;
@@ -108,7 +108,7 @@ impl ClickUpClient {
         let response = self
             .http_client
             .get(&url)
-            .header("Authorization", &self.api_token)
+            .header("Authorization", format!("Bearer {}", &self.api_token))
             .header("Content-Type", "application/json")
             .send()
             .await?;
@@ -142,7 +142,7 @@ impl ClickUpClient {
         let response = self
             .http_client
             .post(&url)
-            .header("Authorization", &self.api_token)
+            .header("Authorization", format!("Bearer {}", &self.api_token))
             .header("Content-Type", "application/json")
             .json(body)
             .send()
@@ -167,7 +167,7 @@ impl ClickUpClient {
         let response = self
             .http_client
             .post(&url)
-            .header("Authorization", &self.api_token)
+            .header("Authorization", format!("Bearer {}", &self.api_token))
             .header("Content-Type", "application/json")
             .json(body)
             .send()
@@ -202,7 +202,7 @@ impl ClickUpClient {
         let response = self
             .http_client
             .put(&url)
-            .header("Authorization", &self.api_token)
+            .header("Authorization", format!("Bearer {}", &self.api_token))
             .header("Content-Type", "application/json")
             .json(body)
             .send()
@@ -232,7 +232,7 @@ impl ClickUpClient {
         let response = self
             .http_client
             .delete(&url)
-            .header("Authorization", &self.api_token)
+            .header("Authorization", format!("Bearer {}", &self.api_token))
             .header("Content-Type", "application/json")
             .send()
             .await?;
