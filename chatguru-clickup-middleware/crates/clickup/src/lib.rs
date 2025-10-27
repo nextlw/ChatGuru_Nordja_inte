@@ -67,11 +67,18 @@ pub mod folders;
 pub mod assignees;
 pub mod fields;
 pub mod tasks;
+pub mod types;     // ✅ Type-safe structures (Task, Priority, Status, CustomField, etc.)
+pub mod webhooks;  // ✅ Webhook management (create, list, update, delete)
 
 // Re-exports principais
 pub use client::ClickUpClient;
 pub use error::{ClickUpError, Result};
 
+// Re-exports de types para conveniência
+pub use types::{
+    Task, TaskBuilder, Priority, Status, User, Assignee,
+    CustomField, CustomFieldValue,
+};
+
 // Módulos a serem implementados
-// pub mod types;
 // pub mod lists;

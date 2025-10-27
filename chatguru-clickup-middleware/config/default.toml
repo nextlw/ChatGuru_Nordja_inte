@@ -36,20 +36,3 @@ phone_ids = [
     "62558780e2923cc4705beee1"   # +55 (11) 970525814
 ]
 
-[ai]
-enabled = true  # Sempre usar Vertex AI para classificação de atividades
-# No Cloud Run, Vertex AI usa automaticamente a service account configurada
-use_hybrid = true  # NOVO: Usar serviço híbrido (Vertex + OpenAI fallback) - HABILITADO
-prefer_vertex = true  # NOVO: Preferir Vertex AI quando híbrido estiver ativo - HABILITADO
-
-[vertex]
-enabled = true  # HABILITADO para processamento multimodal
-timeout_seconds = 30  # Timeout de 30s para processamento de mídia (fail-fast para fallback OpenAI)
-project_id = "buzzlightear"
-location = "us-central1"
-model = "gemini-2.0-flash-001"  # Modelo Gemini 2.0 Flash (stable, Feb 2025 - pode ser sobrescrito via ENV VAR: VERTEX_AI_MODEL)
-
-[hybrid_ai]
-enabled = true  # NOVO: Feature flag para serviço híbrido - HABILITADO
-fallback_enabled = true  # NOVO: Permitir fallback automático para OpenAI
-log_service_used = true  # NOVO: Log detalhado de qual serviço foi usado

@@ -94,10 +94,7 @@ pub async fn status_check(State(state): State<Arc<AppState>>) -> Json<Value> {
         clickup_info["connection"] = json!("not_configured");
         false
     };
-    
-    // Verificar configuração de AI
-    let ai_enabled = state.settings.ai.as_ref().map_or(false, |ai| ai.enabled);
-    
+
     // Verificar configuração do ChatGuru
     let chatguru_configured = state.settings.chatguru.api_token.is_some() &&
                              state.settings.chatguru.api_endpoint.is_some() &&
@@ -121,14 +118,13 @@ pub async fn status_check(State(state): State<Arc<AppState>>) -> Json<Value> {
         "uptime": "N/A", // TODO: Implementar tracking de uptime
         "environment": std::env::var("RUST_ENV").unwrap_or_else(|_| "development".to_string()),
         "clickup_connected": clickup_connected,
-        "ai_enabled": ai_enabled,
         "chatguru_configured": chatguru_configured,
         "integrations": {
             "clickup": clickup_info,
             "pubsub": pubsub_info,
             "openai": {
-                "enabled": ai_enabled,
-                "region": "us-central1",  // Gemini só está disponível em us-central1
+                "enabled": true,  // OpenAI sempre habilitado via ia-service crate
+                "region": "us-central1",
                 "project_id": state.settings.gcp.project_id.clone()
             },
             "chatguru": {

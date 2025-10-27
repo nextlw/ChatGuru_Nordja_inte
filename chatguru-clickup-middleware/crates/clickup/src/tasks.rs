@@ -28,6 +28,7 @@
 
 use crate::client::ClickUpClient;
 use crate::error::{ClickUpError, Result};
+use crate::types::Task;
 use serde_json::{json, Value};
 
 /// Gerenciador de tarefas do ClickUp
@@ -85,13 +86,13 @@ impl TaskManager {
     }
 
 
-    /// Cria uma tarefa no ClickUp a partir de dados JSON
+    /// Cria uma tarefa no ClickUp (API tipada)
     ///
     /// # Descrição
     ///
     /// Cria uma tarefa na lista especificada. Suporta duas formas:
-    /// 1. `list_id` presente em `task_data` (SmartFolderFinder insere isso)
-    /// 2. Fallback para `self.list_id` se não encontrado
+    /// 1. `task.list_id` presente (SmartFolderFinder configura isso)
+    /// 2. Fallback para `self.list_id` se não configurado
     ///
     /// # Endpoint da API
     ///
@@ -99,58 +100,73 @@ impl TaskManager {
     ///
     /// # Argumentos
     ///
-    /// - `task_data`: JSON com estrutura da tarefa do ClickUp:
-    ///   ```json
-    ///   {
-    ///     "name": "Título da tarefa",
-    ///     "description": "Descrição markdown",
-    ///     "priority": 3,
-    ///     "tags": ["tag1", "tag2"],
-    ///     "custom_fields": [
-    ///       {"id": "field-id", "value": "valor"}
-    ///     ],
-    ///     "list_id": "123456" // Opcional, usado se presente
-    ///   }
-    ///   ```
+    /// - `task`: Tarefa a criar (use TaskBuilder para construir)
+    ///
+    /// # Exemplo
+    ///
+    /// ```rust,ignore
+    /// use clickup::{Task, TaskBuilder, Priority};
+    ///
+    /// let task = TaskBuilder::new("Nova tarefa")
+    ///     .description("Descrição da tarefa")
+    ///     .priority(Priority::High)
+    ///     .list_id("list-123")
+    ///     .build();
+    ///
+    /// let created = task_manager.create_task(&task).await?;
+    /// println!("Task criada: {}", created.id.unwrap());
+    /// ```
     ///
     /// # Retorno
     ///
-    /// - `Ok(Value)`: Tarefa criada com sucesso, retorna JSON com `id`, `url`, etc
+    /// - `Ok(Task)`: Tarefa criada com sucesso (inclui ID, URL, timestamps)
     /// - `Err(ClickUpError)`: Falha na criação
     ///
     /// # Erros Comuns
     ///
+    /// - **ValidationError**: list_id não encontrado na task nem no TaskManager
     /// - **401 Unauthorized**: Token inválido ou expirado
     /// - **403 Forbidden**: Sem permissão para criar tarefas nesta lista
     /// - **404 Not Found**: list_id não existe
-    /// - **400 Bad Request**: Estrutura JSON inválida ou custom_field_id incorreto
-    pub async fn create_task_from_json(&self, task_data: &Value) -> Result<Value> {
-        // Extrair list_id do task_data (SmartFolderFinder insere isso) ou usar fallback
-        let list_id_str;
-        let list_id = if let Some(id) = task_data.get("list_id").and_then(|v| v.as_str()) {
-            tracing::info!("🎯 Usando list_id do task_data: {}", id);
-            id
+    /// - **400 Bad Request**: Estrutura inválida ou custom_field_id incorreto
+    pub async fn create_task(&self, task: &Task) -> Result<Task> {
+        // Extrair list_id da task ou usar fallback
+        let list_id = if let Some(ref id) = task.list_id {
+            tracing::info!("🎯 Usando list_id da task: {}", id);
+            id.clone()
         } else if let Some(ref id) = self.list_id {
-            tracing::info!("⚠️ list_id não encontrado no task_data, usando fallback: {}", id);
-            list_id_str = id.clone();
-            &list_id_str
+            tracing::info!("⚠️ list_id não encontrado na task, usando fallback: {}", id);
+            id.clone()
         } else {
             return Err(ClickUpError::ValidationError(
-                "list_id não encontrado no task_data e TaskManager não tem list_id configurado".to_string()
+                "list_id não encontrado na task e TaskManager não tem list_id configurado".to_string()
             ));
         };
 
-        // Remover list_id do task_data antes de enviar (API espera na URL, não no body)
-        let mut clean_task_data = task_data.clone();
-        if let Some(obj) = clean_task_data.as_object_mut() {
+        // Serializar task para JSON
+        let mut task_json = serde_json::to_value(task)?;
+
+        // Remover list_id do body (API espera na URL, não no body)
+        if let Some(obj) = task_json.as_object_mut() {
             obj.remove("list_id");
+            // Também remover campos read-only que API não aceita no POST
+            obj.remove("id");
+            obj.remove("url");
+            obj.remove("date_created");
+            obj.remove("date_updated");
+            obj.remove("date_closed");
+            obj.remove("creator");
+            obj.remove("folder");
+            obj.remove("space");
+            obj.remove("project");
         }
 
         // POST /list/{list_id}/task
         let endpoint = format!("/list/{}/task", list_id);
-        let task: Value = self.client.post_json(&endpoint, &clean_task_data).await?;
+        let created_task: Task = self.client.post_json(&endpoint, &task_json).await?;
 
-        Ok(task)
+        tracing::info!("✅ Task criada: {}", created_task.id.as_ref().unwrap_or(&"?".to_string()));
+        Ok(created_task)
     }
 
     /// Testa conectividade com a API do ClickUp
@@ -252,6 +268,72 @@ impl TaskManager {
 
 
 
+    /// Lista todas as tarefas de uma lista (não arquivadas)
+    ///
+    /// # Descrição
+    ///
+    /// Retorna todas as tarefas não-arquivadas de uma lista específica.
+    /// Usado para debug, listagens e verificações administrativas.
+    ///
+    /// # Endpoint da API
+    ///
+    /// `GET /api/v2/list/{list_id}/task?archived=false`
+    ///
+    /// # Argumentos
+    ///
+    /// - `list_id`: ID da lista (se None, usa self.list_id)
+    ///
+    /// # Retorno
+    ///
+    /// - `Ok(Vec<Task>)`: Array de tarefas encontradas (pode ser vazio)
+    /// - `Err(ClickUpError)`: Erro na comunicação com API
+    ///
+    /// # Exemplo
+    ///
+    /// ```rust,no_run
+    /// # use clickup::tasks::TaskManager;
+    /// # async fn example(manager: &TaskManager) -> clickup::Result<()> {
+    /// let tasks = manager.get_tasks_in_list(None).await?;
+    /// println!("Total de tasks: {}", tasks.len());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_tasks_in_list(&self, list_id: Option<&str>) -> Result<Vec<Task>> {
+        let id = if let Some(id) = list_id {
+            id
+        } else if let Some(ref id) = self.list_id {
+            id
+        } else {
+            return Err(ClickUpError::ValidationError(
+                "list_id não fornecido e TaskManager não tem list_id configurado".to_string()
+            ));
+        };
+
+        let endpoint = format!("/list/{}/task?archived=false", id);
+
+        let json_resp: Value = self.client.get_json(&endpoint).await?;
+
+        // Extrair array de tasks e desserializar
+        if let Some(tasks_array) = json_resp.get("tasks").and_then(|v| v.as_array()) {
+            let mut tasks = Vec::new();
+            for task_value in tasks_array {
+                match serde_json::from_value::<Task>(task_value.clone()) {
+                    Ok(task) => tasks.push(task),
+                    Err(e) => {
+                        tracing::warn!("⚠️ Falha ao desserializar task: {}", e);
+                        // Continua processando outras tasks
+                    }
+                }
+            }
+            tracing::info!("✅ Listadas {} tasks da lista {}", tasks.len(), id);
+            Ok(tasks)
+        } else {
+            // Se não houver campo "tasks", retornar array vazio
+            tracing::warn!("⚠️ Resposta da API sem campo 'tasks'");
+            Ok(Vec::new())
+        }
+    }
+
     /// Busca uma tarefa existente na lista pelo título (detecção de duplicatas)
     ///
     /// # Descrição
@@ -270,7 +352,7 @@ impl TaskManager {
     ///
     /// # Retorno
     ///
-    /// - `Ok(Some(Value))`: Tarefa encontrada, retorna JSON completo da tarefa
+    /// - `Ok(Some(Task))`: Tarefa encontrada com título exato
     /// - `Ok(None)`: Nenhuma tarefa com este título encontrada
     /// - `Err(ClickUpError)`: Erro na comunicação com API
     ///
@@ -293,7 +375,7 @@ impl TaskManager {
         &self,
         list_id: Option<&str>,
         title: &str,
-    ) -> Result<Option<Value>> {
+    ) -> Result<Option<Task>> {
         let id = if let Some(id) = list_id {
             id
         } else if let Some(ref id) = self.list_id {
@@ -332,11 +414,13 @@ impl TaskManager {
 
         // Buscar tarefa com título exato (case-sensitive)
         if let Some(tasks) = json_resp.get("tasks").and_then(|v| v.as_array()) {
-            for task in tasks {
-                if let Some(task_name) = task.get("name").and_then(|v| v.as_str()) {
+            for task_value in tasks {
+                if let Some(task_name) = task_value.get("name").and_then(|v| v.as_str()) {
                     if task_name == title {
                         tracing::info!("✅ Tarefa existente encontrada: '{}'", title);
-                        return Ok(Some(task.clone()));
+                        // Desserializar task de Value para Task
+                        let task: Task = serde_json::from_value(task_value.clone())?;
+                        return Ok(Some(task));
                     }
                 }
             }
@@ -460,14 +544,388 @@ impl TaskManager {
     ///     &json!({"name": "Novo título", "priority": 1})
     /// ).await?;
     /// ```
-    pub async fn update_task(&self, task_id: &str, task_data: &Value) -> Result<Value> {
+    pub async fn update_task(&self, task_id: &str, task_data: &Value) -> Result<Task> {
         let endpoint = format!("/task/{}", task_id);
 
         // PUT /task/{task_id}
-        let updated_task: Value = self.client.put_json(&endpoint, task_data).await?;
+        let updated_task: Task = self.client.put_json(&endpoint, task_data).await?;
 
         tracing::debug!("✅ Task {} atualizada", task_id);
         Ok(updated_task)
+    }
+
+    // ==================== ASSIGNEES (Responsáveis) ====================
+
+    /// Atribui usuários a uma tarefa
+    ///
+    /// # Endpoint da API
+    ///
+    /// `PUT /api/v2/task/{task_id}` com campo `assignees.add`
+    ///
+    /// # Argumentos
+    ///
+    /// - `task_id`: ID da tarefa
+    /// - `user_ids`: Lista de IDs de usuários a adicionar como assignees
+    ///
+    /// # Exemplo
+    ///
+    /// ```rust,ignore
+    /// task_manager.assign_task("task-123", &[123, 456]).await?;
+    /// ```
+    pub async fn assign_task(&self, task_id: &str, user_ids: &[u32]) -> Result<Task> {
+        let endpoint = format!("/task/{}", task_id);
+        let body = json!({
+            "assignees": {
+                "add": user_ids
+            }
+        });
+
+        let updated_task: Task = self.client.put_json(&endpoint, &body).await?;
+        tracing::debug!("✅ Assignees {:?} adicionados à task {}", user_ids, task_id);
+        Ok(updated_task)
+    }
+
+    /// Remove usuários de uma tarefa
+    ///
+    /// # Endpoint da API
+    ///
+    /// `PUT /api/v2/task/{task_id}` com campo `assignees.rem`
+    ///
+    /// # Argumentos
+    ///
+    /// - `task_id`: ID da tarefa
+    /// - `user_ids`: Lista de IDs de usuários a remover
+    ///
+    /// # Exemplo
+    ///
+    /// ```rust,ignore
+    /// task_manager.unassign_task("task-123", &[123]).await?;
+    /// ```
+    pub async fn unassign_task(&self, task_id: &str, user_ids: &[u32]) -> Result<Task> {
+        let endpoint = format!("/task/{}", task_id);
+        let body = json!({
+            "assignees": {
+                "rem": user_ids
+            }
+        });
+
+        let updated_task: Task = self.client.put_json(&endpoint, &body).await?;
+        tracing::debug!("✅ Assignees {:?} removidos da task {}", user_ids, task_id);
+        Ok(updated_task)
+    }
+
+    /// Substitui todos os assignees de uma tarefa
+    ///
+    /// # Endpoint da API
+    ///
+    /// `PUT /api/v2/task/{task_id}` com campo `assignees.add` e `assignees.rem`
+    ///
+    /// # Argumentos
+    ///
+    /// - `task_id`: ID da tarefa
+    /// - `add_user_ids`: Usuários a adicionar
+    /// - `rem_user_ids`: Usuários a remover
+    ///
+    /// # Exemplo
+    ///
+    /// ```rust,ignore
+    /// // Remove 123, adiciona 456 e 789
+    /// task_manager.update_assignees("task-123", &[456, 789], &[123]).await?;
+    /// ```
+    pub async fn update_assignees(
+        &self,
+        task_id: &str,
+        add_user_ids: &[u32],
+        rem_user_ids: &[u32],
+    ) -> Result<Task> {
+        let endpoint = format!("/task/{}", task_id);
+        let body = json!({
+            "assignees": {
+                "add": add_user_ids,
+                "rem": rem_user_ids
+            }
+        });
+
+        let updated_task: Task = self.client.put_json(&endpoint, &body).await?;
+        tracing::debug!(
+            "✅ Assignees atualizados: +{:?} -{:?} na task {}",
+            add_user_ids,
+            rem_user_ids,
+            task_id
+        );
+        Ok(updated_task)
+    }
+
+    // ==================== STATUS ====================
+
+    /// Atualiza o status de uma tarefa
+    ///
+    /// # Endpoint da API
+    ///
+    /// `PUT /api/v2/task/{task_id}` com campo `status`
+    ///
+    /// # Argumentos
+    ///
+    /// - `task_id`: ID da tarefa
+    /// - `status`: Nome do status (e.g., "pendente", "em andamento", "concluído")
+    ///
+    /// # IMPORTANTE
+    ///
+    /// Status não são globais no ClickUp - cada lista tem seus próprios status.
+    /// Use nomes que existem na lista da tarefa, caso contrário a API retornará erro.
+    ///
+    /// # Exemplo
+    ///
+    /// ```rust,ignore
+    /// task_manager.update_task_status("task-123", "em andamento").await?;
+    /// ```
+    pub async fn update_task_status(&self, task_id: &str, status: &str) -> Result<Task> {
+        let endpoint = format!("/task/{}", task_id);
+        let body = json!({
+            "status": status
+        });
+
+        let updated_task: Task = self.client.put_json(&endpoint, &body).await?;
+        tracing::debug!("✅ Status da task {} atualizado para: {}", task_id, status);
+        Ok(updated_task)
+    }
+
+    // ==================== SUBTASKS ====================
+
+    /// Cria uma subtask (tarefa filha) de uma tarefa existente
+    ///
+    /// # Endpoint da API
+    ///
+    /// `POST /api/v2/list/{list_id}/task` com campo `parent`
+    ///
+    /// # Argumentos
+    ///
+    /// - `parent_id`: ID da tarefa pai
+    /// - `task_data`: Dados da subtask (deve incluir `name` no mínimo)
+    ///
+    /// # Exemplo
+    ///
+    /// ```rust,ignore
+    /// let subtask = task_manager.create_subtask(
+    ///     "parent-task-123",
+    ///     &json!({
+    ///         "name": "Subtarefa 1",
+    ///         "description": "Descrição da subtarefa"
+    ///     })
+    /// ).await?;
+    /// ```
+    pub async fn create_subtask(&self, parent_id: &str, task_data: &Value) -> Result<Task> {
+        // Extract or validate list_id from task_data or use fallback
+        let list_id = if let Some(id) = task_data.get("list_id").and_then(|v| v.as_str()) {
+            id.to_string()
+        } else if let Some(ref id) = self.list_id {
+            id.clone()
+        } else {
+            return Err(ClickUpError::ValidationError(
+                "list_id não encontrado para criar subtask".to_string(),
+            ));
+        };
+
+        // Add parent field to task_data
+        let mut subtask_data = task_data.clone();
+        if let Some(obj) = subtask_data.as_object_mut() {
+            obj.insert("parent".to_string(), json!(parent_id));
+            obj.remove("list_id"); // Remove list_id from body (goes in URL)
+        }
+
+        // POST /list/{list_id}/task
+        let endpoint = format!("/list/{}/task", list_id);
+        let subtask: Task = self.client.post_json(&endpoint, &subtask_data).await?;
+
+        tracing::debug!("✅ Subtask criada: {} (pai: {})", subtask.id.as_ref().unwrap_or(&"?".to_string()), parent_id);
+        Ok(subtask)
+    }
+
+    // ==================== DUE DATES ====================
+
+    /// Define a data de entrega (due date) de uma tarefa
+    ///
+    /// # Endpoint da API
+    ///
+    /// `PUT /api/v2/task/{task_id}` com campo `due_date`
+    ///
+    /// # Argumentos
+    ///
+    /// - `task_id`: ID da tarefa
+    /// - `timestamp_ms`: Timestamp em MILISSEGUNDOS (não segundos!)
+    /// - `include_time`: Se true, inclui horário; se false, apenas data
+    ///
+    /// # ⚠️ IMPORTANTE: Timestamps em MILISSEGUNDOS
+    ///
+    /// A API do ClickUp usa milissegundos, não segundos:
+    /// - ✅ Correto: `1672531200000` (2023-01-01 00:00:00 UTC)
+    /// - ❌ Errado: `1672531200` (segundos Unix)
+    ///
+    /// # Exemplo
+    ///
+    /// ```rust,ignore
+    /// use chrono::Utc;
+    ///
+    /// // Data: 2023-01-01 00:00:00 UTC
+    /// let timestamp_ms = 1672531200000;
+    /// task_manager.set_due_date("task-123", timestamp_ms, true).await?;
+    ///
+    /// // Ou usando chrono:
+    /// let date = Utc::now() + chrono::Duration::days(7);
+    /// let timestamp_ms = date.timestamp_millis();
+    /// task_manager.set_due_date("task-123", timestamp_ms, false).await?;
+    /// ```
+    pub async fn set_due_date(
+        &self,
+        task_id: &str,
+        timestamp_ms: i64,
+        include_time: bool,
+    ) -> Result<Task> {
+        let endpoint = format!("/task/{}", task_id);
+        let body = json!({
+            "due_date": timestamp_ms,
+            "due_date_time": include_time
+        });
+
+        let updated_task: Task = self.client.put_json(&endpoint, &body).await?;
+        tracing::debug!(
+            "✅ Due date da task {} definida: {} (include_time: {})",
+            task_id,
+            timestamp_ms,
+            include_time
+        );
+        Ok(updated_task)
+    }
+
+    /// Remove a data de entrega (due date) de uma tarefa
+    ///
+    /// # Endpoint da API
+    ///
+    /// `PUT /api/v2/task/{task_id}` com `due_date: null`
+    ///
+    /// # Argumentos
+    ///
+    /// - `task_id`: ID da tarefa
+    ///
+    /// # Exemplo
+    ///
+    /// ```rust,ignore
+    /// task_manager.clear_due_date("task-123").await?;
+    /// ```
+    pub async fn clear_due_date(&self, task_id: &str) -> Result<Task> {
+        let endpoint = format!("/task/{}", task_id);
+        let body = json!({
+            "due_date": null,
+            "due_date_time": false
+        });
+
+        let updated_task: Task = self.client.put_json(&endpoint, &body).await?;
+        tracing::debug!("✅ Due date da task {} removida", task_id);
+        Ok(updated_task)
+    }
+
+    // ==================== DEPENDENCIES ====================
+
+    /// Adiciona uma dependência a uma tarefa
+    ///
+    /// # Endpoint da API
+    ///
+    /// `POST /api/v2/task/{task_id}/dependency`
+    ///
+    /// # Argumentos
+    ///
+    /// - `task_id`: ID da tarefa
+    /// - `depends_on`: ID da tarefa da qual esta depende
+    /// - `dependency_type`: Tipo de dependência:
+    ///   - "waiting_on" = esta task espera pela outra completar
+    ///   - "blocking" = esta task bloqueia a outra (opcional, padrão: "waiting_on")
+    ///
+    /// # Exemplo
+    ///
+    /// ```rust,ignore
+    /// // Task 123 depende de Task 456 (123 espera 456 completar)
+    /// task_manager.add_dependency("123", "456", None).await?;
+    /// ```
+    pub async fn add_dependency(
+        &self,
+        task_id: &str,
+        depends_on: &str,
+        dependency_type: Option<&str>,
+    ) -> Result<Value> {
+        let endpoint = format!("/task/{}/dependency", task_id);
+        let dep_type = dependency_type.unwrap_or("waiting_on");
+
+        let body = json!({
+            "depends_on": depends_on,
+            "dependency_of": dep_type
+        });
+
+        let response: Value = self.client.post_json(&endpoint, &body).await?;
+        tracing::debug!(
+            "✅ Dependência adicionada: task {} {} task {}",
+            task_id,
+            dep_type,
+            depends_on
+        );
+        Ok(response)
+    }
+
+    /// Remove uma dependência de uma tarefa
+    ///
+    /// # Endpoint da API
+    ///
+    /// `DELETE /api/v2/task/{task_id}/dependency/{depends_on}`
+    ///
+    /// # Argumentos
+    ///
+    /// - `task_id`: ID da tarefa
+    /// - `depends_on`: ID da tarefa dependente a remover
+    ///
+    /// # Exemplo
+    ///
+    /// ```rust,ignore
+    /// task_manager.remove_dependency("123", "456").await?;
+    /// ```
+    pub async fn remove_dependency(&self, task_id: &str, depends_on: &str) -> Result<Value> {
+        let endpoint = format!("/task/{}/dependency/{}", task_id, depends_on);
+        let response: Value = self.client.delete_json(&endpoint).await?;
+
+        tracing::debug!("✅ Dependência removida: task {} não depende mais de {}", task_id, depends_on);
+        Ok(response)
+    }
+
+    /// Lista todas as dependências de uma tarefa
+    ///
+    /// # Endpoint da API
+    ///
+    /// `GET /api/v2/task/{task_id}` e extrai campo `dependencies`
+    ///
+    /// # Argumentos
+    ///
+    /// - `task_id`: ID da tarefa
+    ///
+    /// # Retorno
+    ///
+    /// Retorna array de dependências ou array vazio se não houver.
+    ///
+    /// # Exemplo
+    ///
+    /// ```rust,ignore
+    /// let deps = task_manager.get_dependencies("task-123").await?;
+    /// println!("Dependências: {:?}", deps);
+    /// ```
+    pub async fn get_dependencies(&self, task_id: &str) -> Result<Vec<Value>> {
+        let endpoint = format!("/task/{}", task_id);
+        let task: Value = self.client.get_json(&endpoint).await?;
+
+        let dependencies = task
+            .get("dependencies")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.clone())
+            .unwrap_or_default();
+
+        tracing::debug!("✅ Recuperadas {} dependências da task {}", dependencies.len(), task_id);
+        Ok(dependencies)
     }
 
 }

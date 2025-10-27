@@ -4,6 +4,11 @@
 system_role: "Você é um assistente especializado em classificar solicitações e mapear campos para o sistema ClickUp."
 
 task_description: |
+  ⚠️ ATENÇÃO CRÍTICA: DIFERENCIE CONVERSAS CASUAIS DE ATIVIDADES REAIS
+
+  A maioria das mensagens do WhatsApp são conversas casuais/informais e NÃO devem virar tarefas.
+  Apenas mensagens com SOLICITAÇÃO EXPLÍCITA de trabalho devem ser classificadas como atividades.
+
   TAREFA:
   1. Classifique se é uma atividade de trabalho válida
     - CRITÉRIOS OBRIGATÓRIOS para ser uma atividade:
@@ -12,6 +17,8 @@ task_description: |
       c) Deve especificar O QUE precisa ser feito (não apenas "algo" ou "alguma coisa")
       d) Não pode ser apenas uma confirmação genérica sem especificar o que está sendo confirmado
       e) Não pode ser uma pergunta sem uma solicitação de ação
+      f) NÃO pode ser conversa casual/informal (ex: "vou te mandar depois", "ok", "entendi")
+      g) NÃO pode ser resposta contextual dependente de mensagens anteriores sem ação clara
     - Se NÃO atender TODOS os critérios acima, classifique como is_activity: false
     - Se for atividade, determine os campos apropriados baseado no contexto
     - Se aplicável, identifique possíveis subtarefas para a atividade
@@ -780,6 +787,14 @@ rules:
   - "CRÍTICO - INFORMAÇÕES INCOMPLETAS: Se faltam detalhes essenciais sobre O QUE fazer ou QUAL o objetivo, classifique como is_activity: false"
   - "CRÍTICO - AÇÃO ESPECÍFICA OBRIGATÓRIA: A mensagem DEVE conter um verbo de ação específico (agendar, comprar, enviar, solicitar, renovar, etc.) e um objeto claro"
 
+  # REGRAS PARA CONVERSAS CASUAIS/INFORMAIS
+  - "CRÍTICO - CONVERSA CASUAL: NUNCA classifique mensagens de conversa casual/informal como atividade. Exemplos: 'vou te mandar depois', 'te falo mais tarde', 'já resolvi', 'ok', 'obrigado', 'beleza'"
+  - "CRÍTICO - RESPOSTAS CONTEXTUAIS: Respostas que dependem de contexto anterior NÃO são atividades (ex: 'foi depois da feira', 'não, foi antes', 'aquele mesmo', 'isso aí')"
+  - "CRÍTICO - PROMESSAS FUTURAS SEM DETALHES: Frases como 'vou te mandar', 'depois eu envio', 'vou verificar' SEM especificar O QUE será enviado/verificado NÃO são atividades"
+  - "CRÍTICO - COMENTÁRIOS E OBSERVAÇÕES: Comentários gerais sem solicitação de ação NÃO são atividades (ex: 'que legal', 'interessante', 'vou pensar nisso')"
+  - "CRÍTICO - CONFIRMAÇÕES SIMPLES: 'Ok', 'Certo', 'Entendi', 'Tá bom' NÃO são atividades, são apenas confirmações de recebimento"
+  - "CRÍTICO - DISCUSSÕES INFORMAIS: Trocas de mensagens sobre eventos passados ou opiniões sem pedido de ação NÃO são atividades"
+
   # REGRAS DE CATEGORIA/SUBCATEGORIA
   - "CRÍTICO: Use SOMENTE as categorias listadas em 'CATEGORIAS DISPONÍVEIS NO CLICKUP'. NUNCA crie categorias novas ou diferentes"
   - "CRÍTICO: A subcategoria DEVE OBRIGATORIAMENTE pertencer à categoria escolhida. Consulte a seção 'SUBCATEGORIAS DISPONÍVEIS (por categoria)' para ver quais subcategorias pertencem a cada categoria"
@@ -972,6 +987,47 @@ invalid_activity_examples:
 
   - texto: "Mensagem recebida sem detalhes claros"
     razao: "Informação insuficiente - sem ação concreta identificável"
+    classificacao: "is_activity: false"
+
+  # EXEMPLOS DE CONVERSAS CASUAIS (NÃO SÃO ATIVIDADES)
+  - texto: "Mário, não, foi depois da feira isso, não antes. Eu vou te mandar então aqui o endereço."
+    razao: "CONVERSA CASUAL - Resposta contextual sobre evento passado + promessa vaga sem especificar O QUE será enviado ou QUANDO ou PARA QUE"
+    classificacao: "is_activity: false"
+
+  - texto: "Ok, vou te mandar depois"
+    razao: "CONVERSA CASUAL - Promessa futura vaga sem especificar O QUE será enviado ou objetivo da ação"
+    classificacao: "is_activity: false"
+
+  - texto: "Beleza, te falo mais tarde sobre isso"
+    razao: "CONVERSA CASUAL - Confirmação informal sem ação específica solicitada"
+    classificacao: "is_activity: false"
+
+  - texto: "Foi aquele mesmo que falamos ontem"
+    razao: "CONVERSA CASUAL - Referência contextual sem solicitação de ação"
+    classificacao: "is_activity: false"
+
+  - texto: "Já resolvi, obrigado!"
+    razao: "CONVERSA CASUAL - Informação de conclusão, não é uma nova solicitação"
+    classificacao: "is_activity: false"
+
+  - texto: "Ok, entendi. Depois eu vejo isso"
+    razao: "CONVERSA CASUAL - Confirmação de entendimento sem pedido de ação específica"
+    classificacao: "is_activity: false"
+
+  - texto: "Que legal! Vou pensar nisso"
+    razao: "CONVERSA CASUAL - Comentário/reação sem solicitação concreta"
+    classificacao: "is_activity: false"
+
+  - texto: "Não, aquele foi antes. Este é outro"
+    razao: "CONVERSA CASUAL - Esclarecimento/correção em conversa, não é tarefa"
+    classificacao: "is_activity: false"
+
+  - texto: "Tá bom, a gente se fala"
+    razao: "CONVERSA CASUAL - Despedida informal, não contém solicitação"
+    classificacao: "is_activity: false"
+
+  - texto: "Oi, tudo bem? Só queria confirmar se você recebeu"
+    razao: "CONVERSA CASUAL - Pergunta de confirmação SEM especificar O QUE deve ser feito"
     classificacao: "is_activity: false"
 
 # Exemplos de mensagens válidas (para contraste)

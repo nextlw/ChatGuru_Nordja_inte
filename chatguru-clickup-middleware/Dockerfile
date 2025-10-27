@@ -14,6 +14,9 @@ WORKDIR /app
 # Copy Cargo files first to cache dependencies
 COPY Cargo.toml Cargo.lock ./
 
+# Copy workspace crates
+COPY crates ./crates
+
 # Copy source code and config (migrations não são necessárias no runtime)
 COPY src ./src
 COPY config ./config

@@ -1,24 +1,34 @@
 //! Message Queue Service: Agrupa mensagens por chat antes de processar
 //!
-//! Comportamento Unificado:
+//! Comportamento Inteligente (SmartContextManager):
 //! - Cada chat tem sua própria fila
-//! - Processa AUTOMATICAMENTE via callback quando:
-//!   - 10 mensagens acumuladas (via enqueue)
-//!   - 180 segundos transcorridos (via scheduler)
-//! - Scheduler roda a cada 10 segundos verificando timeouts
+//! - Processa AUTOMATICAMENTE via callback quando uma das 5 regras é ativada:
+//!   1. Closing Message Detection (obrigado, tchau, fechado)
+//!   2. Silence Detection (>30s sem mensagens)
+//!   3. Topic Change Detection (keyword overlap <30%)
+//!   4. Action Completion Pattern (pergunta→resposta→confirmação)
+//!   5. Safety Timeout (8 mensagens OU 120s)
+//! - Scheduler roda a cada 10 segundos verificando condições
 //! - Callback centraliza todo envio para Pub/Sub
 //!
 //! Exemplo:
 //! ```text
-//! Chat A: msg1 -> msg2 -> msg3 -> ... -> msg10 -> CALLBACK -> Pub/Sub (10 mensagens)
-//! Chat B: msg1 -> espera 180s -> CALLBACK -> Pub/Sub (timeout)
+//! Chat A: "preciso criar tarefa" -> "sobre cliente X" -> "obrigado"
+//!         -> SmartContextManager detecta closing -> CALLBACK -> Pub/Sub
+//! Chat B: "como fazer?" -> "aqui está" -> "ok"
+//!         -> SmartContextManager detecta action completion -> CALLBACK -> Pub/Sub
 //! ```
+
+pub mod context_manager;
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use serde_json::Value;
+use ia_service::IaService;
+
+pub use context_manager::{SmartContextManager, ContextDecision, MessageContext};
 
 /// Configuração da fila
 const MAX_MESSAGES_PER_CHAT: usize = 10;  // Aumentado de 5 para 10 mensagens
@@ -47,8 +57,44 @@ impl ChatQueue {
         }
     }
 
-    /// Verifica se a fila está pronta para ser processada
-    fn is_ready_to_process(&self) -> bool {
+    /// Verifica se a fila está pronta para ser processada usando SmartContextManager
+    async fn is_ready_to_process(&self, ia_service: Option<&IaService>) -> (bool, Option<String>) {
+        // Extrair payloads e timestamps
+        let payloads: Vec<Value> = self.messages.iter().map(|m| m.payload.clone()).collect();
+        let timestamps: Vec<Instant> = self.messages.iter().map(|m| m.received_at).collect();
+
+        // Calcular similaridade semântica se IaService disponível e houver 3+ mensagens
+        let semantic_similarity = if let Some(ia) = ia_service {
+            if self.messages.len() >= 3 {
+                // Converter para MessageContext
+                let contexts: Vec<MessageContext> = payloads
+                    .iter()
+                    .zip(timestamps.iter())
+                    .filter_map(|(payload, timestamp)| MessageContext::from_payload(payload, *timestamp))
+                    .collect();
+
+                if contexts.len() >= 3 {
+                    SmartContextManager::calculate_semantic_similarity(ia, &contexts).await
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Usar SmartContextManager para decidir
+        match SmartContextManager::should_process_now(&payloads, &timestamps, semantic_similarity) {
+            ContextDecision::ProcessNow { reason } => (true, Some(reason)),
+            ContextDecision::Wait => (false, None),
+        }
+    }
+
+    /// Verifica se a fila está pronta (versão legada - mantida para compatibilidade de testes)
+    #[allow(dead_code)]
+    fn is_ready_to_process_legacy(&self) -> bool {
         // Pronta se atingiu o limite de mensagens
         if self.messages.len() >= MAX_MESSAGES_PER_CHAT {
             return true;
@@ -77,6 +123,7 @@ impl ChatQueue {
 pub struct MessageQueueService {
     queues: Arc<RwLock<HashMap<String, ChatQueue>>>,
     on_batch_ready: Option<Arc<dyn Fn(String, Vec<QueuedMessage>) + Send + Sync>>,
+    ia_service: Option<Arc<IaService>>, // Serviço de IA para análise semântica
 }
 
 impl MessageQueueService {
@@ -84,6 +131,7 @@ impl MessageQueueService {
         Self {
             queues: Arc::new(RwLock::new(HashMap::new())),
             on_batch_ready: None,
+            ia_service: None,
         }
     }
 
@@ -93,6 +141,12 @@ impl MessageQueueService {
         F: Fn(String, Vec<QueuedMessage>) + Send + Sync + 'static,
     {
         self.on_batch_ready = Some(Arc::new(callback));
+        self
+    }
+
+    /// Define serviço de IA para análise semântica (opcional, mas recomendado)
+    pub fn with_ia_service(mut self, ia_service: IaService) -> Self {
+        self.ia_service = Some(Arc::new(ia_service));
         self
     }
 
@@ -115,20 +169,18 @@ impl MessageQueueService {
         queue.push(payload);
 
         tracing::info!(
-            "📬 Chat '{}': {} mensagens na fila (aguardando {} ou 100s)",
+            "📬 Chat '{}': {} mensagens na fila (aguardando análise SmartContextManager)",
             chat_id,
-            queue.messages.len(),
-            MAX_MESSAGES_PER_CHAT
+            queue.messages.len()
         );
 
-        // Verificar se está pronto para processar
-        if queue.is_ready_to_process() {
-            let reason = if queue.messages.len() >= MAX_MESSAGES_PER_CHAT {
-                format!("{} mensagens atingidas", MAX_MESSAGES_PER_CHAT)
-            } else {
-                "100 segundos atingidos".to_string()
-            };
+        // Verificar se está pronto para processar usando SmartContextManager
+        // Passar IaService se disponível para análise semântica com embeddings
+        let ia_service_ref = self.ia_service.as_ref().map(|arc| arc.as_ref());
+        let (is_ready, reason_opt) = queue.is_ready_to_process(ia_service_ref).await;
 
+        if is_ready {
+            let reason = reason_opt.unwrap_or_else(|| "Condição desconhecida".to_string());
             let message_count = queue.messages.len();
 
             tracing::info!(
@@ -220,27 +272,43 @@ impl MessageQueueService {
 
     /// Verifica filas que atingiram o timeout e as processa
     async fn check_timeouts(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let mut queues = self.queues.write().await;
-        let mut ready_chats = Vec::new();
+        let queues = self.queues.read().await;
 
         tracing::trace!("🔍 Verificando timeouts em {} filas ativas", queues.len());
 
-        // Identificar chats prontos para processar
-        for (chat_id, queue) in queues.iter() {
-            if queue.is_ready_to_process() {
-                let elapsed = queue.first_message_at.elapsed().as_secs();
-                let message_count = queue.messages.len();
+        // Coletar chat_ids para verificar (não podemos iterar e await ao mesmo tempo)
+        let chat_ids: Vec<String> = queues.keys().cloned().collect();
+        drop(queues); // Liberar read lock
 
-                tracing::info!(
-                    "⏰ Chat '{}': Timeout atingido ({}s) - {} mensagens aguardando processamento",
-                    chat_id,
-                    elapsed,
-                    message_count
-                );
+        let mut ready_chats = Vec::new();
 
-                ready_chats.push((chat_id.clone(), message_count, elapsed));
+        // Verificar cada chat de forma assíncrona
+        for chat_id in chat_ids {
+            let queues = self.queues.read().await;
+            if let Some(queue) = queues.get(&chat_id) {
+                let ia_service_ref = self.ia_service.as_ref().map(|arc| arc.as_ref());
+                let (is_ready, reason_opt) = queue.is_ready_to_process(ia_service_ref).await;
+
+                if is_ready {
+                    let elapsed = queue.first_message_at.elapsed().as_secs();
+                    let message_count = queue.messages.len();
+                    let reason = reason_opt.unwrap_or_else(|| "Condição desconhecida".to_string());
+
+                    tracing::info!(
+                        "⏰ Chat '{}': SmartContextManager ativado ({}s, {} mensagens) - Razão: {}",
+                        chat_id,
+                        elapsed,
+                        message_count,
+                        reason
+                    );
+
+                    ready_chats.push((chat_id.clone(), message_count, elapsed));
+                }
             }
         }
+
+        // Processar chats prontos (agora com write lock)
+        let mut queues = self.queues.write().await;
 
         // Processar chats prontos
         for (chat_id, message_count, elapsed_secs) in ready_chats {

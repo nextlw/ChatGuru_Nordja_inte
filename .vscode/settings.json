@@ -3,5 +3,6 @@
         "open-pages": [
             "pinyfakepage.html"
         ]
-    }
+    },
+    "snippets.viewer.sortSnippetsByName": false
 }

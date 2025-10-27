@@ -564,6 +564,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
+name = "chatguru"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "reqwest 0.11.27",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "urlencoding",
+]
+
+[[package]]
 name = "chatguru-clickup-middleware"
 version = "0.1.0"
 dependencies = [
@@ -571,6 +585,7 @@ dependencies = [
  "anyhow",
  "axum",
  "base64 0.22.1",
+ "chatguru",
  "chrono",
  "clickup",
  "config",
@@ -627,9 +642,12 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "deunicode",
+ "hex",
+ "hmac",
  "reqwest 0.11.27",
  "serde",
  "serde_json",
+ "sha2",
  "strsim",
  "thiserror 1.0.69",
  "tokio",
@@ -2229,6 +2247,7 @@ checksum = "f52b00d39961fc5b2736ea853c9cc86238e165017a493d1d5c8eac6bdc4cc273"
 name = "mensageria"
 version = "0.1.0"
 dependencies = [
+ "ia-service",
  "serde",
  "serde_json",
  "tokio",

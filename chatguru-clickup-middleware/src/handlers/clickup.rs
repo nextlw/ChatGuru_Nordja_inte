@@ -61,35 +61,22 @@ use chatguru_clickup_middleware::AppState;
 pub async fn list_clickup_tasks(State(state): State<Arc<AppState>>) -> Result<Json<Value>, AppError> {
     log_request_received("/clickup/tasks", "GET");
 
-    // Construir URL da API do ClickUp para listar tarefas
-    // Formato: https://api.clickup.com/api/v2/list/{list_id}/task
-    let url = format!("https://api.clickup.com/api/v2/list/{}/task", state.settings.clickup.list_id);
-
-    // Fazer requisição HTTP GET à API do ClickUp
-    // Authorization: Bearer token (Personal Token ou OAuth2 Access Token)
-    let response = state.clickup_client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", &state.settings.clickup.token))
-        .send()
-        .await?;
-
-    let status = response.status();
-
-    // Processar resposta com base no status HTTP
-    if status.is_success() {
-        // Sucesso: extrair array de tarefas do JSON retornado
-        let tasks: Value = response.json().await?;
-        Ok(Json(json!({
-            "success": true,
-            "tasks": tasks.get("tasks").unwrap_or(&json!([])),  // Extrair campo "tasks" ou retornar []
-            "list_id": state.settings.clickup.list_id,
-            "timestamp": chrono::Utc::now().to_rfc3339()
-        })))
-    } else {
-        // Erro: logar e retornar erro estruturado
-        let error_text = response.text().await.unwrap_or_default();
-        log_clickup_api_error(&url, Some(status.as_u16()), &error_text);
-        Err(AppError::ClickUpApi(format!("Status: {} - {}", status, error_text)))
+    // ✅ Usa TaskManager do crate em vez de HTTP direto
+    match state.clickup.get_tasks_in_list(None).await {
+        Ok(tasks) => {
+            log_info(&format!("✅ Listadas {} tasks", tasks.len()));
+            Ok(Json(json!({
+                "success": true,
+                "tasks": tasks,
+                "count": tasks.len(),
+                "list_id": state.settings.clickup.list_id,
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            })))
+        },
+        Err(e) => {
+            log_clickup_api_error("get_tasks_in_list", None, &e.to_string());
+            Err(AppError::ClickUpApi(e.to_string()))
+        }
     }
 }
 
@@ -153,85 +140,6 @@ pub async fn get_clickup_list_info(State(state): State<Arc<AppState>>) -> Result
     }
 }
 
-/// Handler HTTP para testar conectividade e autenticação com a API do ClickUp
-///
-/// # Endpoint
-/// `GET /clickup/test`
-///
-/// # Descrição
-/// Executa um teste de conectividade chamando a API do ClickUp para validar:
-/// - Token de autenticação é válido
-/// - Permissões estão corretas
-/// - API está acessível
-/// - Retorna informações do usuário autenticado
-///
-/// # Fluxo
-/// 1. Chama `state.clickup.test_connection()` (método do ClickUpService)
-/// 2. Tenta fazer uma chamada simples à API (ex: GET /api/v2/user)
-/// 3. Retorna sucesso + informações do usuário OU erro detalhado
-///
-/// # Resposta de Sucesso
-/// ```json
-/// {
-///   "success": true,
-///   "message": "ClickUp connection successful",
-///   "user": {
-///     "id": 123456,
-///     "username": "user@example.com",
-///     "email": "user@example.com"
-///   },
-///   "list_id": "901321080769",
-///   "timestamp": "2025-10-14T16:20:00Z"
-/// }
-/// ```
-///
-/// # Resposta de Erro (HTTP 200 com success: false)
-/// ```json
-/// {
-///   "success": false,
-///   "message": "ClickUp connection failed",
-///   "error": "Invalid token or insufficient permissions",
-///   "list_id": "901321080769",
-///   "timestamp": "2025-10-14T16:20:00Z"
-/// }
-/// ```
-///
-/// # Uso
-/// Útil para:
-/// - Verificar se o token OAuth2 ou Personal Token está válido
-/// - Debug de problemas de autenticação antes de processar webhooks
-/// - Health check externo do sistema
-/// - Monitoramento: pode ser usado em scripts de monitoramento
-///
-/// # IMPORTANTE
-/// Este endpoint SEMPRE retorna HTTP 200, mesmo em caso de falha.
-/// O campo "success" no JSON indica se o teste passou ou falhou.
-pub async fn test_clickup_connection(State(state): State<Arc<AppState>>) -> Result<Json<Value>, AppError> {
-    log_request_received("/clickup/test", "GET");
-
-    // Delegar teste de conexão para o serviço ClickUp
-    match state.clickup.test_connection().await {
-        Ok(user_info) => {
-            // Sucesso: token válido, API acessível, retornar info do usuário
-            Ok(Json(json!({
-                "success": true,
-                "message": "ClickUp connection successful",
-                "user": user_info,
-                "list_id": state.settings.clickup.list_id,
-                "timestamp": chrono::Utc::now().to_rfc3339()
-            })))
-        },
-        Err(e) => {
-            // Falha: token inválido, sem permissão, ou API inacessível
-            // IMPORTANTE: Retorna HTTP 200 com success: false (não propaga erro)
-            log_clickup_api_error("test_connection", None, &e.to_string());
-            Ok(Json(json!({
-                "success": false,
-                "message": "ClickUp connection failed",
-                "error": e.to_string(),
-                "list_id": state.settings.clickup.list_id,
-                "timestamp": chrono::Utc::now().to_rfc3339()
-            })))
-        }
-    }
-}
+// ❌ REMOVIDO: test_clickup_connection
+// Este endpoint era redundante com /ready que já faz o mesmo teste.
+// Use /ready para health checks que testam conectividade com ClickUp.

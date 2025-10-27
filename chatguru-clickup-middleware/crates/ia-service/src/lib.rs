@@ -4,6 +4,7 @@
 //! - Classificação de atividades (GPT-4o-mini)
 //! - Transcrição de áudio (Whisper)
 //! - Descrição de imagens (Vision)
+//! - Extração de texto de PDFs (GPT-4 Vision)
 //! - Embeddings (text-embedding-3-small)
 //!
 //! Usa a biblioteca oficial async-openai para tipagem forte e manutenção simplificada.
@@ -14,8 +15,10 @@ use async_openai::{
         AudioInput, AudioResponseFormat, ChatCompletionRequestMessage,
         ChatCompletionRequestUserMessageArgs, ChatCompletionRequestUserMessageContent,
         CreateChatCompletionRequestArgs, CreateEmbeddingRequestArgs, CreateTranscriptionRequestArgs,
-        EmbeddingInput, ImageDetail, ImageUrl, ResponseFormat,
+        EmbeddingInput, ImageDetail, ImageUrl, ImageUrlArgs, ResponseFormat,
         ChatCompletionRequestUserMessageContentPart,
+        ChatCompletionRequestMessageContentPartTextArgs,
+        ChatCompletionRequestMessageContentPartImageArgs,
     },
     Client,
 };
@@ -87,6 +90,8 @@ pub struct IaServiceConfig {
     pub api_key: String,
     /// Modelo para chat/classificação (padrão: gpt-4o-mini)
     pub chat_model: String,
+    /// Modelo para Vision/PDFs (padrão: gpt-4o)
+    pub vision_model: String,
     /// Modelo para embeddings (padrão: text-embedding-3-small)
     pub embedding_model: String,
     /// Temperatura para classificação (padrão: 0.1)
@@ -102,6 +107,7 @@ impl IaServiceConfig {
         Self {
             api_key,
             chat_model: "gpt-4o-mini".to_string(),
+            vision_model: "gpt-4o".to_string(), // gpt-4o suporta Vision e PDFs
             embedding_model: "text-embedding-3-small".to_string(),
             temperature: 0.1,
             max_tokens: 500,
@@ -111,6 +117,11 @@ impl IaServiceConfig {
 
     pub fn with_chat_model(mut self, model: impl Into<String>) -> Self {
         self.chat_model = model.into();
+        self
+    }
+
+    pub fn with_vision_model(mut self, model: impl Into<String>) -> Self {
+        self.vision_model = model.into();
         self
     }
 
@@ -390,11 +401,135 @@ impl IaService {
         Ok(bytes)
     }
 
-    /// Processa mídia (áudio ou imagem) automaticamente
+    /// Processa PDF usando GPT-4 Vision (extração de texto completo para classificação)
+    ///
+    /// # Argumentos
+    /// * `pdf_bytes` - Bytes do arquivo PDF
+    pub async fn process_pdf(&self, pdf_bytes: &[u8]) -> IaResult<String> {
+        tracing::info!("📄 Processando PDF com GPT-4 Vision: {} bytes", pdf_bytes.len());
+
+        // Codificar PDF em base64
+        let base64_pdf = base64::prelude::BASE64_STANDARD.encode(pdf_bytes);
+
+        // Criar mensagem para Vision API com PDF
+        let messages = vec![ChatCompletionRequestMessage::User(
+            ChatCompletionRequestUserMessageArgs::default()
+                .content(vec![
+                    ChatCompletionRequestUserMessageContentPart::Text(
+                        ChatCompletionRequestMessageContentPartTextArgs::default()
+                            .text("Extraia todo o texto deste documento PDF. Mantenha a formatação e estrutura. Se houver tabelas, descreva-as claramente.")
+                            .build()
+                            .map_err(|e| IaServiceError::OpenAIError(format!("Failed to build text part: {}", e)))?
+                    ),
+                    ChatCompletionRequestUserMessageContentPart::ImageUrl(
+                        ChatCompletionRequestMessageContentPartImageArgs::default()
+                            .image_url(
+                                ImageUrlArgs::default()
+                                    .url(format!("data:application/pdf;base64,{}", base64_pdf))
+                                    .build()
+                                    .map_err(|e| IaServiceError::OpenAIError(format!("Failed to build image url: {}", e)))?
+                            )
+                            .build()
+                            .map_err(|e| IaServiceError::OpenAIError(format!("Failed to build image part: {}", e)))?
+                    ),
+                ])
+                .build()
+                .map_err(|e| IaServiceError::OpenAIError(format!("Failed to build user message: {}", e)))?
+        )];
+
+        let request = CreateChatCompletionRequestArgs::default()
+            .model(&self.config.vision_model) // Usa vision_model (gpt-4-vision-preview ou gpt-4o)
+            .messages(messages)
+            .max_tokens(4096u32) // PDFs podem ter muito texto
+            .build()
+            .map_err(|e| IaServiceError::OpenAIError(format!("Failed to build PDF request: {}", e)))?;
+
+        let response = self
+            .client
+            .chat()
+            .create(request)
+            .await
+            .map_err(|e| IaServiceError::OpenAIError(format!("PDF processing failed: {}", e)))?;
+
+        let content = response
+            .choices
+            .get(0)
+            .and_then(|choice| choice.message.content.as_ref())
+            .ok_or_else(|| IaServiceError::OpenAIError("No content in PDF response".to_string()))?
+            .clone();
+
+        tracing::info!("✅ PDF processado: {} caracteres extraídos", content.len());
+
+        Ok(content)
+    }
+
+    /// Descreve PDF usando GPT-4 Vision (descrição resumida interpretada para anotações)
+    ///
+    /// # Argumentos
+    /// * `pdf_bytes` - Bytes do arquivo PDF
+    pub async fn describe_pdf(&self, pdf_bytes: &[u8]) -> IaResult<String> {
+        tracing::info!("📄 Descrevendo PDF com GPT-4 Vision: {} bytes", pdf_bytes.len());
+
+        // Codificar PDF em base64
+        let base64_pdf = base64::prelude::BASE64_STANDARD.encode(pdf_bytes);
+
+        // Criar mensagem para Vision API com PDF
+        let messages = vec![ChatCompletionRequestMessage::User(
+            ChatCompletionRequestUserMessageArgs::default()
+                .content(vec![
+                    ChatCompletionRequestUserMessageContentPart::Text(
+                        ChatCompletionRequestMessageContentPartTextArgs::default()
+                            .text("Descreva resumidamente o conteúdo deste documento PDF em português do Brasil. Foque em: tipo de documento, assunto principal, informações relevantes. Seja conciso (máximo 3 frases).")
+                            .build()
+                            .map_err(|e| IaServiceError::OpenAIError(format!("Failed to build text part: {}", e)))?
+                    ),
+                    ChatCompletionRequestUserMessageContentPart::ImageUrl(
+                        ChatCompletionRequestMessageContentPartImageArgs::default()
+                            .image_url(
+                                ImageUrlArgs::default()
+                                    .url(format!("data:application/pdf;base64,{}", base64_pdf))
+                                    .build()
+                                    .map_err(|e| IaServiceError::OpenAIError(format!("Failed to build image url: {}", e)))?
+                            )
+                            .build()
+                            .map_err(|e| IaServiceError::OpenAIError(format!("Failed to build image part: {}", e)))?
+                    ),
+                ])
+                .build()
+                .map_err(|e| IaServiceError::OpenAIError(format!("Failed to build user message: {}", e)))?
+        )];
+
+        let request = CreateChatCompletionRequestArgs::default()
+            .model(&self.config.vision_model)
+            .messages(messages)
+            .max_tokens(300u32) // Descrição curta
+            .build()
+            .map_err(|e| IaServiceError::OpenAIError(format!("Failed to build PDF description request: {}", e)))?;
+
+        let response = self
+            .client
+            .chat()
+            .create(request)
+            .await
+            .map_err(|e| IaServiceError::OpenAIError(format!("PDF description failed: {}", e)))?;
+
+        let description = response
+            .choices
+            .get(0)
+            .and_then(|choice| choice.message.content.as_ref())
+            .ok_or_else(|| IaServiceError::OpenAIError("No description in PDF response".to_string()))?
+            .clone();
+
+        tracing::info!("✅ PDF descrito: {} caracteres", description.len());
+
+        Ok(description)
+    }
+
+    /// Processa mídia (áudio, imagem ou PDF) automaticamente
     ///
     /// # Argumentos
     /// * `media_url` - URL da mídia
-    /// * `media_type` - Tipo MIME (ex: "audio/ogg", "image/jpeg")
+    /// * `media_type` - Tipo MIME (ex: "audio/ogg", "image/jpeg", "application/pdf")
     pub async fn process_media(&self, media_url: &str, media_type: &str) -> IaResult<String> {
         tracing::info!("📎 Processando mídia: {} ({})", media_url, media_type);
 
@@ -410,12 +545,49 @@ impl IaService {
         } else if media_type.contains("image") {
             let image_bytes = self.download_image(media_url).await?;
             self.describe_image(&image_bytes).await
+        } else if media_type.contains("pdf") || media_type.contains("application/pdf") {
+            let pdf_bytes = self.download_file(media_url, "PDF").await?;
+            self.process_pdf(&pdf_bytes).await
         } else {
             Err(IaServiceError::ConfigError(format!(
                 "Tipo de mídia não suportado: {}",
                 media_type
             )))
         }
+    }
+
+    /// Baixa arquivo genérico de uma URL
+    ///
+    /// # Argumentos
+    /// * `url` - URL do arquivo
+    /// * `file_type` - Tipo do arquivo para log (ex: "PDF", "Áudio")
+    pub async fn download_file(&self, url: &str, file_type: &str) -> IaResult<Vec<u8>> {
+        tracing::info!("⬇️ Baixando {} de: {}", file_type, url);
+
+        let response = self
+            .http_client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| IaServiceError::DownloadError(format!("Download failed: {}", e)))?;
+
+        if !response.status().is_success() {
+            return Err(IaServiceError::DownloadError(format!(
+                "HTTP {} while downloading {}",
+                response.status(),
+                file_type
+            )));
+        }
+
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|e| IaServiceError::DownloadError(format!("Failed to read bytes: {}", e)))?
+            .to_vec();
+
+        tracing::info!("✅ {} baixado: {} bytes", file_type, bytes.len());
+
+        Ok(bytes)
     }
 
     /// Obtém informações sobre a configuração atual

@@ -23,14 +23,15 @@ use std::sync::Arc;
 use tokio::time::Instant;
 use base64::{Engine as _, engine::general_purpose};
 
-use chatguru_clickup_middleware::models::WebhookPayload;
+use chatguru_clickup_middleware::models::payload::WebhookPayload;
+use chatguru::ChatGuruClient;
 use chatguru_clickup_middleware::utils::{AppResult, AppError};
 use chatguru_clickup_middleware::utils::logging::*;
 use chatguru_clickup_middleware::AppState;
-use chatguru_clickup_middleware::services::chatguru::ChatGuruApiService;
-use chatguru_clickup_middleware::services::smart_folder_finder::SmartFolderFinder;
-use chatguru_clickup_middleware::services::smart_assignee_finder::SmartAssigneeFinder;
-use chatguru_clickup_middleware::services::custom_field_manager::CustomFieldManager;
+// Usar services do crate clickup ao invés de duplicar no main project
+use clickup::folders::SmartFolderFinder;
+use clickup::assignees::SmartAssigneeFinder;
+use clickup::fields::CustomFieldManager;
 
 // Configuração de retry
 const MAX_RETRY_ATTEMPTS: u32 = 3;
@@ -184,32 +185,41 @@ pub async fn handle_worker(
         ));
     };
 
-    // Parsear o envelope interno que contém o raw_payload
+    // Parsear o envelope que contém o raw_payload
+    // O formato esperado após decodificar base64 é:
+    // { "raw_payload": "{...chatguru payload...}", "received_at": "...", "source": "...", ... }
     let inner_envelope: Value = match serde_json::from_str(&raw_payload_str) {
         Ok(v) => v,
         Err(e) => {
-            log_error(&format!("Failed to parse inner envelope: {}", e));
+            log_error(&format!("Failed to parse envelope: {}", e));
             return Err((
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Invalid inner envelope"}))
+                Json(json!({"error": "Invalid envelope format"}))
             ));
         }
     };
 
-    // Extrair o raw_payload do envelope interno
-    let raw_payload_str = match inner_envelope.get("raw_payload").and_then(|v| v.as_str()) {
-        Some(s) => s,
-        None => {
-            log_error("Missing raw_payload in inner envelope");
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Missing raw_payload"}))
-            ));
-        }
+    // Extrair o raw_payload do envelope (ou usar o próprio envelope se não tiver esse campo)
+    let chatguru_payload_str = if let Some(raw_payload) = inner_envelope.get("raw_payload").and_then(|v| v.as_str()) {
+        // Formato esperado: envelope tem campo raw_payload (string JSON)
+        raw_payload.to_string()
+    } else {
+        // Fallback: o próprio envelope já é o payload do ChatGuru (para compatibilidade)
+        log_warning("⚠️  Envelope sem campo 'raw_payload', usando envelope completo como payload");
+        raw_payload_str.clone()
     };
+
+    // Validar que o payload não está vazio
+    if chatguru_payload_str.trim().is_empty() {
+        log_error("Payload do ChatGuru está vazio");
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Empty payload"}))
+        ));
+    }
 
     // Parsear payload do ChatGuru
-    let mut payload: WebhookPayload = match serde_json::from_str(raw_payload_str) {
+    let mut payload: WebhookPayload = match serde_json::from_str(&chatguru_payload_str) {
         Ok(p) => p,
         Err(e) => {
             log_error(&format!("Failed to parse ChatGuru payload: {}", e));
@@ -242,11 +252,20 @@ pub async fn handle_worker(
         ));
 
         // Verificar se tem media_url e media_type
-        if let (Some(ref media_url), Some(ref media_type)) = (&chatguru_payload.media_url, &chatguru_payload.media_type) {
-            // Verificar se é tipo de mídia suportado - usando tipos estáticos para agora
-            let is_supported = media_type.contains("audio") || media_type.contains("image") || media_type.contains("video");
+        if let (Some(media_url), Some(media_type)) = (&chatguru_payload.media_url, &chatguru_payload.media_type) {
+            // Verificar se é tipo de mídia suportado
+            let is_supported = media_type.contains("audio") || media_type.contains("image") || media_type.contains("video") || media_type.contains("pdf");
             if is_supported {
-                let processing_type = if media_type.contains("audio") { "audio" } else if media_type.contains("image") { "image" } else { "video" };
+                let processing_type = if media_type.contains("audio") {
+                    "audio"
+                } else if media_type.contains("image") {
+                    "image"
+                } else if media_type.contains("pdf") {
+                    "pdf"
+                } else {
+                    "video"
+                };
+
                 log_info(&format!("📎 Mídia detectada ({}: {}), iniciando processamento: {}",
                     processing_type, media_type, media_url));
 
@@ -255,7 +274,7 @@ pub async fn handle_worker(
                 let final_result = if let Some(ref ia_service) = state.ia_service {
                     match ia_service.process_media(media_url, media_type).await {
                         Ok(result) => {
-                            log_info(&format!("✅ Mídia processada com sucesso: {}", result));
+                            log_info(&format!("✅ Mídia processada com sucesso: {} caracteres", result.len()));
                             Some(result)
                         }
                         Err(e) => {
@@ -268,12 +287,42 @@ pub async fn handle_worker(
                     None
                 };
 
+                // Para PDFs, gerar também uma descrição resumida (para anotações)
+                let pdf_description = if processing_type == "pdf" && final_result.is_some() {
+                    if let Some(ref ia_service) = state.ia_service {
+                        log_info("📄 Gerando descrição resumida do PDF para anotação");
+                        match ia_service.download_file(media_url, "PDF").await {
+                            Ok(pdf_bytes) => {
+                                match ia_service.describe_pdf(&pdf_bytes).await {
+                                    Ok(desc) => {
+                                        log_info(&format!("✅ Descrição do PDF gerada: {} caracteres", desc.len()));
+                                        Some(desc)
+                                    }
+                                    Err(e) => {
+                                        log_warning(&format!("⚠️ Falha ao gerar descrição do PDF: {}", e));
+                                        None
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                log_warning(&format!("⚠️ Falha ao baixar PDF para descrição: {}", e));
+                                None
+                            }
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
                 // Atualizar payload com resultado
                 if let Some(result_text) = final_result {
-                    let label = if processing_type == "audio" {
-                        "Transcrição do áudio"
-                    } else {
-                        "Descrição da imagem"
+                    let label = match processing_type {
+                        "audio" => "Transcrição do áudio",
+                        "image" => "Descrição da imagem",
+                        "pdf" => "Conteúdo do PDF",
+                        _ => "Descrição da mídia",
                     };
 
                     if !chatguru_payload.texto_mensagem.is_empty() {
@@ -285,6 +334,15 @@ pub async fn handle_worker(
                         );
                     } else {
                         chatguru_payload.texto_mensagem = result_text;
+                    }
+
+                    // Adicionar descrição do PDF se disponível (para anotações)
+                    if let Some(pdf_desc) = pdf_description {
+                        chatguru_payload.texto_mensagem = format!(
+                            "{}\n\n[Descrição do PDF]: {}",
+                            chatguru_payload.texto_mensagem,
+                            pdf_desc
+                        );
                     }
 
                     log_info(&format!("📝 Payload enriquecido com {}", label));
@@ -327,9 +385,6 @@ pub async fn handle_worker(
 
                 // Database error - NÃO recuperável (indica problema de configuração)
                 AppError::DatabaseError(_) => false,
-
-                // Vertex AI errors - recuperável (problemas de rede/temporários)
-                AppError::VertexError(_) => retry_count < MAX_RETRY_ATTEMPTS,
 
                 // Outros erros internos - permitir retry limitado
                 AppError::InternalError(_) => retry_count < MAX_RETRY_ATTEMPTS,
@@ -492,7 +547,8 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
         let folder_api_token = api_token.clone();
         let folder_workspace_id = workspace_id.clone();
 
-        let mut finder = SmartFolderFinder::new(folder_api_token, folder_workspace_id);
+        let mut finder = SmartFolderFinder::from_token(folder_api_token, folder_workspace_id)
+            .map_err(|e| AppError::ClickUpApi(format!("Failed to create SmartFolderFinder: {}", e)))?;
 
         // Buscar folder de forma inteligente
         let folder_result = match finder.find_folder_for_client(&client_name).await {
@@ -532,7 +588,8 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
             let assignee_api_token = api_token.clone();
             let assignee_workspace_id = workspace_id.clone();
 
-            let mut assignee_finder = SmartAssigneeFinder::new(assignee_api_token, assignee_workspace_id);
+            let mut assignee_finder = SmartAssigneeFinder::from_token(assignee_api_token, assignee_workspace_id)
+                .map_err(|e| AppError::ClickUpApi(format!("Failed to create SmartAssigneeFinder: {}", e)))?;
 
             match assignee_finder.find_assignee_by_name(responsavel).await {
                 Ok(Some(result)) => {
@@ -550,6 +607,31 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
                         "⚠️ Assignee não encontrado para '{}', tarefa será criada sem responsável",
                         responsavel
                     ));
+
+                    // Enviar anotação de warning ao ChatGuru
+                    let warning_annotation = if responsavel.trim().is_empty() {
+                        "⚠️ **RESPONSÁVEL NÃO SELECIONADO**\n\n\
+                        👤 O campo 'Info_2' (responsável/atendente) está vazio\n\n\
+                        ℹ️ A tarefa será criada, mas **sem atribuição de responsável**.\n\n\
+                        ⚠️ **ATENÇÃO**: Isso pode causar erro ao salvar a tarefa no ClickUp dependendo das configurações da lista.\n\n\
+                        ✅ **Ação necessária**: Selecione o atendente responsável no campo Info_2 antes de enviar a mensagem.".to_string()
+                    } else {
+                        format!(
+                            "⚠️ **ATENDENTE NÃO CADASTRADO**\n\n\
+                            👤 Responsável informado: '{}'\n\
+                            ❌ Este atendente não foi encontrado no ClickUp\n\n\
+                            ℹ️ A tarefa será criada, mas **sem atribuição de responsável**.\n\n\
+                            ⚠️ **ATENÇÃO**: Isso pode causar erro ao salvar a tarefa no ClickUp dependendo das configurações da lista.\n\n\
+                            ✅ **Ação necessária**: Verifique se '{}' tem acesso ao workspace do ClickUp.",
+                            responsavel,
+                            responsavel
+                        )
+                    };
+
+                    if let Err(e) = send_annotation_to_chatguru(&state, &payload, &warning_annotation).await {
+                        log_warning(&format!("⚠️ Não foi possível enviar anotação de warning: {}", e));
+                    }
+
                     None
                 }
                 Err(e) => {
@@ -559,6 +641,18 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
             }
         } else {
             log_info("ℹ️ Sem responsavel_nome no payload, tarefa será criada sem assignee");
+
+            // Enviar anotação de warning ao ChatGuru
+            let warning_annotation = "⚠️ **RESPONSÁVEL NÃO INFORMADO**\n\n\
+                👤 O campo 'Info_2' (responsável/atendente) não foi preenchido no payload\n\n\
+                ℹ️ A tarefa será criada, mas **sem atribuição de responsável**.\n\n\
+                ⚠️ **ATENÇÃO**: Isso pode causar erro ao salvar a tarefa no ClickUp dependendo das configurações da lista.\n\n\
+                ✅ **Ação necessária**: Configure o ChatGuru para enviar o campo 'responsavel_nome' no webhook.";
+
+            if let Err(e) = send_annotation_to_chatguru(&state, &payload, warning_annotation).await {
+                log_warning(&format!("⚠️ Não foi possível enviar anotação de warning: {}", e));
+            }
+
             None
         };
 
@@ -582,7 +676,8 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
                     folder_info.folder_name
                 ));
 
-                let custom_field_manager = CustomFieldManager::new(api_token.clone());
+                let custom_field_manager = CustomFieldManager::from_token(api_token.clone())
+                    .map_err(|e| AppError::ClickUpApi(format!("Failed to create CustomFieldManager: {}", e)))?;
 
                 match custom_field_manager
                     .ensure_client_solicitante_option(&list_id, &folder_info.folder_name)
@@ -628,17 +723,21 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
                     list_id, folder_info.folder_id
                 ));
 
-                // Adicionar list_id ao task_data (ClickUpService espera que o list_id esteja no JSON)
-                // O método create_task_from_json extrai o list_id do próprio JSON
+                // Adicionar list_id ao task_data
                 if let Some(obj) = task_data.as_object_mut() {
                     obj.insert("list_id".to_string(), serde_json::json!(list_id));
                 }
 
-                // Criar tarefa diretamente na lista usando o ClickUpService
-                match state.clickup.create_task_from_json(&task_data).await {
-                    Ok(result) => {
-                        log_info(&format!("✅ Tarefa criada via SmartFolderFinder: {}", result["id"]));
-                        result
+                // Converter Value para Task tipada
+                let task: clickup::Task = serde_json::from_value(task_data)?;
+
+                // Criar tarefa usando API tipada
+                match state.clickup.create_task(&task).await {
+                    Ok(created_task) => {
+                        log_info(&format!("✅ Tarefa criada via SmartFolderFinder: {}", created_task.id.as_ref().unwrap_or(&"?".to_string())));
+                        // Converter Task de volta para Value para compatibilidade com código existente
+                        serde_json::to_value(&created_task)
+                            .unwrap_or_else(|_| serde_json::json!({"id": created_task.id}))
                     }
                     Err(e) => {
                         log_error(&format!("❌ Erro ao criar tarefa: {}", e));
@@ -651,6 +750,21 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
                     "⚠️ Folder '{}' encontrado mas sem lista do mês, encaminhando para App Engine",
                     folder_info.folder_name
                 ));
+
+                // Enviar anotação de warning ao ChatGuru
+                let warning_annotation = format!(
+                    "⚠️ **LISTA DO MÊS NÃO ENCONTRADA**\n\n\
+                    📂 Pasta: '{}'\n\
+                    📋 Lista mensal não criada ainda\n\n\
+                    ℹ️ A tarefa será processada pelo sistema legado (App Engine).\n\n\
+                    ✅ **Ação necessária**: Crie a lista do mês atual na pasta '{}' no ClickUp.",
+                    folder_info.folder_name,
+                    folder_info.folder_name
+                );
+
+                if let Err(e) = send_annotation_to_chatguru(&state, &payload, &warning_annotation).await {
+                    log_warning(&format!("⚠️ Não foi possível enviar anotação de warning: {}", e));
+                }
 
                 // Enviar payload original para o App Engine
                 forward_to_app_engine(&payload).await?;
@@ -668,6 +782,19 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
         } else {
             // Não encontrou folder, encaminhar para App Engine
             log_warning(&format!("⚠️ Folder não encontrado para '{}', encaminhando para App Engine", client_name));
+
+            // Enviar anotação de warning ao ChatGuru
+            let warning_annotation = format!(
+                "⚠️ **CONFIGURAÇÃO PENDENTE**\n\n\
+                📂 Pasta não encontrada no ClickUp para o cliente: '{}'\n\n\
+                ℹ️ A tarefa será processada pelo sistema legado (App Engine).\n\n\
+                ✅ **Ação necessária**: Configure o mapeamento deste cliente no sistema para habilitar o processamento otimizado.",
+                client_name
+            );
+
+            if let Err(e) = send_annotation_to_chatguru(&state, &payload, &warning_annotation).await {
+                log_warning(&format!("⚠️ Não foi possível enviar anotação de warning: {}", e));
+            }
 
             // Enviar payload original para o App Engine e encerrar processamento
             forward_to_app_engine(&payload).await?;
@@ -688,18 +815,46 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
         let task_id = task_result.get("id").and_then(|v| v.as_str()).unwrap_or("N/A");
         let task_url = task_result.get("url").and_then(|v| v.as_str()).unwrap_or("");
 
-        // Verificar se há transcrição de áudio
-        let transcription_section = if let WebhookPayload::ChatGuru(ref chatguru_payload) = payload {
-            if let (Some(_media_url), Some(ref media_type)) = (&chatguru_payload.media_url, &chatguru_payload.media_type) {
-                if (media_type.to_lowercase().contains("audio") || media_type.to_lowercase().contains("voice"))
+        // Extrair descrição de mídia (áudio, imagem ou PDF)
+        let media_description_section = if let WebhookPayload::ChatGuru(ref chatguru_payload) = payload {
+            if let (Some(_media_url), Some(media_type)) = (&chatguru_payload.media_url, &chatguru_payload.media_type) {
+                let media_type_lower = media_type.to_lowercase();
+
+                // Verificar tipo de mídia e extrair descrição correspondente
+                if (media_type_lower.contains("audio") || media_type_lower.contains("voice"))
                     && chatguru_payload.texto_mensagem.contains("[Transcrição do áudio]:") {
-                    // Extrair apenas a transcrição
-                    let transcription = chatguru_payload.texto_mensagem
+                    let description = chatguru_payload.texto_mensagem
                         .split("[Transcrição do áudio]:")
                         .nth(1)
                         .unwrap_or("")
                         .trim();
-                    format!("\n🎤 Transcrição: {}", transcription)
+                    format!("\n🎤 Transcrição: {}", description)
+                } else if media_type_lower.contains("image")
+                    && chatguru_payload.texto_mensagem.contains("[Descrição da imagem]:") {
+                    let description = chatguru_payload.texto_mensagem
+                        .split("[Descrição da imagem]:")
+                        .nth(1)
+                        .unwrap_or("")
+                        .trim();
+                    format!("\n🖼️ Descrição da imagem: {}", description)
+                } else if media_type_lower.contains("pdf")
+                    && chatguru_payload.texto_mensagem.contains("[Conteúdo do PDF]:") {
+                    let full_content = chatguru_payload.texto_mensagem
+                        .split("[Conteúdo do PDF]:")
+                        .nth(1)
+                        .unwrap_or("")
+                        .trim();
+
+                    // Para anotação, criar resumo ao invés de texto completo
+                    let summary = if full_content.len() > 200 {
+                        format!("{}... (documento com {} caracteres)",
+                            &full_content[..200].trim(),
+                            full_content.len())
+                    } else {
+                        full_content.to_string()
+                    };
+
+                    format!("\n📄 Descrição do PDF: {}", summary)
                 } else {
                     String::new()
                 }
@@ -727,7 +882,7 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
                 })
                 .unwrap_or("N/A"),
             task_url,
-            transcription_section
+            media_description_section
         );
 
         // Enviar anotação ao ChatGuru
@@ -745,18 +900,46 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
     } else {
         log_info(&format!("❌ Não é atividade: {}", classification.reason));
 
-        // Verificar se há transcrição de áudio
-        let transcription_section = if let WebhookPayload::ChatGuru(ref chatguru_payload) = payload {
-            if let (Some(_media_url), Some(ref media_type)) = (&chatguru_payload.media_url, &chatguru_payload.media_type) {
-                if (media_type.to_lowercase().contains("audio") || media_type.to_lowercase().contains("voice"))
+        // Extrair descrição de mídia (áudio, imagem ou PDF)
+        let media_description_section = if let WebhookPayload::ChatGuru(ref chatguru_payload) = payload {
+            if let (Some(_media_url), Some(media_type)) = (&chatguru_payload.media_url, &chatguru_payload.media_type) {
+                let media_type_lower = media_type.to_lowercase();
+
+                // Verificar tipo de mídia e extrair descrição correspondente
+                if (media_type_lower.contains("audio") || media_type_lower.contains("voice"))
                     && chatguru_payload.texto_mensagem.contains("[Transcrição do áudio]:") {
-                    // Extrair apenas a transcrição
-                    let transcription = chatguru_payload.texto_mensagem
+                    let description = chatguru_payload.texto_mensagem
                         .split("[Transcrição do áudio]:")
                         .nth(1)
                         .unwrap_or("")
                         .trim();
-                    format!("\n🎤 Transcrição: {}", transcription)
+                    format!("\n🎤 Transcrição: {}", description)
+                } else if media_type_lower.contains("image")
+                    && chatguru_payload.texto_mensagem.contains("[Descrição da imagem]:") {
+                    let description = chatguru_payload.texto_mensagem
+                        .split("[Descrição da imagem]:")
+                        .nth(1)
+                        .unwrap_or("")
+                        .trim();
+                    format!("\n🖼️ Descrição da imagem: {}", description)
+                } else if media_type_lower.contains("pdf")
+                    && chatguru_payload.texto_mensagem.contains("[Conteúdo do PDF]:") {
+                    let full_content = chatguru_payload.texto_mensagem
+                        .split("[Conteúdo do PDF]:")
+                        .nth(1)
+                        .unwrap_or("")
+                        .trim();
+
+                    // Para anotação, criar resumo ao invés de texto completo
+                    let summary = if full_content.len() > 200 {
+                        format!("{}... (documento com {} caracteres)",
+                            &full_content[..200].trim(),
+                            full_content.len())
+                    } else {
+                        full_content.to_string()
+                    };
+
+                    format!("\n📄 Descrição do PDF: {}", summary)
                 } else {
                     String::new()
                 }
@@ -767,7 +950,7 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
             String::new()
         };
 
-        let annotation = format!("❌ Não é uma tarefa: {}{}", classification.reason, transcription_section);
+        let annotation = format!("❌ Não é uma tarefa: {}{}", classification.reason, media_description_section);
 
         // Apenas enviar anotação
         if let Err(e) = send_annotation_to_chatguru(state, payload, &annotation).await {
@@ -795,7 +978,7 @@ async fn send_annotation_to_chatguru(
     let account_id = state.settings.chatguru.account_id.clone()
         .unwrap_or_else(|| "default_account".to_string());
 
-    let chatguru_service = ChatGuruApiService::new(api_token, api_endpoint, account_id);
+    let chatguru_service = ChatGuruClient::new(api_token, api_endpoint, account_id);
 
     let chat_id = extract_chat_id_from_payload(payload);
     let phone = extract_phone_from_payload(payload);

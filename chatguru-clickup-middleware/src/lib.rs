@@ -6,6 +6,7 @@ pub mod models;
 pub mod services;
 pub mod utils;
 pub mod auth; // Novo módulo OAuth2 isolado
+pub mod middleware; // ✅ Middleware para autenticação e validação
 
 // AppState é definido aqui para ser compartilhado
 // Versão event-driven: SEM scheduler, SEM database

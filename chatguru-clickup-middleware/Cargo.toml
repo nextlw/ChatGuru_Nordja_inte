@@ -4,6 +4,7 @@ members = [
     "crates/mensageria",
     "crates/ia-service",
     "crates/clickup",
+    "crates/chatguru",
 ]
 resolver = "2"
 
@@ -27,6 +28,7 @@ path = "src/main.rs"
 mensageria = { path = "crates/mensageria" }
 ia-service = { path = "crates/ia-service" }
 clickup = { path = "crates/clickup" }
+chatguru = { path = "crates/chatguru" }
 
 # Web framework
 axum = { version = "0.7", features = ["json", "macros", "tokio"] }

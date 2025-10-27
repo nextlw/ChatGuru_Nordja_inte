@@ -32,5 +32,10 @@ chrono = { version = "0.4", features = ["serde"] }
 # URL encoding
 urlencoding = "2.1"
 
+# Webhook signature verification
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+
 [dev-dependencies]
 tokio = { version = "1.0", features = ["full", "test-util"] }

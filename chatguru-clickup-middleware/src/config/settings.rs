@@ -7,9 +7,6 @@ pub struct Settings {
     pub clickup: ClickUpSettings,
     pub gcp: GcpSettings,
     pub chatguru: ChatGuruSettings,
-    pub ai: Option<AISettings>,
-    pub vertex: Option<VertexSettings>,
-    pub hybrid_ai: Option<HybridAISettings>,  // NOVO: Configurações do serviço híbrido
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -23,6 +20,7 @@ pub struct ClickUpSettings {
     pub token: String,
     pub list_id: String,
     pub base_url: String,
+    pub workspace_id: Option<String>,  // ✅ Workspace ID (team_id) - necessário para webhooks
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -30,10 +28,11 @@ pub struct GcpSettings {
     pub project_id: String,
     pub topic_name: String,
     pub subscription_name: String,
-    pub pubsub_topic: Option<String>,  // Tópico para envio de webhooks RAW
+    pub pubsub_topic: Option<String>,  // Tópico para envio de webhooks RAW (ChatGuru)
     pub media_processing_topic: Option<String>,  // Tópico para requisições de processamento de mídia
     pub media_results_topic: Option<String>,  // Tópico para resultados de processamento
     pub media_results_subscription: Option<String>,  // Subscription para ler resultados
+    pub clickup_webhook_topic: Option<String>,  // ✅ Tópico para eventos de webhooks ClickUp
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -46,67 +45,6 @@ pub struct ChatGuruSettings {
     pub api_endpoint: Option<String>,  // Endpoint da API do ChatGuru
     pub account_id: Option<String>,  // ID da conta no ChatGuru
     pub phone_ids: Option<Vec<String>>,  // IDs dos telefones configurados
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct AISettings {
-    pub enabled: bool,
-    // Usa sempre Vertex AI no Google Cloud (mais eficiente e integrado)
-    pub use_hybrid: Option<bool>,     // NOVO: Usar serviço híbrido experimental
-    pub prefer_vertex: Option<bool>,  // NOVO: Preferir Vertex AI quando híbrido ativo
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct VertexSettings {
-    pub enabled: bool,
-    pub timeout_seconds: u64,
-    pub project_id: String,
-    pub location: String,
-    pub model: Option<String>, // Modelo a usar (default: gemini-1.5-flash)
-    pub max_media_size_mb: Option<u32>, // Tamanho máximo de mídia em MB (default: 10)
-    pub supported_mime_types: Option<Vec<String>>, // Tipos MIME permitidos
-    pub generation: Option<VertexGenerationConfig>, // Configurações de geração
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct VertexGenerationConfig {
-    pub temperature: Option<f32>,
-    pub top_p: Option<f32>,
-    pub top_k: Option<i32>,
-    pub max_output_tokens: Option<i32>,
-}
-
-// NOVO: Configurações para o serviço híbrido AI
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct HybridAISettings {
-    pub enabled: bool,                 // Feature flag principal
-    pub fallback_enabled: Option<bool>, // Permitir fallback automático
-    pub log_service_used: Option<bool>, // Log detalhado de qual serviço foi usado
-    pub vertex_timeout_seconds: Option<u64>, // Timeout específico para Vertex AI
-    pub prefer_vertex_for_media: Option<bool>, // Preferir Vertex para processamento de mídia
-}
-
-impl Default for VertexGenerationConfig {
-    fn default() -> Self {
-        Self {
-            temperature: Some(0.7),
-            top_p: Some(0.9),
-            top_k: Some(40),
-            max_output_tokens: Some(1024),
-        }
-    }
-}
-
-impl Default for HybridAISettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,                        // Desabilitado por padrão (segurança)
-            fallback_enabled: Some(true),         // Fallback habilitado por padrão
-            log_service_used: Some(true),         // Log habilitado por padrão
-            vertex_timeout_seconds: Some(10),     // Timeout baixo para fail-fast
-            prefer_vertex_for_media: Some(true),  // Vertex melhor para mídia
-        }
-    }
 }
 
 impl Settings {
@@ -126,19 +64,6 @@ impl Settings {
         }
         if let Ok(list_id) = std::env::var("CLICKUP_LIST_ID") {
             builder = builder.set_override("clickup.list_id", list_id)?;
-        }
-
-        // Variáveis de ambiente para Vertex AI (permite trocar modelo sem rebuild!)
-        if let Ok(model) = std::env::var("VERTEX_AI_MODEL") {
-            builder = builder.set_override("vertex.model", model)?;
-        }
-        if let Ok(location) = std::env::var("VERTEX_AI_LOCATION") {
-            builder = builder.set_override("vertex.location", location)?;
-        }
-        if let Ok(timeout) = std::env::var("VERTEX_AI_TIMEOUT") {
-            if let Ok(timeout_val) = timeout.parse::<u64>() {
-                builder = builder.set_override("vertex.timeout_seconds", timeout_val)?;
-            }
         }
 
         // Também suportar o prefixo antigo

@@ -274,6 +274,13 @@ impl ClickUpClient {
         self.handle_response(response).await
     }
 
+    /// Executa uma requisição DELETE e parseia JSON (API v2)
+    pub(crate) async fn delete_json<T: DeserializeOwned>(&self, endpoint: &str) -> Result<T> {
+        let response = self.delete_v2(endpoint).await?;
+        let json = response.json().await?;
+        Ok(json)
+    }
+
     /// Processa a resposta HTTP e trata erros
     async fn handle_response(&self, response: Response) -> Result<Response> {
         let status = response.status();

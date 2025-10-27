@@ -12,12 +12,13 @@
 use axum::{
     routing::{get, post},
     Router,
+    middleware,
 };
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
 // Importar módulos da biblioteca
-use chatguru_clickup_middleware::{AppState, config, services, utils, auth};
+use chatguru_clickup_middleware::{AppState, config, services, utils, auth, middleware as app_middleware};
 
 mod handlers;
 
@@ -26,7 +27,8 @@ use handlers::{
     health_check, ready_check, status_check,
     handle_webhook,
     handle_worker,
-    list_clickup_tasks, get_clickup_list_info, test_clickup_connection,
+    list_clickup_tasks, get_clickup_list_info,  // ❌ Removido: test_clickup_connection (redundante com /ready)
+    handle_clickup_webhook, list_registered_webhooks, create_webhook,
 };
 use utils::{AppError, logging::*};
 
@@ -161,23 +163,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Configurar rotas base
     let mut app = Router::new()
-        // Health checks
+        // Health checks (públicos)
         .route("/health", get(health_check))
         .route("/ready", get(ready_check))
         .route("/status", get(status_check))
 
-        // Webhook ChatGuru: Envia RAW para Pub/Sub
+        // Webhooks (públicos - validação própria)
         .route("/webhooks/chatguru", post(handle_webhook))
+        .route("/webhooks/clickup", post(handle_clickup_webhook))
 
-        // Worker: Processa mensagens do Pub/Sub
+        // Worker: Processa mensagens do Pub/Sub (público - autenticado pelo GCP)
         .route("/worker/process", post(handle_worker))
 
-        // ClickUp endpoints (debug/admin)
-        .route("/clickup/tasks", get(list_clickup_tasks))
-        .route("/clickup/list", get(get_clickup_list_info))
-        .route("/clickup/test", get(test_clickup_connection))
+        .with_state(app_state.clone());
 
+    // ✅ Rotas administrativas protegidas com API key
+    let admin_routes = Router::new()
+        .route("/admin/clickup/tasks", get(list_clickup_tasks))
+        .route("/admin/clickup/list", get(get_clickup_list_info))
+        .route("/admin/clickup/webhooks", get(list_registered_webhooks))
+        .route("/admin/clickup/webhooks", post(create_webhook))
+        .layer(middleware::from_fn(app_middleware::require_admin_key))
         .with_state(app_state);
+
+    app = app.merge(admin_routes);
 
     // Adicionar rotas OAuth2 se configurado
     if let Some(oauth_st) = oauth_state {
