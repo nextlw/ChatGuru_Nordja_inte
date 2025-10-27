@@ -77,7 +77,7 @@ pub async fn status_check(State(state): State<Arc<AppState>>) -> Json<Value> {
     });
     
     let clickup_connected = if clickup_configured {
-        match state.clickup.get_list_info().await {
+        match state.clickup.get_list_info(None).await {
             Ok(list_info) => {
                 clickup_info["connection"] = json!("success");
                 clickup_info["list_name"] = list_info.get("name").unwrap_or(&json!("unknown")).clone();

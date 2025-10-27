@@ -28,7 +28,6 @@ use handlers::{
     handle_worker,
     list_clickup_tasks, get_clickup_list_info, test_clickup_connection,
 };
-use services::ClickUpService;
 use utils::{AppError, logging::*};
 
 // Importar novo módulo OAuth2
@@ -55,7 +54,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // - CustomFieldManager (sincroniza "Cliente Solicitante")
     log_info("ℹ️ Usando SmartFolderFinder/SmartAssigneeFinder (busca via API)");
 
-    let clickup_service = ClickUpService::new(settings.clone(), None);
+    // ✅ Criar TaskManager do crate clickup
+    let clickup_client = clickup::ClickUpClient::new(settings.clickup.token.clone())
+        .map_err(|e| AppError::ConfigError(format!("Failed to create ClickUp client: {}", e)))?;
+    let clickup_service = clickup::tasks::TaskManager::new(
+        clickup_client,
+        Some(settings.clickup.list_id.clone())
+    );
+    log_info("⚡ ClickUp TaskManager configured from crate");
 
     // Inicializar IA Service (OpenAI)
     let ia_service = match std::env::var("OPENAI_API_KEY").or_else(|_| std::env::var("openai_api_key")) {

@@ -15,7 +15,7 @@ use std::sync::Arc;
 pub struct AppState {
     pub settings: config::Settings,
     pub clickup_client: reqwest::Client,
-    pub clickup: services::ClickUpService,
+    pub clickup: clickup::tasks::TaskManager,  // ✅ Migrado para crate clickup
     pub ia_service: Option<Arc<services::IaService>>,  // Serviço de IA usando OpenAI (async-openai)
     pub message_queue: Arc<services::MessageQueueService>,  // Fila de mensagens por chat
 }

@@ -136,7 +136,7 @@ pub async fn get_clickup_list_info(State(state): State<Arc<AppState>>) -> Result
     log_request_received("/clickup/list", "GET");
 
     // Delegar para o serviço ClickUp, que encapsula a lógica de chamada à API
-    match state.clickup.get_list_info().await {
+    match state.clickup.get_list_info(None).await {
         Ok(list_info) => {
             // Sucesso: retornar informações da lista em formato estruturado
             Ok(Json(json!({
@@ -148,7 +148,7 @@ pub async fn get_clickup_list_info(State(state): State<Arc<AppState>>) -> Result
         Err(e) => {
             // Erro: logar e propagar erro para o cliente
             log_clickup_api_error("get_list_info", None, &e.to_string());
-            Err(e)
+            Err(AppError::ClickUpApi(e.to_string()))
         }
     }
 }

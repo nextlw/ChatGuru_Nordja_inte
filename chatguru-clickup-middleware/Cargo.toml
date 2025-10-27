@@ -26,6 +26,7 @@ path = "src/main.rs"
 # Local crates
 mensageria = { path = "crates/mensageria" }
 ia-service = { path = "crates/ia-service" }
+clickup = { path = "crates/clickup" }
 
 # Web framework
 axum = { version = "0.7", features = ["json", "macros", "tokio"] }

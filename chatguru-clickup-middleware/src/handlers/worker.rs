@@ -642,7 +642,7 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
                     }
                     Err(e) => {
                         log_error(&format!("❌ Erro ao criar tarefa: {}", e));
-                        return Err(e);
+                        return Err(AppError::ClickUpApi(e.to_string()));
                     }
                 }
             } else {
@@ -780,25 +780,6 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
             "annotation": annotation
         }))
     }
-}
-
-/// FUNÇÃO OBSOLETA - NÃO MAIS UTILIZADA
-///
-/// Esta função foi substituída por chamada direta a:
-/// `state.clickup.process_payload_with_ai()` na linha 173
-///
-/// NOVA IMPLEMENTAÇÃO: src/services/clickup.rs:215-262
-/// A lógica de criação de tarefas agora está centralizada no ClickUpService
-#[allow(dead_code)]
-async fn create_clickup_task(
-    state: &Arc<AppState>,
-    payload: &WebhookPayload,
-    classification: &chatguru_clickup_middleware::services::OpenAIClassification,
-    _nome: &str,
-    _message: &str,
-) -> AppResult<Value> {
-    // Usar o método público process_payload_with_ai do serviço ClickUp
-    state.clickup.process_payload_with_ai(payload, Some(classification)).await
 }
 
 /// Envia anotação de volta ao ChatGuru
