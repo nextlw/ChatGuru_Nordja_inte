@@ -1,0 +1,36 @@
+[package]
+name = "clickup"
+version = "0.1.0"
+edition = "2021"
+authors = ["eLai Integration Team"]
+description = "Cliente completo da API ClickUp com funcionalidades avançadas (smart search, fuzzy matching)"
+
+[dependencies]
+# HTTP client
+reqwest = { version = "0.11", features = ["json"] }
+
+# Async runtime
+tokio = { version = "1.0", features = ["sync", "time"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "1.0"
+
+# String matching & normalization
+strsim = "0.11"        # Jaro-Winkler fuzzy matching
+deunicode = "1.6"      # Unicode normalization (remove accents)
+
+# Logging
+tracing = "0.1"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# URL encoding
+urlencoding = "2.1"
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["full", "test-util"] }

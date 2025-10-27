@@ -621,6 +621,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "clickup"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "deunicode",
+ "reqwest 0.11.27",
+ "serde",
+ "serde_json",
+ "strsim",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "urlencoding",
+]
+
+[[package]]
 name = "concurrent-queue"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

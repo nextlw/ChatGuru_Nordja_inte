@@ -484,14 +484,15 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
             .or_else(|_| std::env::var("CLICKUP_TOKEN"))
             .map_err(|_| AppError::ConfigError("CLICKUP_API_TOKEN não configurado".to_string()))?;
 
-        let team_id = std::env::var("CLICKUP_TEAM_ID")
-            .unwrap_or_else(|_| "9013037641".to_string()); // Team ID da Nordja
+        let workspace_id = std::env::var("CLICKUP_WORKSPACE_ID")
+            .or_else(|_| std::env::var("CLICKUP_TEAM_ID")) // Fallback para compatibilidade
+            .unwrap_or_else(|_| "9013037641".to_string()); // Workspace ID da Nordja
 
         // Clonar para uso posterior no assignee_finder
         let folder_api_token = api_token.clone();
-        let folder_team_id = team_id.clone();
+        let folder_workspace_id = workspace_id.clone();
 
-        let mut finder = SmartFolderFinder::new(folder_api_token, folder_team_id);
+        let mut finder = SmartFolderFinder::new(folder_api_token, folder_workspace_id);
 
         // Buscar folder de forma inteligente
         let folder_result = match finder.find_folder_for_client(&client_name).await {
@@ -529,9 +530,9 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
 
             // Clonar para evitar move
             let assignee_api_token = api_token.clone();
-            let assignee_team_id = team_id.clone();
+            let assignee_workspace_id = workspace_id.clone();
 
-            let mut assignee_finder = SmartAssigneeFinder::new(assignee_api_token, assignee_team_id);
+            let mut assignee_finder = SmartAssigneeFinder::new(assignee_api_token, assignee_workspace_id);
 
             match assignee_finder.find_assignee_by_name(responsavel).await {
                 Ok(Some(result)) => {

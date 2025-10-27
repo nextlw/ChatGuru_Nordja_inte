@@ -14,7 +14,8 @@
 use std::collections::HashMap;
 use serde::Deserialize;
 use serde_json::Value;
-use crate::utils::{AppResult, AppError};
+use crate::error::Result;
+use crate::client::ClickUpClient;
 
 const FUZZY_THRESHOLD: f64 = 0.85;
 
@@ -36,7 +37,7 @@ pub enum SearchMethod {
 }
 
 /// Deserializa ID que pode vir como string ou integer da API do ClickUp
-fn deserialize_id_flexible<'de, D>(deserializer: D) -> Result<String, D::Error>
+fn deserialize_id_flexible<'de, D>(deserializer: D) -> std::result::Result<String, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -97,21 +98,25 @@ struct ClickUpTask {
 }
 
 pub struct SmartAssigneeFinder {
-    client: reqwest::Client,
-    api_token: String,
+    client: ClickUpClient,
     workspace_id: String,
     cache: HashMap<String, AssigneeSearchResult>,
 }
 
 impl SmartAssigneeFinder {
     /// Criar novo finder
-    pub fn new(api_token: String, workspace_id: String) -> Self {
+    pub fn new(client: ClickUpClient, workspace_id: String) -> Self {
         Self {
-            client: reqwest::Client::new(),
-            api_token,
+            client,
             workspace_id,
             cache: HashMap::new(),
         }
+    }
+
+    /// Criar novo finder a partir de API token (conveniência)
+    pub fn from_token(api_token: String, workspace_id: String) -> Result<Self> {
+        let client = ClickUpClient::new(api_token)?;
+        Ok(Self::new(client, workspace_id))
     }
 
     /// Busca inteligente de assignee por nome do responsável
@@ -121,7 +126,7 @@ impl SmartAssigneeFinder {
     /// 2. Team members API com fuzzy matching
     /// 3. Historical search em tarefas anteriores (assignees)
     /// 4. Fallback (retorna None)
-    pub async fn find_assignee_by_name(&mut self, responsavel_nome: &str) -> AppResult<Option<AssigneeSearchResult>> {
+    pub async fn find_assignee_by_name(&mut self, responsavel_nome: &str) -> Result<Option<AssigneeSearchResult>> {
         let normalized_name = Self::normalize_name(responsavel_nome);
 
         tracing::info!("🔍 SmartAssigneeFinder: Buscando assignee para '{}'", responsavel_nome);
@@ -165,31 +170,12 @@ impl SmartAssigneeFinder {
     }
 
     /// Fase 1: Buscar membros do time via API do ClickUp
-    async fn search_team_members(&self, normalized_name: &str) -> AppResult<Option<AssigneeSearchResult>> {
+    async fn search_team_members(&self, normalized_name: &str) -> Result<Option<AssigneeSearchResult>> {
         tracing::info!("👥 Buscando team members via API do ClickUp...");
 
-        // GET /team/{workspace_id}
-        let url = format!("https://api.clickup.com/api/v2/team/{}", self.workspace_id);
-
-        let response = self.client
-            .get(&url)
-            .header("Authorization", &self.api_token)
-            .header("Content-Type", "application/json")
-            .send()
-            .await
-            .map_err(|e| AppError::InternalError(format!("Falha ao buscar team members: {}", e)))?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(AppError::ClickUpApi(format!(
-                "GET team members failed: {} - {}",
-                status, body
-            )));
-        }
-
-        let team_response: ClickUpTeamResponse = response.json().await
-            .map_err(|e| AppError::InternalError(format!("Falha ao parsear team response: {}", e)))?;
+        // GET /team/{workspace_id} (API v2)
+        let endpoint = format!("/team/{}", self.workspace_id);
+        let team_response: ClickUpTeamResponse = self.client.get_json(&endpoint).await?;
 
         tracing::info!("👥 Total de membros encontrados: {}", team_response.team.members.len());
 
@@ -202,7 +188,7 @@ impl SmartAssigneeFinder {
         &self,
         normalized_name: &str,
         members: &[ClickUpMember],
-    ) -> AppResult<Option<AssigneeSearchResult>> {
+    ) -> Result<Option<AssigneeSearchResult>> {
         let mut best_match: Option<(ClickUpUser, f64, SearchMethod)> = None;
 
         for member in members {
@@ -247,39 +233,12 @@ impl SmartAssigneeFinder {
     }
 
     /// Fase 2: Buscar em tarefas anteriores pelos assignees
-    async fn search_historical_assignees(&self, normalized_name: &str) -> AppResult<Option<AssigneeSearchResult>> {
+    async fn search_historical_assignees(&self, normalized_name: &str) -> Result<Option<AssigneeSearchResult>> {
         tracing::info!("🕐 Buscando assignees em tarefas históricas...");
 
-        // GET /team/{workspace_id}/task
-        let url = format!(
-            "https://api.clickup.com/api/v2/team/{}/task",
-            self.workspace_id
-        );
-
-        let response = self.client
-            .get(&url)
-            .header("Authorization", &self.api_token)
-            .header("Content-Type", "application/json")
-            .query(&[
-                ("archived", "false"),
-                ("subtasks", "false"),
-                ("include_closed", "true"), // Incluir tarefas fechadas
-            ])
-            .send()
-            .await
-            .map_err(|e| AppError::InternalError(format!("Falha ao buscar tasks: {}", e)))?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(AppError::ClickUpApi(format!(
-                "GET tasks failed: {} - {}",
-                status, body
-            )));
-        }
-
-        let tasks_response: ClickUpTasksResponse = response.json().await
-            .map_err(|e| AppError::InternalError(format!("Falha ao parsear tasks: {}", e)))?;
+        // GET /team/{workspace_id}/task with query params (API v2)
+        let endpoint = format!("/team/{}/task?archived=false&subtasks=false&include_closed=true", self.workspace_id);
+        let tasks_response: ClickUpTasksResponse = self.client.get_json(&endpoint).await?;
 
         tracing::info!("📋 Total de tarefas encontradas: {}", tasks_response.tasks.len());
 

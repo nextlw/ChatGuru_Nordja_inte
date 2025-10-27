@@ -3,6 +3,7 @@ members = [
     ".",
     "crates/mensageria",
     "crates/ia-service",
+    "crates/clickup",
 ]
 resolver = "2"
 
