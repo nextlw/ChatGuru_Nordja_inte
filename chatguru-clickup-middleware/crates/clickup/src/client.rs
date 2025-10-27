@@ -65,17 +65,25 @@ impl ClickUpClient {
         })
     }
 
-    /// Executa uma requisição GET (API v2)
+    /// Executa uma requisição GET (API v2 - padrão)
+    ///
+    /// Wrapper de conveniência que defaulta para API v2.
+    /// Quando v3 se tornar padrão, este método será alterado para chamar `get_v3()`.
+    #[allow(dead_code)] // Parte da API para migração futura v2→v3
     pub(crate) async fn get(&self, endpoint: &str) -> Result<Response> {
         self.get_v2(endpoint).await
     }
 
-    /// Executa uma requisição GET e parseia JSON (API v2)
+    /// Executa uma requisição GET e parseia JSON (API v2 - padrão)
+    ///
+    /// Wrapper de conveniência que defaulta para API v2.
     pub(crate) async fn get_json<T: DeserializeOwned>(&self, endpoint: &str) -> Result<T> {
         self.get_json_v2(endpoint).await
     }
 
     /// Executa uma requisição GET na API v2
+    ///
+    /// Implementação direta que usa `/api/v2/...` endpoints.
     pub(crate) async fn get_v2(&self, endpoint: &str) -> Result<Response> {
         let url = format!("{}{}", self.base_url_v2, endpoint);
 
@@ -100,6 +108,10 @@ impl ClickUpClient {
     }
 
     /// Executa uma requisição GET na API v3
+    ///
+    /// Usado para endpoints workspace-centric: `/workspaces`, `/groups`, `/docs`.
+    /// Ver API_VERSIONS.md para lista completa de endpoints v3.
+    #[allow(dead_code)] // Será usado quando endpoints v3 estiverem disponíveis
     pub(crate) async fn get_v3(&self, endpoint: &str) -> Result<Response> {
         let url = format!("{}{}", self.base_url_v3, endpoint);
 
@@ -117,13 +129,19 @@ impl ClickUpClient {
     }
 
     /// Executa uma requisição GET na API v3 e parseia JSON
+    ///
+    /// Usado para endpoints workspace-centric: `/workspaces`, `/groups`, `/docs`.
+    #[allow(dead_code)] // Será usado quando endpoints v3 estiverem disponíveis
     pub(crate) async fn get_json_v3<T: DeserializeOwned>(&self, endpoint: &str) -> Result<T> {
         let response = self.get_v3(endpoint).await?;
         let json = response.json().await?;
         Ok(json)
     }
 
-    /// Executa uma requisição POST (API v2)
+    /// Executa uma requisição POST (API v2 - padrão)
+    ///
+    /// Wrapper de conveniência que defaulta para API v2.
+    #[allow(dead_code)] // Parte da API para migração futura v2→v3
     pub(crate) async fn post(&self, endpoint: &str, body: &Value) -> Result<Response> {
         self.post_v2(endpoint, body).await
     }
@@ -159,6 +177,9 @@ impl ClickUpClient {
     }
 
     /// Executa uma requisição POST na API v3
+    ///
+    /// Usado para criar recursos em endpoints workspace-centric.
+    #[allow(dead_code)] // Será usado quando endpoints v3 estiverem disponíveis
     pub(crate) async fn post_v3(&self, endpoint: &str, body: &Value) -> Result<Response> {
         let url = format!("{}{}", self.base_url_v3, endpoint);
 
@@ -177,13 +198,19 @@ impl ClickUpClient {
     }
 
     /// Executa uma requisição POST na API v3 e parseia JSON
+    ///
+    /// Usado para criar recursos em endpoints workspace-centric.
+    #[allow(dead_code)] // Será usado quando endpoints v3 estiverem disponíveis
     pub(crate) async fn post_json_v3<T: DeserializeOwned>(&self, endpoint: &str, body: &Value) -> Result<T> {
         let response = self.post_v3(endpoint, body).await?;
         let json = response.json().await?;
         Ok(json)
     }
 
-    /// Executa uma requisição PUT (API v2)
+    /// Executa uma requisição PUT (API v2 - padrão)
+    ///
+    /// Wrapper de conveniência que defaulta para API v2.
+    #[allow(dead_code)] // Parte da API para migração futura v2→v3
     pub(crate) async fn put(&self, endpoint: &str, body: &Value) -> Result<Response> {
         self.put_v2(endpoint, body).await
     }
@@ -218,12 +245,19 @@ impl ClickUpClient {
         Ok(json)
     }
 
-    /// Executa uma requisição DELETE (API v2)
+    /// Executa uma requisição DELETE (API v2 - padrão)
+    ///
+    /// Wrapper de conveniência que defaulta para API v2.
+    /// Usado para deletar tasks, folders, custom fields, etc.
+    #[allow(dead_code)] // Necessário para operações de deleção (ainda não implementadas)
     pub(crate) async fn delete(&self, endpoint: &str) -> Result<Response> {
         self.delete_v2(endpoint).await
     }
 
     /// Executa uma requisição DELETE na API v2
+    ///
+    /// Usado para deletar recursos: tasks, folders, lists, custom fields.
+    #[allow(dead_code)] // Necessário para operações de deleção (ainda não implementadas)
     pub(crate) async fn delete_v2(&self, endpoint: &str) -> Result<Response> {
         let url = format!("{}{}", self.base_url_v2, endpoint);
 

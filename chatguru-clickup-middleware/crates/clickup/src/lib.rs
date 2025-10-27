@@ -66,6 +66,7 @@ pub mod matching;
 pub mod folders;
 pub mod assignees;
 pub mod fields;
+pub mod tasks;
 
 // Re-exports principais
 pub use client::ClickUpClient;
@@ -73,5 +74,4 @@ pub use error::{ClickUpError, Result};
 
 // Módulos a serem implementados
 // pub mod types;
-// pub mod tasks;
 // pub mod lists;
