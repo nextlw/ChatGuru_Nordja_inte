@@ -240,7 +240,7 @@ impl IaService {
             .file(audio_input)
             .model("whisper-1")
             .language("pt")
-            .response_format(AudioResponseFormat::Text)
+            .response_format(AudioResponseFormat::Json)
             .build()
             .map_err(|e| IaServiceError::OpenAIError(format!("Failed to build transcription request: {}", e)))?;
 
