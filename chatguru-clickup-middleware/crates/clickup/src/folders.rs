@@ -17,7 +17,7 @@ use crate::error::{Result, ClickUpError};
 use crate::client::ClickUpClient;
 
 const CLIENT_SOLICITANTE_FIELD_ID: &str = "0ed63eec-1c50-4190-91c1-59b4b17557f6";
-const FUZZY_THRESHOLD: f64 = 0.85;
+const FUZZY_THRESHOLD: f64 = 0.70; // Reduzido de 0.85 para 0.70
 
 /// Deserializa ID que pode vir como string ou integer da API do ClickUp
 fn deserialize_id_flexible<'de, D>(deserializer: D) -> std::result::Result<String, D::Error>

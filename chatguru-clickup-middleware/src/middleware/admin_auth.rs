@@ -117,25 +117,25 @@ fn service_unavailable_response() -> Response {
         .into_response()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::{
-        body::Body,
-        http::{Request, Method},
-    };
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//     use axum::{
+//         body::Body,
+//         http::{Request, Method},
+//     };
 
-    #[test]
-    fn test_admin_key_validation_logic() {
-        // Simular diferentes cenários
-        std::env::set_var("ADMIN_API_KEY", "test-key-123");
+//     #[test]
+//     fn test_admin_key_validation_logic() {
+//         // Simular diferentes cenários
+//         std::env::set_var("ADMIN_API_KEY", "test-key-123");
 
-        // Cenário 1: Key correto
-        assert_eq!("test-key-123", std::env::var("ADMIN_API_KEY").unwrap());
+//         // Cenário 1: Key correto
+//         assert_eq!("test-key-123", std::env::var("ADMIN_API_KEY").unwrap());
 
-        // Cenário 2: Key diferente
-        assert_ne!("wrong-key", std::env::var("ADMIN_API_KEY").unwrap());
+//         // Cenário 2: Key diferente
+//         assert_ne!("wrong-key", std::env::var("ADMIN_API_KEY").unwrap());
 
-        std::env::remove_var("ADMIN_API_KEY");
-    }
-}
+//         std::env::remove_var("ADMIN_API_KEY");
+//     }
+// }

@@ -1,4 +1,4 @@
-/// Worker Handler: Processa mensagens do Pub/Sub
+ /// Worker Handler: Processa mensagens do Pub/Sub
 ///
 /// Arquitetura:
 /// 1. Recebe payload RAW do Pub/Sub via HTTP POST
@@ -44,11 +44,90 @@ pub async fn handle_worker(
     State(state): State<Arc<AppState>>,
     request: Request<Body>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    // CORREÇÃO CRÍTICA: Validação preventiva antes de processar
+    // Verificar headers básicos para detectar problemas early
+    let content_type = request.headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+        
+    let content_length = request.headers()
+        .get("content-length")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(0);
+    
+    // Log de diagnóstico para headers críticos
+    log_info(&format!(
+        "🔍 WORKER REQUEST HEADERS - Content-Type: '{}' | Content-Length: {} | Headers: {}",
+        content_type,
+        content_length,
+        request.headers().len()
+    ));
+    
+    // Validação preventiva de content-type (Pub/Sub deve ser application/json)
+    if !content_type.is_empty() && !content_type.contains("application/json") {
+        log_error(&format!("❌ INVALID CONTENT-TYPE - Expected JSON, got: '{}'", content_type));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "Invalid Content-Type, expected application/json",
+                "received_content_type": content_type,
+                "status": "invalid_request"
+            }))
+        ));
+    }
+    
+    // Validação preventiva de tamanho (máx 50MB para Pub/Sub)
+    if content_length > 50_000_000 {
+        log_error(&format!("❌ PAYLOAD TOO LARGE - Size: {} bytes (max: 50MB)", content_length));
+        return Err((
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(json!({
+                "error": "Payload too large",
+                "size_bytes": content_length,
+                "max_size_bytes": 50_000_000,
+                "status": "payload_too_large"
+            }))
+        ));
+    }
+    
+    // Timeout global reduzido para detectar problemas mais rapidamente
+    let global_timeout = std::time::Duration::from_secs(45);
+    
+    match tokio::time::timeout(global_timeout, handle_worker_internal(state, request)).await {
+        Ok(result) => result,
+        Err(_) => {
+            log_error("❌ TIMEOUT GLOBAL - Worker excedeu 45 segundos, forçando término");
+            Err((
+                StatusCode::GATEWAY_TIMEOUT,
+                Json(json!({
+                    "error": "Worker timeout - processing exceeded 45 seconds",
+                    "status": "timeout",
+                    "timeout_seconds": 45
+                }))
+            ))
+        }
+    }
+}
+
+/// Implementação interna do worker com timeouts detalhados
+async fn handle_worker_internal(
+    state: Arc<AppState>,
+    request: Request<Body>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let start_time = Instant::now();
+    
+    // Log de início com informações de request
+    log_info(&format!(
+        "🚀 WORKER INICIADO - Start time: {:?} | Headers count: {}",
+        start_time,
+        request.headers().len()
+    ));
+    
     log_request_received("/worker/process", "POST");
 
-    // Extrair número de tentativas do header do Pub/Sub
-    // Pub/Sub Push usa "googclient_deliveryattempt" ou "x-goog-delivery-attempt"
+    // Primeiro, extrair headers antes de consumir o request
     let retry_count = request
         .headers()
         .get("googclient_deliveryattempt")
@@ -57,7 +136,15 @@ pub async fn handle_worker(
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or(1); // Pub/Sub starts at 1, not 0
 
-    log_info(&format!("🔄 Tentativa {} de {} (header: googclient_deliveryattempt)", retry_count, MAX_RETRY_ATTEMPTS));
+    let message_id = request
+        .headers()
+        .get("x-cloudtasks-taskname")
+        .or_else(|| request.headers().get("x-pubsub-messageid"))
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("-")
+        .to_string();
+
+    log_info(&format!("🔄 Tentativa {} de {} (header: googclient_deliveryattempt), messageId: {}", retry_count, MAX_RETRY_ATTEMPTS, message_id));
 
     // Se excedeu o limite, retornar 200 para evitar loop infinito
     if retry_count > MAX_RETRY_ATTEMPTS {
@@ -70,17 +157,54 @@ pub async fn handle_worker(
         })));
     }
 
-    // Extrair body
-    let body_bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            log_error(&format!("Failed to read request body: {}", e));
+    // CORREÇÃO CRÍTICA: Timeout muito baixo para detectar problemas rapidamente
+    let body_limit = 50_000_000; // 50MB máximo (Pub/Sub pode ser grande)
+    let body_timeout = std::time::Duration::from_secs(5); // Reduzido de 10s para 5s
+    
+    log_info(&format!("📦 Reading body with timeout: {}s, limit: {}MB",
+        body_timeout.as_secs(), body_limit / 1_000_000));
+    
+    let body_bytes = match tokio::time::timeout(
+        body_timeout,
+        axum::body::to_bytes(request.into_body(), body_limit)
+    ).await {
+        Ok(Ok(bytes)) => {
+            log_info(&format!("✅ Body read successfully: {} bytes", bytes.len()));
+            bytes
+        },
+        Ok(Err(e)) => {
+            log_error(&format!("❌ BODY READ ERROR - {}", e));
             return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Invalid request body"}))
+                StatusCode::PAYLOAD_TOO_LARGE,
+                Json(json!({
+                    "error": "Request body too large or invalid",
+                    "limit_mb": body_limit / 1_000_000,
+                    "details": e.to_string(),
+                    "status": "body_read_error"
+                }))
+            ));
+        },
+        Err(_) => {
+            log_error(&format!("❌ BODY TIMEOUT - Failed to read body within {}s", body_timeout.as_secs()));
+            return Err((
+                StatusCode::REQUEST_TIMEOUT,
+                Json(json!({
+                    "error": "Timeout reading request body",
+                    "timeout_seconds": body_timeout.as_secs(),
+                    "status": "body_timeout"
+                }))
             ));
         }
     };
+
+    // Validar se o body não está vazio
+    if body_bytes.is_empty() {
+        log_error("Request body is empty");
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Empty request body"}))
+        ));
+    }
 
     let body_str = match String::from_utf8(body_bytes.to_vec()) {
         Ok(s) => s,
@@ -93,14 +217,34 @@ pub async fn handle_worker(
         }
     };
 
-    // Parsear envelope do Pub/Sub
-    let envelope: Value = match serde_json::from_str(&body_str) {
-        Ok(v) => v,
+    // CORREÇÃO: Parsing JSON mais robusto
+    let envelope: Value = match serde_json::from_str::<Value>(&body_str) {
+        Ok(v) => {
+            log_info(&format!("✅ JSON parsed successfully: {} fields",
+                v.as_object().map_or(0, |o| o.len())));
+            v
+        },
         Err(e) => {
-            log_error(&format!("Invalid JSON: {}", e));
+            log_error(&format!("❌ JSON PARSE ERROR - {} | Body preview: {}",
+                e,
+                if body_str.len() > 200 {
+                    format!("{}...", &body_str[..200])
+                } else {
+                    body_str.clone()
+                }
+            ));
             return Err((
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Invalid JSON"}))
+                Json(json!({
+                    "error": "Invalid JSON format",
+                    "details": e.to_string(),
+                    "status": "json_parse_error",
+                    "body_preview": if body_str.len() > 200 {
+                        format!("{}...", &body_str[..200])
+                    } else {
+                        body_str
+                    }
+                }))
             ));
         }
     };
@@ -231,9 +375,27 @@ pub async fn handle_worker(
         }
     };
 
-    // Log do payload para debug
-    log_info(&format!("📦 Payload recebido: {}",
-        serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "Failed to serialize".to_string())
+    // Extrair informações básicas para logging detalhado
+    let sender_name = extract_nome_from_payload(&payload);
+    let message_text = extract_message_from_payload(&payload);
+    let phone = extract_phone_from_payload(&payload);
+    let chat_id = extract_chat_id_from_payload(&payload);
+    
+    // Log detalhado do worker iniciando processamento
+    log_info(&format!(
+        "🔧 WORKER INICIANDO PROCESSAMENTO - MessageID: {} | Tentativa: {}/{} | Sender: {} | Phone: {} | ChatID: {} | Size: {} chars",
+        message_id,
+        retry_count,
+        MAX_RETRY_ATTEMPTS,
+        sender_name,
+        phone.as_deref().unwrap_or("N/A"),
+        chat_id.as_deref().unwrap_or("N/A"),
+        message_text.len()
+    ));
+
+    // Log do payload para debug (versão resumida)
+    log_info(&format!("📦 Payload processado com sucesso ({} bytes)",
+        serde_json::to_string(&payload).unwrap_or_default().len()
     ));
 
     // Processar mídia (áudio/imagem) se houver
@@ -272,8 +434,12 @@ pub async fn handle_worker(
                     match processing_type {
                         "audio" => {
                             log_info("🎵 Processando áudio com transcrição + anotação");
-                            match ia_service.download_file(media_url, "Áudio").await {
-                                Ok(audio_bytes) => {
+                            // Timeout e limite de tamanho para áudio (máx 5MB, 10s)
+                            match tokio::time::timeout(
+                                std::time::Duration::from_secs(10),
+                                ia_service.download_file(media_url, "Áudio")
+                            ).await {
+                                Ok(Ok(audio_bytes)) if audio_bytes.len() <= 5_000_000 => {
                                     let extension = media_url
                                         .split('.')
                                         .last()
@@ -281,61 +447,115 @@ pub async fn handle_worker(
                                         .unwrap_or("ogg");
                                     let filename = format!("audio.{}", extension);
 
-                                    match ia_service.process_audio_with_annotation(&audio_bytes, &filename).await {
-                                        Ok(result) => {
+                                    // Timeout para processamento de áudio (máx 15s)
+                                    match tokio::time::timeout(
+                                        std::time::Duration::from_secs(15),
+                                        ia_service.process_audio_with_annotation(&audio_bytes, &filename)
+                                    ).await {
+                                        Ok(Ok(result)) => {
                                             log_info(&format!("✅ Áudio processado: {} caracteres", result.extracted_content.len()));
                                             (Some(result.extracted_content), result.annotation)
                                         }
-                                        Err(e) => {
+                                        Ok(Err(e)) => {
                                             log_error(&format!("❌ Erro ao processar áudio: {}", e));
+                                            (None, None)
+                                        }
+                                        Err(_) => {
+                                            log_error("❌ Timeout ao processar áudio (15s)");
                                             (None, None)
                                         }
                                     }
                                 }
-                                Err(e) => {
+                                Ok(Ok(_)) => {
+                                    log_error("❌ Arquivo de áudio muito grande (>5MB), ignorando");
+                                    (None, None)
+                                }
+                                Ok(Err(e)) => {
                                     log_error(&format!("❌ Erro ao baixar áudio: {}", e));
+                                    (None, None)
+                                }
+                                Err(_) => {
+                                    log_error("❌ Timeout ao baixar áudio (10s)");
                                     (None, None)
                                 }
                             }
                         }
                         "image" => {
                             log_info("🖼️ Processando imagem com descrição + anotação");
-                            match ia_service.download_file(media_url, "Imagem").await {
-                                Ok(image_bytes) => {
-                                    match ia_service.process_image_with_annotation(&image_bytes).await {
-                                        Ok(result) => {
+                            // Timeout e limite para imagem (máx 3MB, 8s download, 10s processing)
+                            match tokio::time::timeout(
+                                std::time::Duration::from_secs(8),
+                                ia_service.download_file(media_url, "Imagem")
+                            ).await {
+                                Ok(Ok(image_bytes)) if image_bytes.len() <= 3_000_000 => {
+                                    match tokio::time::timeout(
+                                        std::time::Duration::from_secs(10),
+                                        ia_service.process_image_with_annotation(&image_bytes)
+                                    ).await {
+                                        Ok(Ok(result)) => {
                                             log_info(&format!("✅ Imagem processada: {} caracteres", result.extracted_content.len()));
                                             (Some(result.extracted_content), result.annotation)
                                         }
-                                        Err(e) => {
+                                        Ok(Err(e)) => {
                                             log_error(&format!("❌ Erro ao processar imagem: {}", e));
+                                            (None, None)
+                                        }
+                                        Err(_) => {
+                                            log_error("❌ Timeout ao processar imagem (10s)");
                                             (None, None)
                                         }
                                     }
                                 }
-                                Err(e) => {
+                                Ok(Ok(_)) => {
+                                    log_error("❌ Arquivo de imagem muito grande (>3MB), ignorando");
+                                    (None, None)
+                                }
+                                Ok(Err(e)) => {
                                     log_error(&format!("❌ Erro ao baixar imagem: {}", e));
+                                    (None, None)
+                                }
+                                Err(_) => {
+                                    log_error("❌ Timeout ao baixar imagem (8s)");
                                     (None, None)
                                 }
                             }
                         }
                         "pdf" => {
                             log_info("📄 Processando PDF com extração + anotação");
-                            match ia_service.download_file(media_url, "PDF").await {
-                                Ok(pdf_bytes) => {
-                                    match ia_service.process_pdf_with_annotation(&pdf_bytes).await {
-                                        Ok(result) => {
+                            // Timeout e limite para PDF (máx 10MB, 15s download, 20s processing)
+                            match tokio::time::timeout(
+                                std::time::Duration::from_secs(15),
+                                ia_service.download_file(media_url, "PDF")
+                            ).await {
+                                Ok(Ok(pdf_bytes)) if pdf_bytes.len() <= 10_000_000 => {
+                                    match tokio::time::timeout(
+                                        std::time::Duration::from_secs(20),
+                                        ia_service.process_pdf_with_annotation(&pdf_bytes)
+                                    ).await {
+                                        Ok(Ok(result)) => {
                                             log_info(&format!("✅ PDF processado: {} caracteres", result.extracted_content.len()));
                                             (Some(result.extracted_content), result.annotation)
                                         }
-                                        Err(e) => {
+                                        Ok(Err(e)) => {
                                             log_error(&format!("❌ Erro ao processar PDF: {}", e));
+                                            (None, None)
+                                        }
+                                        Err(_) => {
+                                            log_error("❌ Timeout ao processar PDF (20s)");
                                             (None, None)
                                         }
                                     }
                                 }
-                                Err(e) => {
+                                Ok(Ok(_)) => {
+                                    log_error("❌ Arquivo PDF muito grande (>10MB), ignorando");
+                                    (None, None)
+                                }
+                                Ok(Err(e)) => {
                                     log_error(&format!("❌ Erro ao baixar PDF: {}", e));
+                                    (None, None)
+                                }
+                                Err(_) => {
+                                    log_error("❌ Timeout ao baixar PDF (15s)");
                                     (None, None)
                                 }
                             }
@@ -375,11 +595,31 @@ pub async fn handle_worker(
                 // ENVIAR ANOTAÇÃO IMEDIATAMENTE AO CHATGURU (independente de ser atividade ou não)
                 // Enviar DEPOIS de modificar o payload para evitar borrow checker issues
                 if let Some(annotation) = annotation_opt {
-                    log_info("📤 Enviando anotação de mídia ao ChatGuru...");
-                    if let Err(e) = send_annotation_to_chatguru(&state, &payload, &annotation).await {
-                        log_warning(&format!("⚠️ Não foi possível enviar anotação de mídia: {}", e));
+                    let annotation_preview = if annotation.len() > 100 {
+                        format!("{}...", &annotation[..100])
                     } else {
-                        log_info("✅ Anotação de mídia enviada com sucesso ao ChatGuru");
+                        annotation.clone()
+                    };
+                    
+                    log_info(&format!(
+                        "📤 ENVIANDO ANOTAÇÃO DE MÍDIA - ChatID: {} | Type: {} | Preview: \"{}\"",
+                        chat_id.as_deref().unwrap_or("N/A"),
+                        processing_type,
+                        annotation_preview
+                    ));
+                    
+                    if let Err(e) = send_annotation_to_chatguru(&state, &payload, &annotation).await {
+                        log_warning(&format!(
+                            "⚠️ FALHA NA ANOTAÇÃO DE MÍDIA - ChatID: {} | Error: {}",
+                            chat_id.as_deref().unwrap_or("N/A"),
+                            e
+                        ));
+                    } else {
+                        log_info(&format!(
+                            "✅ ANOTAÇÃO DE MÍDIA ENVIADA - ChatID: {} | Size: {} chars",
+                            chat_id.as_deref().unwrap_or("N/A"),
+                            annotation.len()
+                        ));
                     }
                 }
             }
@@ -388,65 +628,94 @@ pub async fn handle_worker(
 
     // Extrair force_classification se presente
     let force_classification = envelope.get("force_classification");
+// Processar mensagem com tratamento robusto de resposta
+match process_message(&state, &payload, force_classification).await {
+    Ok(result) => {
+        let processing_time = start_time.elapsed().as_millis() as u64;
+        
+        log_info(&format!(
+            "✅ WORKER PROCESSAMENTO CONCLUÍDO - Time: {}ms | Status: success",
+            processing_time
+        ));
+        
+        log_request_processed("/worker/process", 200, processing_time);
+        
+        // Garantir que a resposta é válida e não está vazia
+        let response = if result.is_null() {
+            json!({
+                "status": "processed",
+                "processing_time_ms": processing_time,
+                "result": "empty_payload"
+            })
+        } else {
+            result
+        };
+        
+        Ok(Json(response))
+    }
+    Err(e) => {
+        let processing_time = start_time.elapsed().as_millis() as u64;
+        
+        log_error(&format!(
+            "❌ WORKER ERROR - Time: {}ms | Attempt: {}/{} | Error: {}",
+            processing_time, retry_count, MAX_RETRY_ATTEMPTS, e
+        ));
 
-    // Processar mensagem
-    match process_message(&state, &payload, force_classification).await {
-        Ok(result) => {
-            let processing_time = start_time.elapsed().as_millis() as u64;
-            log_request_processed("/worker/process", 200, processing_time);
-            Ok(Json(result))
-        }
-        Err(e) => {
-            log_error(&format!("Worker processing error (attempt {}/{}): {}",
-                retry_count, MAX_RETRY_ATTEMPTS, e));
+        // Classificar erro: recuperável vs não-recuperável
+        let is_recoverable = match &e {
+            // Erros de API externa (ClickUp, HTTP, Timeout) - recuperável
+            AppError::ClickUpApi(_) => retry_count < MAX_RETRY_ATTEMPTS,
+            AppError::HttpError(_) => retry_count < MAX_RETRY_ATTEMPTS,
+            AppError::Timeout(_) => retry_count < MAX_RETRY_ATTEMPTS,
+            AppError::PubSubError(_) => retry_count < MAX_RETRY_ATTEMPTS,
 
-            // Classificar erro: recuperável vs não-recuperável
-            let is_recoverable = match &e {
-                // Erros de API externa (ClickUp, HTTP, Timeout) - recuperável
-                AppError::ClickUpApi(_) => retry_count < MAX_RETRY_ATTEMPTS,
-                AppError::HttpError(_) => retry_count < MAX_RETRY_ATTEMPTS,
-                AppError::Timeout(_) => retry_count < MAX_RETRY_ATTEMPTS,
-                AppError::PubSubError(_) => retry_count < MAX_RETRY_ATTEMPTS,
+            // Erros de configuração/validação - NÃO recuperável
+            AppError::ConfigError(_) => false,
+            AppError::ValidationError(_) => false,
+            AppError::JsonError(_) => false,
 
-                // Erros de configuração/validação - NÃO recuperável
-                AppError::ConfigError(_) => false,
-                AppError::ValidationError(_) => false,
-                AppError::JsonError(_) => false,
+            // Estrutura não encontrada - NÃO recuperável (já tratado internamente)
+            AppError::StructureNotFound(_) => false,
 
-                // Estrutura não encontrada - NÃO recuperável (já tratado internamente)
-                AppError::StructureNotFound(_) => false,
+            // Database error - NÃO recuperável (indica problema de configuração)
+            AppError::DatabaseError(_) => false,
 
-                // Database error - NÃO recuperável (indica problema de configuração)
-                AppError::DatabaseError(_) => false,
+            // Outros erros internos - permitir retry limitado
+            AppError::InternalError(_) => retry_count < MAX_RETRY_ATTEMPTS,
+        };
 
-                // Outros erros internos - permitir retry limitado
-                AppError::InternalError(_) => retry_count < MAX_RETRY_ATTEMPTS,
-            };
-
-            if is_recoverable {
-                // Erro recuperável - Pub/Sub vai fazer retry
-                log_warning(&format!("⚠️ Erro recuperável, Pub/Sub fará retry (tentativa {}/{})",
-                    retry_count, MAX_RETRY_ATTEMPTS));
-                Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({
-                        "error": e.to_string(),
-                        "retry_count": retry_count,
-                        "will_retry": true
-                    }))
-                ))
-            } else {
-                // Erro não recuperável - retornar 200 para evitar retry
-                log_error(&format!("❌ Erro não recuperável ou limite de tentativas atingido, descartando mensagem: {}", e));
-                Ok(Json(json!({
-                    "status": "failed",
+        if is_recoverable {
+            // Erro recuperável - Pub/Sub vai fazer retry
+            log_warning(&format!("⚠️ Erro recuperável, Pub/Sub fará retry (tentativa {}/{})",
+                retry_count, MAX_RETRY_ATTEMPTS));
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
                     "error": e.to_string(),
                     "retry_count": retry_count,
-                    "reason": "Non-recoverable error or max retries exceeded"
-                })))
-            }
+                    "max_retries": MAX_RETRY_ATTEMPTS,
+                    "will_retry": true,
+                    "processing_time_ms": processing_time
+                }))
+            ))
+        } else {
+            // Erro não recuperável - retornar 200 para evitar retry
+            log_error(&format!("❌ Erro não recuperável ou limite de tentativas atingido, descartando mensagem: {}", e));
+            
+            // Retornar 200 OK com status de erro para evitar retry infinito
+            Ok(Json(json!({
+                "status": "failed",
+                "error": e.to_string(),
+                "retry_count": retry_count,
+                "max_retries": MAX_RETRY_ATTEMPTS,
+                "reason": "Non-recoverable error or max retries exceeded",
+                "processing_time_ms": processing_time,
+                "discarded": true
+            })))
         }
     }
+}
+
 }
 
 /// Processa uma mensagem do ChatGuru
@@ -466,12 +735,34 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
     let nome = extract_nome_from_payload(payload);
     let message = extract_message_from_payload(payload);
     let phone = extract_phone_from_payload(payload);
-    let _chat_id = extract_chat_id_from_payload(payload);
+    let chat_id = extract_chat_id_from_payload(payload);
+
+    // CORREÇÃO: Usar char_indices para evitar panic com UTF-8 multi-byte
+    let message_preview = if message.chars().count() > 150 {
+        let mut char_count = 0;
+        let mut byte_end = 0;
+        for (byte_idx, _) in message.char_indices() {
+            if char_count >= 150 {
+                byte_end = byte_idx;
+                break;
+            }
+            char_count += 1;
+        }
+        if byte_end > 0 {
+            format!("{}...", &message[..byte_end])
+        } else {
+            format!("{}...", message.chars().take(150).collect::<String>())
+        }
+    } else {
+        message.clone()
+    };
 
     log_info(&format!(
-        "💬 Processando mensagem de {}: {}",
+        "💬 PROCESSANDO MENSAGEM - Sender: {} | ChatID: {} | Phone: {} | Message: \"{}\"",
         if !nome.is_empty() { nome.clone() } else { "Desconhecido".to_string() },
-        message
+        chat_id.as_deref().unwrap_or("N/A"),
+        phone.as_deref().unwrap_or("N/A"),
+        message_preview
     ));
 
     // Verificar se há classificação forçada (bypass OpenAI)
@@ -518,6 +809,12 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
         }
     } else {
         // Classificar com IaService (OpenAI)
+        log_info(&format!(
+            "🤖 INICIANDO CLASSIFICAÇÃO IA - ChatID: {} | Sender: {}",
+            chat_id.as_deref().unwrap_or("N/A"),
+            nome
+        ));
+        
         let ia_service = state.ia_service.as_ref()
             .ok_or_else(|| AppError::InternalError("IaService não disponível no AppState".to_string()))?;
 
@@ -535,12 +832,42 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
         // Gerar prompt usando a configuração
         let formatted_prompt = prompt_config.generate_prompt(&context);
 
-        // Classificar com IA
-        match ia_service.classify_activity(&formatted_prompt).await {
-            Ok(c) => c,
-            Err(e) => {
-                log_error(&format!("❌ Erro na classificação IA: {}", e));
+        log_info(&format!(
+            "📝 PROMPT GERADO - ChatID: {} | Context size: {} chars | Prompt size: {} chars",
+            chat_id.as_deref().unwrap_or("N/A"),
+            context.len(),
+            formatted_prompt.len()
+        ));
+
+        // Classificar com IA com timeout (máx 8 segundos)
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(8),
+            ia_service.classify_activity(&formatted_prompt)
+        ).await {
+            Ok(Ok(c)) => {
+                log_info(&format!(
+                    "✅ CLASSIFICAÇÃO IA CONCLUÍDA - ChatID: {} | Is_activity: {} | Category: {} | Confidence: {}",
+                    chat_id.as_deref().unwrap_or("N/A"),
+                    c.is_activity,
+                    c.category.as_deref().unwrap_or("N/A"),
+                    "N/A" // Confidence não está disponível na struct atual
+                ));
+                c
+            },
+            Ok(Err(e)) => {
+                log_error(&format!(
+                    "❌ FALHA NA CLASSIFICAÇÃO IA - ChatID: {} | Error: {}",
+                    chat_id.as_deref().unwrap_or("N/A"),
+                    e
+                ));
                 return Err(AppError::InternalError(format!("IA classification failed: {}", e)));
+            },
+            Err(_) => {
+                log_error(&format!(
+                    "❌ TIMEOUT NA CLASSIFICAÇÃO IA - ChatID: {} | Exceeded 8s",
+                    chat_id.as_deref().unwrap_or("N/A")
+                ));
+                return Err(AppError::Timeout("IA classification timeout".to_string()));
             }
         }
     };
@@ -641,30 +968,6 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
                         responsavel
                     ));
 
-                    // Enviar anotação de warning ao ChatGuru
-                    let warning_annotation = if responsavel.trim().is_empty() {
-                        "⚠️ **RESPONSÁVEL NÃO SELECIONADO**\n\n\
-                        👤 O campo 'Info_2' (responsável/atendente) está vazio\n\n\
-                        ℹ️ A tarefa será criada, mas **sem atribuição de responsável**.\n\n\
-                        ⚠️ **ATENÇÃO**: Isso pode causar erro ao salvar a tarefa no ClickUp dependendo das configurações da lista.\n\n\
-                        ✅ **Ação necessária**: Selecione o atendente responsável no campo Info_2 antes de enviar a mensagem.".to_string()
-                    } else {
-                        format!(
-                            "⚠️ **ATENDENTE NÃO CADASTRADO**\n\n\
-                            👤 Responsável informado: '{}'\n\
-                            ❌ Este atendente não foi encontrado no ClickUp\n\n\
-                            ℹ️ A tarefa será criada, mas **sem atribuição de responsável**.\n\n\
-                            ⚠️ **ATENÇÃO**: Isso pode causar erro ao salvar a tarefa no ClickUp dependendo das configurações da lista.\n\n\
-                            ✅ **Ação necessária**: Verifique se '{}' tem acesso ao workspace do ClickUp.",
-                            responsavel,
-                            responsavel
-                        )
-                    };
-
-                    if let Err(e) = send_annotation_to_chatguru(&state, &payload, &warning_annotation).await {
-                        log_warning(&format!("⚠️ Não foi possível enviar anotação de warning: {}", e));
-                    }
-
                     None
                 }
                 Err(e) => {
@@ -674,17 +977,6 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
             }
         } else {
             log_info("ℹ️ Sem responsavel_nome no payload, tarefa será criada sem assignee");
-
-            // Enviar anotação de warning ao ChatGuru
-            let warning_annotation = "⚠️ **RESPONSÁVEL NÃO INFORMADO**\n\n\
-                👤 O campo 'Info_2' (responsável/atendente) não foi preenchido no payload\n\n\
-                ℹ️ A tarefa será criada, mas **sem atribuição de responsável**.\n\n\
-                ⚠️ **ATENÇÃO**: Isso pode causar erro ao salvar a tarefa no ClickUp dependendo das configurações da lista.\n\n\
-                ✅ **Ação necessária**: Configure o ChatGuru para enviar o campo 'responsavel_nome' no webhook.";
-
-            if let Err(e) = send_annotation_to_chatguru(&state, &payload, warning_annotation).await {
-                log_warning(&format!("⚠️ Não foi possível enviar anotação de warning: {}", e));
-            }
 
             None
         };
@@ -764,16 +1056,37 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
                 // Converter Value para Task tipada
                 let task: clickup::Task = serde_json::from_value(task_data)?;
 
-                // Criar tarefa usando API tipada
-                match state.clickup.create_task(&task).await {
-                    Ok(created_task) => {
-                        log_info(&format!("✅ Tarefa criada via SmartFolderFinder: {}", created_task.id.as_ref().unwrap_or(&"?".to_string())));
-                        // Converter Task de volta para Value para compatibilidade com código existente
-                        serde_json::to_value(&created_task)
-                            .unwrap_or_else(|_| serde_json::json!({"id": created_task.id}))
+                // Deduplicação: checar se já existe tarefa com o mesmo título antes de criar
+                let existing = state.clickup.find_existing_task_in_list(
+                    Some(&list_id),
+                    &task.name
+                ).await;
+
+                match existing {
+                    Ok(Some(_task_found)) => {
+                        log_info(&format!("❗ Tarefa já existe no ClickUp com o mesmo título: '{}'. Não será criada nova task.", &task.name));
+                        return Ok(serde_json::json!({
+                            "status": "duplicate",
+                            "message": "Tarefa já existente, não criada novamente",
+                            "task_title": &task.name
+                        }));
+                    }
+                    Ok(None) => {
+                        // Só cria a task se não houver duplicata
+                        match state.clickup.create_task(&task).await {
+                            Ok(created_task) => {
+                                log_info(&format!("✅ Tarefa criada via SmartFolderFinder: {}", created_task.id.as_ref().unwrap_or(&"?".to_string())));
+                                serde_json::to_value(&created_task)
+                                    .unwrap_or_else(|_| serde_json::json!({"id": created_task.id}))
+                            }
+                            Err(e) => {
+                                log_error(&format!("❌ Erro ao criar tarefa: {}", e));
+                                return Err(AppError::ClickUpApi(e.to_string()));
+                            }
+                        }
                     }
                     Err(e) => {
-                        log_error(&format!("❌ Erro ao criar tarefa: {}", e));
+                        log_error(&format!("❌ Erro ao buscar duplicata no ClickUp: {}", e));
                         return Err(AppError::ClickUpApi(e.to_string()));
                     }
                 }
@@ -814,20 +1127,9 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
             }
         } else {
             // Não encontrou folder, encaminhar para App Engine
-            log_warning(&format!("⚠️ Folder não encontrado para '{}', encaminhando para App Engine", client_name));
+            log_warning(&format!("⚠️ Folder não encontrado para '{}'", client_name));
 
-            // Enviar anotação de warning ao ChatGuru
-            let warning_annotation = format!(
-                "⚠️ **CONFIGURAÇÃO PENDENTE**\n\n\
-                📂 Pasta não encontrada no ClickUp para o cliente: '{}'\n\n\
-                ℹ️ A tarefa será processada pelo sistema legado (App Engine).\n\n\
-                ✅ **Ação necessária**: Configure o mapeamento deste cliente no sistema para habilitar o processamento otimizado.",
-                client_name
-            );
-
-            if let Err(e) = send_annotation_to_chatguru(&state, &payload, &warning_annotation).await {
-                log_warning(&format!("⚠️ Não foi possível enviar anotação de warning: {}", e));
-            }
+            log_info("ℹ️ Anotação de fallback desabilitada — apenas encaminhando para o App Engine");
 
             // Enviar payload original para o App Engine e encerrar processamento
             forward_to_app_engine(&payload).await?;
@@ -848,55 +1150,10 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
         let task_id = task_result.get("id").and_then(|v| v.as_str()).unwrap_or("N/A");
         let task_url = task_result.get("url").and_then(|v| v.as_str()).unwrap_or("");
 
-        // Extrair descrição de mídia (áudio, imagem ou PDF)
-        let media_description_section = if let WebhookPayload::ChatGuru(ref chatguru_payload) = payload {
-            if let (Some(_media_url), Some(media_type)) = (&chatguru_payload.media_url, &chatguru_payload.media_type) {
-                let media_type_lower = media_type.to_lowercase();
-
-                // Verificar tipo de mídia e extrair descrição correspondente
-                if (media_type_lower.contains("audio") || media_type_lower.contains("voice"))
-                    && chatguru_payload.texto_mensagem.contains("[Transcrição do áudio]:") {
-                    let description = chatguru_payload.texto_mensagem
-                        .split("[Transcrição do áudio]:")
-                        .nth(1)
-                        .unwrap_or("")
-                        .trim();
-                    format!("\n🎤 Transcrição: {}", description)
-                } else if media_type_lower.contains("image")
-                    && chatguru_payload.texto_mensagem.contains("[Descrição da imagem]:") {
-                    let description = chatguru_payload.texto_mensagem
-                        .split("[Descrição da imagem]:")
-                        .nth(1)
-                        .unwrap_or("")
-                        .trim();
-                    format!("\n🖼️ Descrição da imagem: {}", description)
-                } else if media_type_lower.contains("pdf")
-                    && chatguru_payload.texto_mensagem.contains("[Conteúdo do PDF]:") {
-                    let full_content = chatguru_payload.texto_mensagem
-                        .split("[Conteúdo do PDF]:")
-                        .nth(1)
-                        .unwrap_or("")
-                        .trim();
-
-                    // Para anotação, criar resumo ao invés de texto completo
-                    let summary = if full_content.len() > 200 {
-                        format!("{}... (documento com {} caracteres)",
-                            &full_content[..200].trim(),
-                            full_content.len())
-                    } else {
-                        full_content.to_string()
-                    };
-
-                    format!("\n📄 Descrição do PDF: {}", summary)
-                } else {
-                    String::new()
-                }
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        };
+        // CORREÇÃO: Não incluir descrição de mídia na anotação da tarefa se já foi enviada separadamente
+        // A descrição do PDF/áudio/imagem já foi enviada como anotação de mídia nas linhas 402-429
+        // Incluir aqui seria duplicação desnecessária
+        let media_description_section = String::new();
 
         let annotation = format!(
             "✅ Tarefa criada no ClickUp\n\n📋 Descrição: {}\n🏷️ Categoria: {}\n📂 Subcategoria: {}\n⭐ Prioridade: {} estrela(s)\n🔗 Link: {}{}",
@@ -933,57 +1190,7 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
     } else {
         log_info(&format!("❌ Não é atividade: {}", classification.reason));
 
-        // Extrair descrição de mídia (áudio, imagem ou PDF)
-        let media_description_section = if let WebhookPayload::ChatGuru(ref chatguru_payload) = payload {
-            if let (Some(_media_url), Some(media_type)) = (&chatguru_payload.media_url, &chatguru_payload.media_type) {
-                let media_type_lower = media_type.to_lowercase();
-
-                // Verificar tipo de mídia e extrair descrição correspondente
-                if (media_type_lower.contains("audio") || media_type_lower.contains("voice"))
-                    && chatguru_payload.texto_mensagem.contains("[Transcrição do áudio]:") {
-                    let description = chatguru_payload.texto_mensagem
-                        .split("[Transcrição do áudio]:")
-                        .nth(1)
-                        .unwrap_or("")
-                        .trim();
-                    format!("\n🎤 Transcrição: {}", description)
-                } else if media_type_lower.contains("image")
-                    && chatguru_payload.texto_mensagem.contains("[Descrição da imagem]:") {
-                    let description = chatguru_payload.texto_mensagem
-                        .split("[Descrição da imagem]:")
-                        .nth(1)
-                        .unwrap_or("")
-                        .trim();
-                    format!("\n🖼️ Descrição da imagem: {}", description)
-                } else if media_type_lower.contains("pdf")
-                    && chatguru_payload.texto_mensagem.contains("[Conteúdo do PDF]:") {
-                    let full_content = chatguru_payload.texto_mensagem
-                        .split("[Conteúdo do PDF]:")
-                        .nth(1)
-                        .unwrap_or("")
-                        .trim();
-
-                    // Para anotação, criar resumo ao invés de texto completo
-                    let summary = if full_content.len() > 200 {
-                        format!("{}... (documento com {} caracteres)",
-                            &full_content[..200].trim(),
-                            full_content.len())
-                    } else {
-                        full_content.to_string()
-                    };
-
-                    format!("\n📄 Descrição do PDF: {}", summary)
-                } else {
-                    String::new()
-                }
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        };
-
-        let annotation = format!("❌ Não é uma tarefa: {}{}", classification.reason, media_description_section);
+        let annotation = format!("Não é uma tarefa: {}", classification.reason);
 
         // Apenas enviar anotação
         if let Err(e) = send_annotation_to_chatguru(state, payload, &annotation).await {
@@ -1011,15 +1218,31 @@ async fn send_annotation_to_chatguru(
     let account_id = state.settings.chatguru.account_id.clone()
         .unwrap_or_else(|| "default_account".to_string());
 
-    let chatguru_service = ChatGuruClient::new(api_token, api_endpoint, account_id);
+    let chatguru_service = ChatGuruClient::new(api_token, api_endpoint.clone(), account_id);
 
     let chat_id = extract_chat_id_from_payload(payload);
     let phone = extract_phone_from_payload(payload);
 
     if let Some(chat_id) = chat_id {
         let phone_str = phone.as_deref().unwrap_or("");
+        
+        // Log detalhado antes de enviar
+        log_info(&format!(
+            "📡 ENVIANDO PARA CHATGURU - ChatID: {} | Phone: {} | Endpoint: {} | Size: {} chars",
+            chat_id,
+            phone_str,
+            api_endpoint,
+            annotation.len()
+        ));
+        
         chatguru_service.add_annotation(&chat_id, phone_str, annotation).await?;
-        log_info("📝 Anotação enviada ao ChatGuru");
+        
+        log_info(&format!(
+            "✅ ANOTAÇÃO CONFIRMADA NO CHATGURU - ChatID: {} | Success",
+            chat_id
+        ));
+    } else {
+        log_warning("⚠️ CHAT_ID NÃO ENCONTRADO - Não foi possível enviar anotação ao ChatGuru");
     }
 
     Ok(())

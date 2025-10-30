@@ -159,6 +159,15 @@ impl TaskManager {
             obj.remove("folder");
             obj.remove("space");
             obj.remove("project");
+
+            // Patch defensivo: garantir que priority seja inteiro válido (1-4)
+            if let Some(priority) = obj.get("priority") {
+                if !priority.is_i64() {
+                    obj.insert("priority".to_string(), serde_json::json!(3));
+                }
+            } else {
+                obj.insert("priority".to_string(), serde_json::json!(3));
+            }
         }
 
         // POST /list/{list_id}/task

@@ -24,6 +24,7 @@ use axum::{
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::time::Instant;
+use uuid;
 
 use chatguru_clickup_middleware::utils::AppError;
 use chatguru_clickup_middleware::utils::logging::*;
@@ -36,12 +37,22 @@ pub async fn handle_webhook(
     request: Request<Body>,
 ) -> Result<Json<Value>, AppError> {
     let start_time = Instant::now();
-    log_request_received("/webhooks/chatguru", "POST");
+    let request_id = uuid::Uuid::new_v4().to_string()[..8].to_string(); // ID único para tracking
+    
+    log_info(&format!(
+        "🔍 WEBHOOK INICIADO - RequestID: {} | Endpoint: {} | Method: {}",
+        request_id, "/webhooks/chatguru", "POST"
+    ));
 
     // Extrair body como bytes
     let body_bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
         .await
         .map_err(|e| AppError::InternalError(format!("Failed to read request body: {}", e)))?;
+
+    log_info(&format!(
+        "📦 BODY EXTRAÍDO - RequestID: {} | Size: {} bytes",
+        request_id, body_bytes.len()
+    ));
 
     // Validar UTF-8
     let body_str = String::from_utf8(body_bytes.to_vec())
@@ -51,7 +62,10 @@ pub async fn handle_webhook(
     let payload: Value = serde_json::from_str(&body_str)
         .map_err(|e| AppError::ValidationError(format!("Invalid JSON payload: {}", e)))?;
 
-    log_info(&format!("📥 Webhook payload recebido ({} bytes)", body_str.len()));
+    log_info(&format!(
+        "✅ JSON PARSEADO - RequestID: {} | Success",
+        request_id
+    ));
 
     // Extrair chat_id do payload
     let chat_id = payload
@@ -60,16 +74,79 @@ pub async fn handle_webhook(
         .unwrap_or("unknown")
         .to_string();
 
-    log_info(&format!("📬 Adicionando mensagem do chat '{}' à fila", chat_id));
+    // Extrair informações adicionais para logging
+    let sender_name = payload
+        .get("sender_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    
+    let message_type = payload
+        .get("message_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("text");
+    
+    let has_media = payload
+        .get("media_url")
+        .and_then(|v| v.as_str())
+        .map(|url| !url.is_empty())
+        .unwrap_or(false);
+
+    // Extrair texto da mensagem (truncado para logs)
+    let message_text = payload
+        .get("texto_mensagem")
+        .and_then(|v| v.as_str())
+        .map(|text| {
+            if text.len() > 100 {
+                format!("{}...", &text[..100])
+            } else {
+                text.to_string()
+            }
+        })
+        .unwrap_or_default();
+
+    // Verificar se é PDF duplicado (pode ter descrição vazia)
+    let is_pdf = payload
+        .get("media_url")
+        .and_then(|v| v.as_str())
+        .map(|url| url.to_lowercase().contains(".pdf"))
+        .unwrap_or(false);
+
+    let pdf_info = if is_pdf {
+        " | ⚠️ PDF_DETECTED"
+    } else {
+        ""
+    };
+
+    // Log detalhado do webhook recebido
+    log_info(&format!(
+        "📥 WEBHOOK RECEBIDO - RequestID: {} | ChatID: {} | Sender: {} | Type: {} | Media: {} | Size: {} bytes{} | Text: \"{}\"",
+        request_id, chat_id, sender_name, message_type,
+        if has_media { "Sim" } else { "Não" },
+        body_str.len(),
+        pdf_info,
+        message_text
+    ));
+
+    log_info(&format!(
+        "📬 ADICIONANDO À FILA - RequestID: {} | ChatID: {} | Queue size: estimating...",
+        request_id, chat_id
+    ));
 
     // Adicionar à fila (processa automaticamente quando atingir 5 msgs ou 100s via callback)
     state.message_queue.enqueue(chat_id.clone(), payload).await;
 
     let processing_time = start_time.elapsed().as_millis() as u64;
-    log_request_processed("/webhooks/chatguru", 200, processing_time);
+    
+    log_info(&format!(
+        "✅ WEBHOOK CONCLUÍDO - RequestID: {} | ChatID: {} | Processing time: {}ms | Status: 200",
+        request_id, chat_id, processing_time
+    ));
 
     // ACK imediato (compatível com legado)
     Ok(Json(json!({
-        "message": "Success"
+        "message": "Success",
+        "request_id": request_id,
+        "chat_id": chat_id,
+        "processing_time_ms": processing_time
     })))
 }

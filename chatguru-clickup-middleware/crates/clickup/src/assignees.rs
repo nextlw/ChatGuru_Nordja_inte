@@ -17,7 +17,7 @@ use serde_json::Value;
 use crate::error::Result;
 use crate::client::ClickUpClient;
 
-const FUZZY_THRESHOLD: f64 = 0.85;
+const FUZZY_THRESHOLD: f64 = 0.70; // Reduzido de 0.85 para 0.70
 
 #[derive(Debug, Clone)]
 pub struct AssigneeSearchResult {

@@ -119,7 +119,7 @@ impl IaServiceConfig {
             chat_model: "gpt-4o-mini".to_string(),
             vision_model: "gpt-4o".to_string(), // gpt-4o suporta Vision e PDFs
             embedding_model: "text-embedding-3-small".to_string(),
-            temperature: 0.1,
+            temperature: 0.26,
             max_tokens: 500,
             download_timeout_secs: 10,
         }

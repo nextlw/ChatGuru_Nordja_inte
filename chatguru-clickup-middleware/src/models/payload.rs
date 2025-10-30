@@ -512,43 +512,35 @@ impl WebhookPayload {
         // ID do campo: 0ed63eec-1c50-4190-91c1-59b4b17557f6
         tracing::info!("🔍 DEBUG Cliente Solicitante - campos_personalizados: {:?}", payload.campos_personalizados);
 
-        if let Some(info_2) = payload.campos_personalizados.get("Info_2") {
-            tracing::info!("🔍 DEBUG Info_2 encontrado no payload: {:?}", info_2);
+        // Busca cliente solicitante pelo Info_2 e, se não encontrar, pelo nome do contato (payload.nome)
+        let info_2_str = payload.campos_personalizados.get("Info_2").and_then(|v| v.as_str());
+        let nome_contato = if !payload.nome.is_empty() { Some(payload.nome.as_str()) } else { None };
 
-            if let Some(info_2_str) = info_2.as_str() {
-                tracing::info!("🔍 DEBUG Info_2 como string: '{}'", info_2_str);
+        match AiPromptConfig::load_default().await {
+            Ok(config) => {
+                tracing::info!("✅ Config carregado com sucesso, {} clientes mapeados",
+                    config.cliente_solicitante_mappings.len());
 
-                match AiPromptConfig::load_default().await {
-                    Ok(config) => {
-                        tracing::info!("✅ Config carregado com sucesso, {} clientes mapeados",
-                            config.cliente_solicitante_mappings.len());
+                if let Some(cliente_id) = config.get_cliente_solicitante_id_multi(info_2_str, nome_contato) {
+                    custom_fields.push(serde_json::json!({
+                        "id": "0ed63eec-1c50-4190-91c1-59b4b17557f6",  // Campo "Cliente Solicitante"
+                        "value": cliente_id
+                    }));
+                    tracing::info!("✅ Campo Cliente Solicitante adicionado via Info_2 ou nome: '{:?}' | '{:?}' -> '{}'", info_2_str, nome_contato, cliente_id);
+                } else {
+                    tracing::warn!("❌ Cliente não tem ID mapeado no YAML (Info_2: '{:?}', nome: '{:?}')", info_2_str, nome_contato);
 
-                        if let Some(cliente_id) = config.get_cliente_solicitante_id(info_2_str) {
-                            custom_fields.push(serde_json::json!({
-                                "id": "0ed63eec-1c50-4190-91c1-59b4b17557f6",  // Campo "Cliente Solicitante"
-                                "value": cliente_id
-                            }));
-                            tracing::info!("✅ Campo Cliente Solicitante (Info_2) adicionado: '{}' -> '{}'", info_2_str, cliente_id);
-                        } else {
-                            tracing::warn!("❌ Cliente '{}' não tem ID mapeado no YAML (tentando normalização...)", info_2_str);
-
-                            // Log dos primeiros 5 clientes mapeados para debug
-                            let sample: Vec<String> = config.cliente_solicitante_mappings.keys()
-                                .take(5)
-                                .map(|k| k.clone())
-                                .collect();
-                            tracing::warn!("📋 Exemplos de clientes mapeados: {:?}", sample);
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!("❌ Falha ao carregar config para Cliente Solicitante: {}", e);
-                    }
+                    // Log dos primeiros 5 clientes mapeados para debug
+                    let sample: Vec<String> = config.cliente_solicitante_mappings.keys()
+                        .take(5)
+                        .map(|k| k.clone())
+                        .collect();
+                    tracing::warn!("📋 Exemplos de clientes mapeados: {:?}", sample);
                 }
-            } else {
-                tracing::warn!("❌ Info_2 existe mas não é uma string: {:?}", info_2);
             }
-        } else {
-            tracing::warn!("❌ Info_2 NÃO encontrado em campos_personalizados");
+            Err(e) => {
+                tracing::error!("❌ Falha ao carregar config para Cliente Solicitante: {}", e);
+            }
         }
 
         // Adicionar campo "Conta cliente" (Info_1) - campo de texto livre

@@ -647,65 +647,61 @@ impl AiPromptConfig {
     /// 1. Match exato (normalizado)
     /// 2. Match por normalização de chaves
     /// 3. Fuzzy matching com Jaro-Winkler (threshold 85%)
-    pub fn get_cliente_solicitante_id(&self, name: &str) -> Option<String> {
+    /// Busca o ID do cliente solicitante usando múltiplas fontes (Info_2 e nome do contato)
+    pub fn get_cliente_solicitante_id_multi(
+        &self,
+        info_2: Option<&str>,
+        nome_contato: Option<&str>,
+    ) -> Option<String> {
         use strsim::jaro_winkler;
 
-        let normalized_input = Self::normalize_client_name(name);
+        // 1. Tentar pelo Info_2 (campo principal)
+        let normalized_info_2 = info_2.map(Self::normalize_client_name);
+        let normalized_nome = nome_contato.map(Self::normalize_client_name);
 
-        tracing::debug!("🔍 Buscando cliente: '{}' → normalizado: '{}'", name, normalized_input);
-
-        // 1. Tentar match exato com nome normalizado
-        if let Some(id) = self.cliente_solicitante_mappings.get(&normalized_input) {
-            tracing::info!("✅ Match exato encontrado: '{}' → '{}'", name, id);
-            return Some(id.clone());
-        }
-
-        // 2. Tentar match com normalização nas chaves do mapeamento
-        for (key, id) in &self.cliente_solicitante_mappings {
-            let normalized_key = Self::normalize_client_name(key);
-            if normalized_key == normalized_input {
-                tracing::info!("✅ Match por normalização: '{}' → '{}' (chave original: '{}')",
-                    name, id, key);
+        // 1a. Match exato ou normalizado via Info_2
+        if let Some(ref info_2_val) = normalized_info_2 {
+            if let Some(id) = self.cliente_solicitante_mappings.get(info_2_val) {
+                tracing::info!("✅ Match exato encontrado via Info_2: '{}'", info_2_val);
                 return Some(id.clone());
             }
         }
 
-        // 3. Fuzzy matching com Jaro-Winkler (threshold configurável)
-        const FUZZY_THRESHOLD: f64 = 0.85; // 85% de similaridade mínima
+        // 1b. Match exato ou normalizado via nome do contato
+        if let Some(ref nome_val) = normalized_nome {
+            if let Some(id) = self.cliente_solicitante_mappings.get(nome_val) {
+                tracing::info!("✅ Match exato encontrado via nome do contato: '{}'", nome_val);
+                return Some(id.clone());
+            }
+        }
 
-        let mut best_match: Option<(&str, &String, f64)> = None;
+        // 3. Se não encontrou, tenta fuzzy matching cruzado entre ambos se ambos disponíveis
+        if let (Some(info_2_val), Some(nome_val)) = (info_2, nome_contato) {
+            let normalized_info_2 = Self::normalize_client_name(info_2_val);
+            let normalized_nome = Self::normalize_client_name(nome_val);
 
-        for (key, id) in &self.cliente_solicitante_mappings {
-            let normalized_key = Self::normalize_client_name(key);
-            let similarity = jaro_winkler(&normalized_input, &normalized_key);
+            const FUZZY_THRESHOLD: f64 = 0.70;
 
-            if similarity >= FUZZY_THRESHOLD {
-                match best_match {
-                    Some((_, _, best_score)) if similarity > best_score => {
-                        best_match = Some((key, id, similarity));
-                    }
-                    None => {
-                        best_match = Some((key, id, similarity));
-                    }
-                    _ => {}
+            for (key, id) in &self.cliente_solicitante_mappings {
+                let normalized_key = Self::normalize_client_name(key);
+                let sim_info_2 = jaro_winkler(&normalized_info_2, &normalized_key);
+                let sim_nome = jaro_winkler(&normalized_nome, &normalized_key);
+
+                if sim_info_2 >= FUZZY_THRESHOLD || sim_nome >= FUZZY_THRESHOLD {
+                    tracing::info!(
+                        "✨ Fuzzy match cruzado: Info_2='{}', Nome='{}', Chave='{}', Score_info_2={:.1}%, Score_nome={:.1}%",
+                        info_2_val, nome_val, key, sim_info_2 * 100.0, sim_nome * 100.0
+                    );
+                    return Some(id.clone());
                 }
             }
         }
 
-        if let Some((matched_key, id, score)) = best_match {
-            tracing::info!(
-                "✨ Fuzzy match encontrado: '{}' → '{}' (score: {:.1}%, chave: '{}')",
-                name, id, score * 100.0, matched_key
-            );
-            return Some(id.clone());
-        }
-
         // Não encontrado - log para debug
         tracing::warn!(
-            "❌ Cliente '{}' não encontrado (normalizado: '{}'). Threshold: {:.0}%",
-            name, normalized_input, FUZZY_THRESHOLD * 100.0
+            "❌ Cliente não encontrado via Info_2='{:?}' ou nome_contato='{:?}'.",
+            info_2, nome_contato
         );
-
         None
     }
 
