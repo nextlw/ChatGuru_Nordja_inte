@@ -37,6 +37,14 @@ use auth::{OAuth2Config, TokenManager, OAuth2State, start_oauth_flow, handle_oau
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // 🔧 Carregar variáveis de ambiente do arquivo .env (se existir)
+    if let Err(_) = dotenvy::dotenv() {
+        // Em produção (Cloud Run), não existe .env - variáveis vêm do ambiente
+        tracing::debug!("Arquivo .env não encontrado - usando variáveis de ambiente do sistema");
+    } else {
+        tracing::info!("✅ Arquivo .env carregado com sucesso");
+    }
+
     // Inicializar tracing
     tracing_subscriber::fmt::init();
 
@@ -56,14 +64,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // - CustomFieldManager (sincroniza "Cliente Solicitante")
     log_info("ℹ️ Usando SmartFolderFinder/SmartAssigneeFinder (busca via API)");
 
-    // ✅ Criar TaskManager do crate clickup
-    let clickup_client = clickup::ClickUpClient::new(settings.clickup.token.clone())
+    // ✅ Inicializar SecretManagerService primeiro
+    let secret_manager = services::SecretManagerService::new()
+        .await
+        .map_err(|e| AppError::ConfigError(format!("Failed to initialize SecretManagerService: {}", e)))?;
+    
+    // ✅ Obter token do ClickUp via SecretManagerService (OAuth2 > Personal > Config)
+    let clickup_token = secret_manager.get_clickup_api_token()
+        .await
+        .map_err(|e| AppError::ConfigError(format!("Failed to get ClickUp token: {}", e)))?;
+    
+    log_info(&format!("🔑 ClickUp token loaded from SecretManagerService"));
+    
+    // ✅ Criar TaskManager do crate clickup com token do Secret Manager
+    let clickup_client = clickup::ClickUpClient::new(clickup_token)
         .map_err(|e| AppError::ConfigError(format!("Failed to create ClickUp client: {}", e)))?;
     let clickup_service = clickup::tasks::TaskManager::new(
         clickup_client,
         Some(settings.clickup.list_id.clone())
     );
-    log_info("⚡ ClickUp TaskManager configured from crate");
+    log_info("⚡ ClickUp TaskManager configured from crate with SecretManager token");
 
     // Inicializar IA Service (OpenAI)
     let ia_service = match std::env::var("OPENAI_API_KEY").or_else(|_| std::env::var("openai_api_key")) {
@@ -213,24 +233,56 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     log_server_startup(port);
     log_server_ready(port);
 
-    axum::serve(listener, app).await?;
+    // Graceful shutdown com signal handling
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
 
+    log_info("🛑 Server shut down gracefully");
     Ok(())
+}
+
+/// Signal handler para graceful shutdown
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {
+            log_info("🛑 Received Ctrl+C, shutting down gracefully...");
+        },
+        _ = terminate => {
+            log_info("🛑 Received SIGTERM, shutting down gracefully...");
+        }
+    }
 }
 
 /// Função auxiliar para publicar batch no Pub/Sub (reutiliza lógica do webhook handler)
 async fn publish_batch_to_pubsub(
     settings: &Settings,
     chat_id: String,
-    mut messages: Vec<services::QueuedMessage>,
+    messages: Vec<services::QueuedMessage>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use google_cloud_pubsub::client::{Client, ClientConfig};
     use google_cloud_googleapis::pubsub::v1::PubsubMessage;
     use serde_json::json;
 
-    // 0. PROCESSAR MÍDIAS PRIMEIRO (se houver)
-    tracing::info!("🔍 Verificando se há mídias no batch do chat '{}'...", chat_id);
-    messages = process_media_in_batch(settings, messages).await?;
+    // Nota: Processamento de mídia é feito individualmente no worker.rs usando ia-service
+    tracing::info!("🔍 Batch do chat '{}' será enviado para processamento no worker", chat_id);
 
     // 1. Agregar mensagens em um único payload (agora com mídias processadas!)
     let aggregated_payload = services::MessageQueueService::process_batch_sync(chat_id.clone(), messages)?;
@@ -321,238 +373,4 @@ async fn publish_batch_to_pubsub(
 
     // Se chegou aqui, todas as tentativas falharam
     Err(last_error.unwrap().into())
-}
-
-/// Processa mídias no batch ANTES de publicar no Pub/Sub
-/// Detecta mídias, publica em media-processing-requests, aguarda resultado e substitui por texto
-async fn process_media_in_batch(
-    settings: &Settings,
-    messages: Vec<services::QueuedMessage>,
-) -> Result<Vec<services::QueuedMessage>, Box<dyn std::error::Error + Send + Sync>> {
-    use google_cloud_pubsub::client::{Client, ClientConfig};
-    use google_cloud_googleapis::pubsub::v1::PubsubMessage;
-    use serde_json::{json};
-    use uuid::Uuid;
-
-    let mut processed_messages = Vec::new();
-    let mut has_media = false;
-
-    // Configurar cliente Pub/Sub para mídias (se necessário)
-    let config = ClientConfig::default().with_auth().await?;
-    let client = Client::new(config).await?;
-
-    let media_topic_name = settings.gcp.media_processing_topic
-        .as_ref()
-        .map(|s| s.as_str())
-        .unwrap_or("media-processing-requests");
-
-    for message in messages {
-        let mut payload = message.payload.clone();
-
-        // Verificar se payload tem mídia
-        let has_media_url = payload.get("media_url")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .is_some();
-
-        let media_type = payload.get("media_type")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-
-        if has_media_url && media_type.is_some() {
-            has_media = true;
-            let media_url = payload["media_url"].as_str().unwrap();
-            let media_type_str = media_type.as_ref().unwrap();
-
-            tracing::info!(
-                "📎 Mídia detectada no batch: {} (tipo: {})",
-                media_url, media_type_str
-            );
-
-            // Gerar correlation ID para rastrear
-            let correlation_id = Uuid::new_v4().to_string();
-
-            // Publicar requisição de processamento de mídia
-            let media_request = json!({
-                "correlation_id": correlation_id,
-                "media_url": media_url,
-                "media_type": media_type_str,
-                "chat_id": payload.get("id_chatguru").and_then(|v| v.as_str()).unwrap_or("unknown"),
-                "timestamp": chrono::Utc::now().to_rfc3339()
-            });
-
-            let topic = client.topic(media_topic_name);
-            let publisher = topic.new_publisher(None);
-
-            let msg = PubsubMessage {
-                data: serde_json::to_vec(&media_request)?.into(),
-                ..Default::default()
-            };
-
-            tracing::info!("📤 Publicando mídia para processamento: {}", correlation_id);
-
-            match publisher.publish(msg).await.get().await {
-                Ok(_) => {
-                    tracing::info!("✅ Mídia publicada com sucesso: {}", correlation_id);
-
-                    // Aguardar resultado da Cloud Function (timeout: 60s)
-                    match wait_for_media_result(&client, settings, &correlation_id, 60).await {
-                        Ok(processed_text) => {
-                            tracing::info!("✅ Mídia processada pela Cloud Function: {} chars", processed_text.len());
-
-                            // ENVIAR ANOTAÇÃO NO CHATGURU com a transcrição/descrição
-                            let chat_id = payload.get("id_chatguru")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("unknown");
-
-                            let annotation = if media_type_str.contains("audio") {
-                                format!("🎤 Transcrição do áudio:\n\n{}", processed_text)
-                            } else if media_type_str.contains("image") {
-                                format!("🖼️ Descrição da imagem:\n\n{}", processed_text)
-                            } else {
-                                format!("📎 Mídia processada:\n\n{}", processed_text)
-                            };
-
-                            if let Err(e) = send_annotation_to_chatguru(settings, chat_id, &annotation).await {
-                                tracing::error!("❌ Erro ao enviar anotação ChatGuru: {}", e);
-                            } else {
-                                tracing::info!("✅ Anotação enviada ao ChatGuru para chat: {}", chat_id);
-                            }
-
-                            // Marcar mídia como processada (não precisa substituir texto!)
-                            payload["media_processing_status"] = json!("completed_with_annotation");
-                        }
-                        Err(e) => {
-                            tracing::error!("❌ Timeout aguardando Cloud Function (60s): {}", e);
-                            payload["media_processing_status"] = json!("timeout");
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::error!("❌ Erro ao publicar mídia: {}. Continuando sem processamento.", e);
-                    payload["media_processing_status"] = json!("failed");
-                }
-            }
-        }
-
-        processed_messages.push(services::QueuedMessage {
-            payload,
-            received_at: message.received_at,
-        });
-    }
-
-    if has_media {
-        tracing::info!("📊 Batch processado: {} mensagens (com mídia)", processed_messages.len());
-    } else {
-        tracing::info!("📊 Batch processado: {} mensagens (sem mídia)", processed_messages.len());
-    }
-
-    Ok(processed_messages)
-}
-
-/// Aguarda resultado da Cloud Function via subscription media-processing-results
-async fn wait_for_media_result(
-    client: &google_cloud_pubsub::client::Client,
-    settings: &Settings,
-    correlation_id: &str,
-    timeout_secs: u64,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    use tokio::time::{timeout, Duration};
-    use futures_util::StreamExt;
-
-    let subscription_name = settings.gcp.media_results_subscription
-        .as_ref()
-        .map(|s| s.as_str())
-        .unwrap_or("media-results-sub");
-
-    let subscription = client.subscription(subscription_name);
-
-    tracing::info!("⏳ Aguardando resultado da mídia (correlation_id: {}, timeout: {}s)", correlation_id, timeout_secs);
-
-    let result = timeout(Duration::from_secs(timeout_secs), async {
-        loop {
-            // Pull mensagens (max 1)
-            let mut stream = subscription.subscribe(None).await?;
-
-            while let Some(message) = stream.next().await {
-                let data = String::from_utf8_lossy(&message.message.data);
-
-                if let Ok(result_json) = serde_json::from_str::<serde_json::Value>(&data) {
-                    let msg_correlation_id = result_json.get("correlation_id")
-                        .and_then(|v| v.as_str());
-
-                    if msg_correlation_id == Some(correlation_id) {
-                        // Ack mensagem
-                        let _ = message.ack().await;
-
-                        // Extrair resultado
-                        if let Some(result_text) = result_json.get("result")
-                            .and_then(|v| v.as_str()) {
-                            return Ok(result_text.to_string());
-                        } else if let Some(error) = result_json.get("error")
-                            .and_then(|v| v.as_str()) {
-                            return Err(format!("Cloud Function error: {}", error).into());
-                        }
-                    } else {
-                        // Não é nossa mensagem, ack e continua
-                        let _ = message.ack().await;
-                    }
-                }
-            }
-
-            // Pequeno delay antes de tentar novamente
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-    }).await;
-
-    match result {
-        Ok(Ok(text)) => Ok(text),
-        Ok(Err(e)) => Err(e),
-        Err(_) => Err(format!("Timeout após {}s aguardando resultado da mídia", timeout_secs).into()),
-    }
-}
-
-/// Envia anotação para o ChatGuru
-async fn send_annotation_to_chatguru(
-    settings: &Settings,
-    chat_id: &str,
-    annotation: &str,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let api_token = std::env::var("CHATGURU_API_TOKEN")
-        .or_else(|_| std::env::var("chatguru_api_token"))
-        .unwrap_or_else(|_| settings.chatguru.api_token.clone().unwrap_or_default());
-
-    let api_endpoint = settings.chatguru.api_endpoint
-        .as_ref()
-        .map(|s| s.as_str())
-        .unwrap_or("https://s15.chatguru.app/api/v1");
-
-    let account_id = settings.chatguru.account_id
-        .as_ref()
-        .map(|s| s.as_str())
-        .unwrap_or_default();
-
-    let client = reqwest::Client::new();
-    let url = format!("{}/annotations", api_endpoint);
-
-    let body = serde_json::json!({
-        "id_account": account_id,
-        "chat_id": chat_id,
-        "note": annotation
-    });
-
-    let response = client
-        .post(&url)
-        .header("apikey", api_token)
-        .json(&body)
-        .send()
-        .await?;
-
-    if response.status().is_success() {
-        Ok(())
-    } else {
-        let status = response.status();
-        let text = response.text().await.unwrap_or_default();
-        Err(format!("ChatGuru API error: {} - {}", status, text).into())
-    }
 }

@@ -7,6 +7,7 @@ pub mod prompts;  // Configuração de prompts AI (YAML-only, sem PostgreSQL)
 // Re-exports (explícitos para evitar ambiguidade)
 pub use chatguru::ChatGuruClient;
 pub use prompts::AiPromptConfig;
+pub use secrets::SecretManagerService;  // ✅ Exporta SecretManagerService
 
 // Re-exporta do crate mensageria
 pub use mensageria::{MessageQueueService, QueuedMessage};
