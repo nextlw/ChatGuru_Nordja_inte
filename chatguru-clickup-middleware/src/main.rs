@@ -170,6 +170,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     message_queue.clone().start_scheduler();
     log_info("✅ Message Queue Scheduler iniciado - COM CALLBACK para Pub/Sub (5 msgs ou 100s por chat)");
 
+    // ✅ Inicializar cliente ChatGuru uma única vez no AppState
+    let chatguru_client = {
+        let api_token = settings.chatguru.api_token.clone()
+            .unwrap_or_else(|| "default_token".to_string());
+        let api_endpoint = settings.chatguru.api_endpoint.clone()
+            .unwrap_or_else(|| "https://s15.chatguru.app/api/v1".to_string());
+        let account_id = settings.chatguru.account_id.clone()
+            .unwrap_or_else(|| "default_account".to_string());
+        
+        chatguru::ChatGuruClient::new(api_token, api_endpoint, account_id)
+    };
+    log_info("✅ ChatGuru client inicializado no AppState (configuração centralizada)");
+
     // Inicializar estado da aplicação
     let app_state = Arc::new(AppState {
         clickup_client: reqwest::Client::new(),
@@ -177,6 +190,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         settings: settings.clone(),
         ia_service,
         message_queue,
+        chatguru_client,  // ✅ Cliente configurado uma única vez
     });
 
     log_info("Event-driven architecture com Message Queue");

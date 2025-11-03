@@ -288,10 +288,14 @@ mod tests {
         env::set_var("clickup_api_token", "test-token-from-env");
         env::set_var("CLICKUP_LIST_ID", "test-list-from-env");
 
-        let service = SecretManagerService::new().await.unwrap();
+        // Cria service sem Secret Manager (client = None) para forçar uso de env vars
+        let settings = crate::config::settings::Settings::new().unwrap();
+        let service = SecretManagerService {
+            client: None, // Força não usar Secret Manager nos testes
+            project_id: settings.gcp.project_id.clone(),
+            settings,
+        };
 
-        // Nota: get_clickup_api_token() agora tenta OAuth2 token primeiro (Secret Manager),
-        // depois Personal Token (Secret Manager), e por último env var.
         // Em ambiente de teste sem Secret Manager, deve usar a env var como fallback.
         let token = service.get_clickup_api_token().await.unwrap();
         assert_eq!(token, "test-token-from-env");

@@ -24,7 +24,6 @@ use tokio::time::Instant;
 use base64::{Engine as _, engine::general_purpose};
 
 use chatguru_clickup_middleware::models::payload::WebhookPayload;
-use chatguru::ChatGuruClient;
 use chatguru_clickup_middleware::utils::{AppResult, AppError};
 use chatguru_clickup_middleware::utils::logging::*;
 use chatguru_clickup_middleware::AppState;
@@ -398,6 +397,9 @@ async fn handle_worker_internal(
         serde_json::to_string(&payload).unwrap_or_default().len()
     ));
 
+    // Clonar payload antes de fazer pattern matching para evitar conflitos de empréstimo
+    let payload_clone = payload.clone();
+    
     // Processar mídia (áudio/imagem) se houver
     if let WebhookPayload::ChatGuru(ref mut chatguru_payload) = payload {
         // IMPORTANTE: Normalizar campos de mídia do ChatGuru
@@ -430,7 +432,7 @@ async fn handle_worker_internal(
                     processing_type, media_type, media_url));
 
                 // Processar mídia com anotação usando IaService
-                let (final_result, annotation_opt) = if let Some(ref ia_service) = state.ia_service {
+                let (final_result, _annotation_opt) = if let Some(ref ia_service) = state.ia_service {
                     match processing_type {
                         "audio" => {
                             log_info("🎵 Processando áudio com transcrição + anotação");
@@ -453,8 +455,27 @@ async fn handle_worker_internal(
                                         ia_service.process_audio_with_annotation(&audio_bytes, &filename)
                                     ).await {
                                         Ok(Ok(result)) => {
+                                            // Loga o tamanho da transcrição gerada
                                             log_info(&format!("✅ Áudio processado: {} caracteres", result.extracted_content.len()));
-                                            (Some(result.extracted_content), result.annotation)
+                                        
+                                            // Monta a mensagem de transcrição no formato solicitado (sem emojis)
+                                            let message = format!("estamos transcrevendo sua mensagem: {}", result.extracted_content);
+                                        
+                                            // Envia a mensagem de transcrição ao usuário via WhatsApp
+                                            // ✅ Usa o cliente ChatGuru centralizado do AppState
+                                            if let Some(phone) = extract_phone_from_payload(&payload_clone) {
+                                                if let Err(e) = state.chatguru_client.send_confirmation_message(&phone, None, &message).await {
+                                                    log_warning(&format!("⚠️ Falha ao enviar mensagem de transcrição: {}", e));
+                                                } else {
+                                                    log_info(&format!("✅ Mensagem de transcrição enviada via WhatsApp para {}", phone));
+                                                }
+                                            } else {
+                                                log_warning("⚠️ Número de telefone não encontrado no payload, não foi possível enviar mensagem de transcrição");
+                                            }
+                                        
+                                            // NÃO envia anotação separada para áudio, apenas a mensagem
+                                            // A transcrição continua sendo usada para o batch de classificação normalmente
+                                            (Some(result.extracted_content), None)
                                         }
                                         Ok(Err(e)) => {
                                             log_error(&format!("❌ Erro ao processar áudio: {}", e));
@@ -592,36 +613,8 @@ async fn handle_worker_internal(
                     log_warning("⚠️ Nenhum resultado de processamento de mídia disponível");
                 }
 
-                // ENVIAR ANOTAÇÃO IMEDIATAMENTE AO CHATGURU (independente de ser atividade ou não)
-                // Enviar DEPOIS de modificar o payload para evitar borrow checker issues
-                if let Some(annotation) = annotation_opt {
-                    let annotation_preview = if annotation.len() > 100 {
-                        format!("{}...", &annotation[..100])
-                    } else {
-                        annotation.clone()
-                    };
-                    
-                    log_info(&format!(
-                        "📤 ENVIANDO ANOTAÇÃO DE MÍDIA - ChatID: {} | Type: {} | Preview: \"{}\"",
-                        chat_id.as_deref().unwrap_or("N/A"),
-                        processing_type,
-                        annotation_preview
-                    ));
-                    
-                    if let Err(e) = send_annotation_to_chatguru(&state, &payload, &annotation).await {
-                        log_warning(&format!(
-                            "⚠️ FALHA NA ANOTAÇÃO DE MÍDIA - ChatID: {} | Error: {}",
-                            chat_id.as_deref().unwrap_or("N/A"),
-                            e
-                        ));
-                    } else {
-                        log_info(&format!(
-                            "✅ ANOTAÇÃO DE MÍDIA ENVIADA - ChatID: {} | Size: {} chars",
-                            chat_id.as_deref().unwrap_or("N/A"),
-                            annotation.len()
-                        ));
-                    }
-                }
+                // [REMOVIDO] Não enviar mais anotação de mídia (descrição de imagem/arquivo) imediatamente após processamento.
+                // O enriquecimento do payload permanece, mas o envio da anotação foi removido conforme solicitado.
             }
         }
     }
@@ -1211,14 +1204,12 @@ async fn send_annotation_to_chatguru(
     payload: &WebhookPayload,
     annotation: &str,
 ) -> AppResult<()> {
-    let api_token = state.settings.chatguru.api_token.clone()
-        .unwrap_or_else(|| "default_token".to_string());
-    let api_endpoint = state.settings.chatguru.api_endpoint.clone()
-        .unwrap_or_else(|| "https://s15.chatguru.app/api/v1".to_string());
-    let account_id = state.settings.chatguru.account_id.clone()
-        .unwrap_or_else(|| "default_account".to_string());
-
-    let chatguru_service = ChatGuruClient::new(api_token, api_endpoint.clone(), account_id);
+    // ✅ Usa o cliente ChatGuru centralizado do AppState
+    let chatguru_service = &state.chatguru_client;
+    let default_endpoint = "https://s15.chatguru.app/api/v1".to_string();
+    let api_endpoint = state.settings.chatguru.api_endpoint
+        .as_ref()
+        .unwrap_or(&default_endpoint);
 
     let chat_id = extract_chat_id_from_payload(payload);
     let phone = extract_phone_from_payload(payload);
@@ -1228,7 +1219,7 @@ async fn send_annotation_to_chatguru(
         
         // Log detalhado antes de enviar
         log_info(&format!(
-            "📡 ENVIANDO PARA CHATGURU - ChatID: {} | Phone: {} | Endpoint: {} | Size: {} chars",
+            "� ENVIANDO PARA CHATGURU - ChatID: {} | Phone: {} | Endpoint: {} | Size: {} chars",
             chat_id,
             phone_str,
             api_endpoint,
@@ -1352,216 +1343,6 @@ fn extract_responsavel_nome_from_payload(payload: &WebhookPayload) -> Option<Str
 // As funções abaixo foram mantidas para referência histórica
 // ============================================================================
 
-/// FUNÇÃO OBSOLETA - NÃO MAIS UTILIZADA
-///
-/// NOVA IMPLEMENTAÇÃO: src/models/payload.rs:240-441 (custom_fields)
-/// A preparação de campos personalizados agora usa configuração YAML
-/// e está integrada diretamente na conversão do payload
-#[allow(dead_code)]
-async fn prepare_custom_fields(
-    payload: &WebhookPayload,
-    classification: &chatguru_clickup_middleware::services::OpenAIClassification,
-    _nome: &str,
-) -> Vec<Value> {
-    let mut custom_fields = Vec::new();
-
-    // IDs reais dos campos personalizados (do script categorize_tasks.js)
-
-    // 1. Campo: Categoria* (dropdown) - ID real do ClickUp
-    if let Some(category) = &classification.category {
-        custom_fields.push(json!({
-            "id": "eac5bbd3-4ff6-41ac-aa93-0a13a5a2c75a", // ID real do campo Categoria*
-            "value": category // Categoria determinada pela classificação IA
-        }));
-    }
-
-    // 2. Campo: SubCategoria (dropdown) - ID real do ClickUp
-    if let Some(subcategory) = determine_subcategoria(classification) {
-        custom_fields.push(json!({
-            "id": "5333c095-eb40-4a5a-b0c2-76bfba4b1094", // ID real do campo SubCategoria
-            "value": subcategory
-        }));
-    }
-
-    // 3. Campo: Estrelas (rating) - ID real do ClickUp
-    let stars = determine_estrelas(classification, payload).await;
-    custom_fields.push(json!({
-        "id": "83afcb8c-2866-498f-9c62-8ea9666b104b", // ID real do campo Estrelas
-        "value": stars // Valor numérico de 1 a 4
-    }));
-
-    custom_fields
-}
-
-/// FUNÇÃO OBSOLETA - NÃO MAIS UTILIZADA
-///
-/// NOVA IMPLEMENTAÇÃO:
-/// - OpenAI Service já retorna `sub_categoria` classificada
-/// - Mapeamento de IDs via config/ai_prompt.yaml
-/// - Processamento em src/models/payload.rs:333-362
-///
-/// A determinação de subcategorias agora é feita pela IA e mapeada via YAML,
-/// não mais por palavra-chave hardcoded
-#[allow(dead_code)]
-fn determine_subcategoria(classification: &chatguru_clickup_middleware::services::OpenAIClassification) -> Option<String> {
-    // Análise de palavras-chave da mensagem/descrição para determinar subcategoria
-    let message_text = classification.reason.to_lowercase();
-    
-    // MAPEAMENTO EXATO do categorize_tasks.js - KEYWORD_MAPPING
-    // Logística
-    if message_text.contains("motoboy") || message_text.contains("entrega") || message_text.contains("retirada") {
-        Some("Corrida de motoboy".to_string())
-    } else if message_text.contains("sedex") || message_text.contains("correio") {
-        Some("Motoboy + Correios e envios internacionais".to_string())
-    } else if message_text.contains("lalamove") {
-        Some("Lalamove".to_string())
-    } else if message_text.contains("uber") || message_text.contains("99") {
-        Some("Transporte Urbano (Uber/99)".to_string())
-    } else if message_text.contains("taxista") {
-        Some("Corridas com Taxistas".to_string())
-    }
-    // Plano de Saúde
-    else if message_text.contains("reembolso") || message_text.contains("bradesco saúde") || message_text.contains("plano de saúde") {
-        Some("Reembolso Médico".to_string())
-    }
-    // Compras
-    else if message_text.contains("mercado") {
-        Some("Mercados".to_string())
-    } else if message_text.contains("farmácia") {
-        Some("Farmácia".to_string())
-    } else if message_text.contains("presente") {
-        Some("Presentes".to_string())
-    } else if message_text.contains("shopper") {
-        Some("Shopper".to_string())
-    } else if message_text.contains("papelaria") {
-        Some("Papelaria".to_string())
-    } else if message_text.contains("petshop") {
-        Some("Petshop".to_string())
-    } else if message_text.contains("ingresso") {
-        Some("Ingressos".to_string())
-    }
-    // Assuntos Pessoais
-    else if message_text.contains("troca") {
-        Some("Troca de titularidade".to_string())
-    } else if message_text.contains("internet") {
-        Some("Internet e TV por Assinatura".to_string())
-    } else if message_text.contains("telefone") {
-        Some("Telefone".to_string())
-    } else if message_text.contains("conserto") {
-        Some("Consertos na Casa".to_string())
-    } else if message_text.contains("assistência") {
-        Some("Assistência Técnica".to_string())
-    }
-    // Financeiro
-    else if message_text.contains("pagamento") {
-        Some("Rotina de Pagamentos".to_string())
-    } else if message_text.contains("boleto") {
-        Some("Emissão de boletos".to_string())
-    } else if message_text.contains("nota fiscal") {
-        Some("Emissão de NF".to_string())
-    }
-    // Viagens
-    else if message_text.contains("passagem") {
-        Some("Passagens Aéreas".to_string())
-    } else if message_text.contains("hospedagem") || message_text.contains("hotel") {
-        Some("Hospedagens".to_string())
-    } else if message_text.contains("check in") {
-        Some("Checkins (Early/Late)".to_string())
-    } else if message_text.contains("bagagem") {
-        Some("Extravio de Bagagens".to_string())
-    }
-    // Agendamentos
-    else if message_text.contains("consulta") {
-        Some("Consultas".to_string())
-    } else if message_text.contains("exame") {
-        Some("Exames".to_string())
-    } else if message_text.contains("vacina") {
-        Some("Vacinas".to_string())
-    } else if message_text.contains("manicure") {
-        Some("Manicure".to_string())
-    } else if message_text.contains("cabeleireiro") {
-        Some("Cabeleleiro".to_string())
-    }
-    // Lazer
-    else if message_text.contains("restaurante") || message_text.contains("reserva") {
-        Some("Reserva de restaurantes/bares".to_string())
-    } else if message_text.contains("festa") {
-        Some("Planejamento de festas".to_string())
-    }
-    // Documentos
-    else if message_text.contains("passaporte") {
-        Some("Passaporte".to_string())
-    } else if message_text.contains("cnh") {
-        Some("CNH".to_string())
-    } else if message_text.contains("cidadania") {
-        Some("Cidadanias".to_string())
-    } else if message_text.contains("visto") {
-        Some("Vistos e Vistos Eletrônicos".to_string())
-    } else if message_text.contains("certidão") {
-        Some("Certidões".to_string())
-    } else if message_text.contains("contrato") {
-        Some("Contratos/Procurações".to_string())
-    }
-    // Fallback: usar categoria padrão
-    else if let Some(category) = &classification.category {
-        match category.as_str() {
-            "Logística" => Some("Corrida de motoboy".to_string()),
-            "Plano de Saúde" => Some("Reembolso Médico".to_string()),
-            "Compras" => Some("Mercados".to_string()),
-            "Agendamentos" => Some("Consultas".to_string()),
-            "Lazer" => Some("Reserva de restaurantes/bares".to_string()),
-            "Viagens" => Some("Passagens Aéreas".to_string()),
-            "Financeiro" => Some("Rotina de Pagamentos".to_string()),
-            "Documentos" => Some("Passaporte".to_string()),
-            "Assuntos Pessoais" => Some("Telefone".to_string()),
-            _ => Some("Consultas".to_string()) // Padrão geral
-        }
-    } else {
-        None
-    }
-}
-
-/// FUNÇÃO OBSOLETA - NÃO MAIS UTILIZADA
-///
-/// NOVA IMPLEMENTAÇÃO:
-/// - Mapeamento de estrelas via config/ai_prompt.yaml
-/// - Processamento em src/models/payload.rs:348-353
-/// - Log automático: "✨ Tarefa classificada: 'categoria' > 'subcategoria' (X estrela(s))"
-///
-/// As estrelas agora são determinadas pela configuração YAML baseada na
-/// subcategoria retornada pela classificação IA
-#[allow(dead_code)]
-async fn determine_estrelas(
-    classification: &chatguru_clickup_middleware::services::OpenAIClassification,
-    _payload: &WebhookPayload,
-) -> i32 {
-    use chatguru_clickup_middleware::services::prompts::AiPromptConfig;
-
-    // Carregar configuração do YAML
-    let config = match AiPromptConfig::load_default().await {
-        Ok(cfg) => cfg,
-        Err(e) => {
-            log_warning(&format!("Failed to load AI prompt config for stars: {}, using fallback", e));
-            return 1; // Fallback direto
-        }
-    };
-
-    // Usar categoria e subcategoria retornadas pelo OpenAI para buscar as estrelas
-    if let (Some(category), Some(sub_categoria)) = (&classification.category, &classification.sub_categoria) {
-        if let Some(stars) = config.get_subcategory_stars(category, sub_categoria) {
-            log_info(&format!("⭐ Estrelas determinadas via YAML: {} ({}→{})",
-                stars, category, sub_categoria));
-            return stars as i32;
-        } else {
-            log_warning(&format!("Subcategoria '{}' não encontrada no YAML para categoria '{}', usando fallback",
-                sub_categoria, category));
-        }
-    }
-
-    // Fallback: 1 estrela padrão
-    log_info("Using fallback: 1 star");
-    1
-}
 
 // ============================================================================
 // App Engine Fallback
@@ -1611,3 +1392,4 @@ async fn forward_to_app_engine(payload: &WebhookPayload) -> AppResult<()> {
         )))
     }
 }
+
