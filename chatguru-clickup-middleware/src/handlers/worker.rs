@@ -27,8 +27,8 @@ use chatguru_clickup_middleware::models::payload::WebhookPayload;
 use chatguru_clickup_middleware::utils::{AppResult, AppError};
 use chatguru_clickup_middleware::utils::logging::*;
 use chatguru_clickup_middleware::AppState;
+use chatguru_clickup_middleware::services; // Para SecretsService
 // Usar services do crate clickup ao invés de duplicar no main project
-use clickup::folders::SmartFolderFinder;
 use clickup::assignees::SmartAssigneeFinder;
 use clickup::fields::CustomFieldManager;
 
@@ -870,68 +870,62 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
     if is_activity {
         log_info(&format!("✅ Atividade identificada: {}", classification.reason));
 
-        // NOVA LÓGICA COM SMARTFOLDERFINDER:
-        // 1. Extrai Info_2 (nome do cliente)
-        // 2. Busca folder via API do ClickUp com fuzzy matching
-        // 3. Fallback: busca em tarefas anteriores pelo campo "Cliente Solicitante"
-        // 4. Retorna folder_id + list_id do mês atual
+        // NOVA LÓGICA SIMPLIFICADA:
+        // 1. Extrai Info_2 do payload
+        // 2. Se Info_2 vazio → interrompe processamento (não classifica, não adiciona à fila)
+        // 3. Busca hierarquia do workspace unificada
+        // 4. Verifica se alguma pasta é compatível com Info_2 (normalização)
+        // 5. Se não encontrar pasta compatível → interrompe processamento
+        // 6. Se encontrar → verifica/cria lista do mês vigente
+        // 7. Cria tarefa com folder_id e list_id determinados
 
-        let client_name = extract_info_2_from_payload(payload)
-            .unwrap_or_else(|| extract_nome_from_payload(payload));
+        let info_2 = extract_info_2_from_payload(payload).unwrap_or_default();
+        
+        log_info(&format!("🔍 Validação simplificada: Info_2='{}'", info_2));
 
-        log_info(&format!("🔍 SmartFolderFinder: Buscando folder para Info_2='{}'", client_name));
-        log_info(&format!("📋 Debug campos: Info_2 (cliente)={:?}, Info_1 (empresa)={:?}, responsavel_nome (atendente)={:?}",
-            extract_info_2_from_payload(payload),
-            extract_info_1_from_payload(payload),
-            extract_responsavel_nome_from_payload(payload)
-        ));
-
-        // Inicializar SmartFolderFinder
-        let api_token = std::env::var("CLICKUP_API_TOKEN")
-            .or_else(|_| std::env::var("clickup_api_token"))
-            .or_else(|_| std::env::var("CLICKUP_TOKEN"))
-            .map_err(|_| AppError::ConfigError("CLICKUP_API_TOKEN não configurado".to_string()))?;
+        // Inicializar serviço de hierarquia do workspace
+        let secrets_service = services::SecretManagerService::new().await
+            .map_err(|e| AppError::ConfigError(format!("Failed to create SecretsService: {}", e)))?;
+        
+        let api_token = secrets_service.get_clickup_api_token().await
+            .map_err(|e| AppError::ConfigError(format!("Failed to get ClickUp token: {}", e)))?;
 
         let workspace_id = std::env::var("CLICKUP_WORKSPACE_ID")
             .or_else(|_| std::env::var("CLICKUP_TEAM_ID")) // Fallback para compatibilidade
             .unwrap_or_else(|_| "9013037641".to_string()); // Workspace ID da Nordja
 
-        // Clonar para uso posterior no assignee_finder
-        let folder_api_token = api_token.clone();
-        let folder_workspace_id = workspace_id.clone();
+        let clickup_client = clickup::ClickUpClient::new(api_token.clone())
+            .map_err(|e| AppError::ClickUpApi(format!("Failed to create ClickUp client: {}", e)))?;
 
-        let mut finder = SmartFolderFinder::from_token(folder_api_token, folder_workspace_id)
-            .map_err(|e| AppError::ClickUpApi(format!("Failed to create SmartFolderFinder: {}", e)))?;
+        let mut hierarchy_service = services::WorkspaceHierarchyService::new(clickup_client, workspace_id.clone());
 
-        // Buscar folder de forma inteligente
-        let folder_result = match finder.find_folder_for_client(&client_name).await {
-            Ok(Some(result)) => {
-                log_info(&format!(
-                    "✅ Folder encontrado: {} (id: {}, método: {:?}, confiança: {:.2})",
-                    result.folder_name,
-                    result.folder_id,
-                    result.search_method,
-                    result.confidence
-                ));
+        // Validação simplificada - verifica se Info_2 é compatível com alguma pasta
+        let validation_result = hierarchy_service.validate_and_find_target(&info_2).await
+            .map_err(|e| AppError::InternalError(format!("Workspace validation failed: {}", e)))?;
 
-                if let (Some(list_id), Some(list_name)) = (result.list_id.clone(), result.list_name.clone()) {
-                    log_info(&format!("📋 Lista do mês: {} (id: {})", list_name, list_id));
-                }
+        if !validation_result.is_valid {
+            log_warning(&format!("❌ Validação falhou: {} - INTERROMPENDO PROCESSAMENTO", validation_result.reason));
+            
+            // IMPORTANTE: Retorna sucesso mas sem processar 
+            // Não classifica com IA, não adiciona à fila, não envia para App Engine
+            return Ok(json!({
+                "status": "skipped",
+                "reason": "validation_failed",
+                "validation_reason": validation_result.reason,
+                "info_2": info_2,
+                "message": "Processamento interrompido - Info_2 inválido ou não encontrada pasta compatível"
+            }));
+        }
 
-                Some(result)
-            }
-            Ok(None) => {
-                log_warning(&format!(
-                    "⚠️ Folder não encontrado para '{}', usando fallback do ClickUpService",
-                    client_name
-                ));
-                None
-            }
-            Err(e) => {
-                log_error(&format!("❌ Erro ao buscar folder: {}, usando fallback", e));
-                None
-            }
-        };
+        let folder_id = validation_result.folder_id.clone().unwrap();
+        let folder_name = validation_result.folder_name.clone().unwrap();
+        let list_id = validation_result.list_id.clone().unwrap();
+        let list_name = validation_result.list_name.clone().unwrap();
+
+        log_info(&format!(
+            "✅ Validação aprovada: Pasta='{}' ({}), Lista='{}' ({})",
+            folder_name, folder_id, list_name, list_id
+        ));
 
         // Buscar assignee (responsável) se disponível
         let assignee_result = if let Some(ref responsavel) = extract_responsavel_nome_from_payload(payload) {
@@ -985,171 +979,111 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
             }
         }
 
-        // Processar resultado do SmartFolderFinder
-        let task_result = if let Some(folder_info) = folder_result {
-            if let Some(list_id) = folder_info.list_id {
-                // Garantir que "Cliente Solicitante" corresponda ao folder encontrado
-                log_info(&format!(
-                    "📝 Configurando 'Cliente Solicitante' para: '{}'",
-                    folder_info.folder_name
-                ));
+        // Processar resultado da validação
+        // LÓGICA SIMPLIFICADA - criar tarefa diretamente
+        let task_result = {
+            log_info(&format!(
+                "📝 Configurando 'Cliente Solicitante' para: '{}'",
+                folder_name
+            ));
 
-                let custom_field_manager = CustomFieldManager::from_token(api_token.clone())
-                    .map_err(|e| AppError::ClickUpApi(format!("Failed to create CustomFieldManager: {}", e)))?;
+            let custom_field_manager = CustomFieldManager::from_token(api_token.clone())
+                .map_err(|e| AppError::ClickUpApi(format!("Failed to create CustomFieldManager: {}", e)))?;
 
-                match custom_field_manager
-                    .ensure_client_solicitante_option(&list_id, &folder_info.folder_name)
-                    .await
-                {
-                    Ok(client_field) => {
-                        log_info("✅ Campo 'Cliente Solicitante' configurado");
+            match custom_field_manager
+                .ensure_client_solicitante_option(&list_id, &folder_name)
+                .await
+            {
+                Ok(client_field) => {
+                    log_info("✅ Campo 'Cliente Solicitante' configurado");
 
-                        // Adicionar/substituir o campo custom no task_data
-                        if let Some(obj) = task_data.as_object_mut() {
-                            // Buscar custom_fields existentes ou criar array vazio
-                            let custom_fields = obj
-                                .entry("custom_fields")
-                                .or_insert_with(|| serde_json::json!([]));
+                    // Adicionar/substituir o campo custom no task_data
+                    if let Some(obj) = task_data.as_object_mut() {
+                        // Buscar custom_fields existentes ou criar array vazio
+                        let custom_fields = obj
+                            .entry("custom_fields")
+                            .or_insert_with(|| serde_json::json!([]));
 
-                            if let Some(fields_array) = custom_fields.as_array_mut() {
-                                // Remover campo "Cliente Solicitante" se já existir
-                                fields_array.retain(|f| {
-                                    f.get("id")
-                                        .and_then(|id| id.as_str())
-                                        != Some("0ed63eec-1c50-4190-91c1-59b4b17557f6")
-                                });
+                        if let Some(fields_array) = custom_fields.as_array_mut() {
+                            // Remover campo "Cliente Solicitante" se já existir
+                            fields_array.retain(|f| {
+                                f.get("id")
+                                    .and_then(|id| id.as_str())
+                                    != Some("0ed63eec-1c50-4190-91c1-59b4b17557f6")
+                            });
 
-                                // Adicionar novo valor
-                                fields_array.push(client_field);
+                            // Adicionar novo valor
+                            fields_array.push(client_field);
 
-                                log_info(&format!(
-                                    "✅ 'Cliente Solicitante' sincronizado com folder: '{}'",
-                                    folder_info.folder_name
-                                ));
-                            }
+                            log_info(&format!(
+                                "✅ 'Cliente Solicitante' sincronizado com folder: '{}'",
+                                folder_name
+                            ));
                         }
                     }
-                    Err(e) => {
-                        log_warning(&format!(
-                            "⚠️ Erro ao configurar 'Cliente Solicitante': {}, continuando sem o campo",
-                            e
-                        ));
-                    }
                 }
-                log_info(&format!(
-                    "🎯 Criando tarefa diretamente na lista: {} (folder: {})",
-                    list_id, folder_info.folder_id
-                ));
-
-                // Adicionar list_id ao task_data
-                if let Some(obj) = task_data.as_object_mut() {
-                    obj.insert("list_id".to_string(), serde_json::json!(list_id));
+                Err(e) => {
+                    log_warning(&format!(
+                        "⚠️ Erro ao configurar 'Cliente Solicitante': {}, continuando sem o campo",
+                        e
+                    ));
                 }
-
-                // Converter Value para Task tipada
-                let task: clickup::Task = serde_json::from_value(task_data)?;
-
-                // Deduplicação: checar se já existe tarefa com o mesmo título antes de criar
-                let existing = state.clickup.find_existing_task_in_list(
-                    Some(&list_id),
-                    &task.name
-                ).await;
-
-                match existing {
-                    Ok(Some(_task_found)) => {
-                        log_info(&format!("❗ Tarefa já existe no ClickUp com o mesmo título: '{}'. Não será criada nova task.", &task.name));
-                        return Ok(serde_json::json!({
-                            "status": "duplicate",
-                            "message": "Tarefa já existente, não criada novamente",
-                            "task_title": &task.name
-                        }));
-                    }
-                    Ok(None) => {
-                        // Só cria a task se não houver duplicata
-                        match state.clickup.create_task(&task).await {
-                            Ok(created_task) => {
-                                log_info(&format!("✅ Tarefa criada via SmartFolderFinder: {}", created_task.id.as_ref().unwrap_or(&"?".to_string())));
-                                serde_json::to_value(&created_task)
-                                    .unwrap_or_else(|_| serde_json::json!({"id": created_task.id}))
-                            }
-                            Err(e) => {
-                                log_error(&format!("❌ Erro ao criar tarefa: {}", e));
-                                return Err(AppError::ClickUpApi(e.to_string()));
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        log_error(&format!("❌ Erro ao buscar duplicata no ClickUp: {}", e));
-                        return Err(AppError::ClickUpApi(e.to_string()));
-                    }
-                }
-            } else {
-                // Tem folder mas não tem lista do mês - encaminhar para App Engine
-                log_warning(&format!(
-                    "⚠️ Folder '{}' encontrado mas sem lista do mês, encaminhando para App Engine",
-                    folder_info.folder_name
-                ));
-
-                // Enviar anotação de warning ao ChatGuru
-                let warning_annotation = format!(
-                    "⚠️ **LISTA DO MÊS NÃO ENCONTRADA**\n\n\
-                    📂 Pasta: '{}'\n\
-                    📋 Lista mensal não criada ainda\n\n\
-                    ℹ️ A tarefa será processada pelo sistema legado (App Engine).\n\n\
-                    ✅ **Ação necessária**: Crie a lista do mês atual na pasta '{}' no ClickUp.",
-                    folder_info.folder_name,
-                    folder_info.folder_name
-                );
-
-                if let Err(e) = send_annotation_to_chatguru(&state, &payload, &warning_annotation).await {
-                    log_warning(&format!("⚠️ Não foi possível enviar anotação de warning: {}", e));
-                }
-
-                // Enviar payload original para o App Engine
-                forward_to_app_engine(&payload).await?;
-
-                log_info("✅ Payload encaminhado para App Engine com sucesso - Processamento encerrado");
-
-                // Retornar resposta de sucesso sem criar task no ClickUp
-                return Ok(json!({
-                    "status": "forwarded_to_app_engine",
-                    "message": "Folder encontrado mas sem lista do mês, payload encaminhado para App Engine",
-                    "folder_name": folder_info.folder_name,
-                    "app_engine_url": "https://buzzlightear.rj.r.appspot.com/webhook"
-                }));
             }
-        } else {
-            // Não encontrou folder, encaminhar para App Engine
-            log_warning(&format!("⚠️ Folder não encontrado para '{}'", client_name));
+            
+            log_info(&format!(
+                "🎯 Criando tarefa diretamente na lista: {} (folder: {})",
+                list_id, folder_id
+            ));
 
-            log_info("ℹ️ Anotação de fallback desabilitada — apenas encaminhando para o App Engine");
+            // Adicionar list_id ao task_data
+            if let Some(obj) = task_data.as_object_mut() {
+                obj.insert("list_id".to_string(), serde_json::json!(list_id));
+            }
 
-            // Enviar payload original para o App Engine e encerrar processamento
-            forward_to_app_engine(&payload).await?;
+            // Converter Value para Task tipada
+            let task: clickup::Task = serde_json::from_value(task_data)?;
 
-            log_info("✅ Payload encaminhado para App Engine com sucesso - Processamento encerrado");
+            // Deduplicação: checar se já existe tarefa com o mesmo título antes de criar
+            let existing = state.clickup.find_existing_task_in_list(
+                Some(&list_id),
+                &task.name
+            ).await;
 
-            // Retornar resposta de sucesso sem criar task no ClickUp
-            // O App Engine será responsável por todo o processamento daqui em diante
-            return Ok(json!({
-                "status": "forwarded_to_app_engine",
-                "message": "Cliente não encontrado no Cloud Run, payload encaminhado para App Engine",
-                "client_name": client_name,
-                "app_engine_url": "https://buzzlightear.rj.r.appspot.com/webhook"
-            }));
+            match existing {
+                Ok(Some(_task_found)) => {
+                    log_info(&format!("❗ Tarefa já existe no ClickUp com o mesmo título: '{}'. Não será criada nova task.", &task.name));
+                    return Ok(serde_json::json!({
+                        "status": "duplicate",
+                        "message": "Tarefa já existente, não criada novamente",
+                        "task_title": &task.name
+                    }));
+                }
+                Ok(None) => {
+                    // Só cria a task se não houver duplicata
+                    match state.clickup.create_task(&task).await {
+                        Ok(created_task) => {
+                            log_info(&format!("✅ Tarefa criada: {}", created_task.id.as_ref().unwrap_or(&"?".to_string())));
+                            serde_json::to_value(&created_task)
+                                .unwrap_or_else(|_| serde_json::json!({"id": created_task.id}))
+                        }
+                        Err(e) => {
+                            log_error(&format!("❌ Erro ao criar tarefa: {}", e));
+                            return Err(AppError::ClickUpApi(e.to_string()));
+                        }
+                    }
+                }
+                Err(e) => {
+                    log_error(&format!("❌ Erro ao buscar duplicata no ClickUp: {}", e));
+                    return Err(AppError::ClickUpApi(e.to_string()));
+                }
+            }
         };
-
         // Montar anotação com informações da task
         let task_id = task_result.get("id").and_then(|v| v.as_str()).unwrap_or("N/A");
         let task_url = task_result.get("url").and_then(|v| v.as_str()).unwrap_or("");
 
-        // CORREÇÃO: Não incluir descrição de mídia na anotação da tarefa se já foi enviada separadamente
-        // A descrição do PDF/áudio/imagem já foi enviada como anotação de mídia nas linhas 402-429
-        // Incluir aqui seria duplicação desnecessária
-        let media_description_section = String::new();
-
         let annotation = format!(
-            "✅ Tarefa criada no ClickUp\n\n📋 Descrição: {}\n🏷️ Categoria: {}\n📂 Subcategoria: {}\n⭐ Prioridade: {} estrela(s)\n🔗 Link: {}{}",
+            "✅ Tarefa criada no ClickUp\\n\\n📋 Descrição: {}\\n🏷️ Categoria: {}\\n📂 Subcategoria: {}\\n⭐ Prioridade: {} estrela(s)\\n🔗 Link: {}",
             classification.reason,
             classification.campanha.as_deref().unwrap_or("N/A"),
             classification.sub_categoria.as_deref().unwrap_or("N/A"),
@@ -1164,8 +1098,7 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
                     _ => "1"
                 })
                 .unwrap_or("N/A"),
-            task_url,
-            media_description_section
+            task_url
         );
 
         // Enviar anotação ao ChatGuru
@@ -1285,7 +1218,7 @@ fn extract_chat_id_from_payload(payload: &WebhookPayload) -> Option<String> {
 /// Info_1 = dados.campos_personalizados.Info_1
 /// Usado APENAS para preencher o campo personalizado "Conta cliente"
 /// NÃO é usado para determinar Space ou Folder
-fn extract_info_1_from_payload(payload: &WebhookPayload) -> Option<String> {
+fn _extract_info_1_from_payload(payload: &WebhookPayload) -> Option<String> {
     match payload {
         WebhookPayload::ChatGuru(p) => {
             p.campos_personalizados.get("Info_1")
@@ -1353,7 +1286,7 @@ fn extract_responsavel_nome_from_payload(payload: &WebhookPayload) -> Option<Str
 /// Usado quando o SmartFolderFinder não consegue encontrar o folder do cliente.
 /// O App Engine processa o payload com sua própria lógica e pode ter outros
 /// folders/listas cadastrados.
-async fn forward_to_app_engine(payload: &WebhookPayload) -> AppResult<()> {
+async fn _forward_to_app_engine(payload: &WebhookPayload) -> AppResult<()> {
     const APP_ENGINE_URL: &str = "https://buzzlightear.rj.r.appspot.com/webhook";
 
     log_info("🔄 Encaminhando payload para App Engine...");

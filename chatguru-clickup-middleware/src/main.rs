@@ -27,13 +27,281 @@ use handlers::{
     health_check, ready_check, status_check,
     handle_webhook,
     handle_worker,
-    list_clickup_tasks, get_clickup_list_info,  // ❌ Removido: test_clickup_connection (redundante com /ready)
-    handle_clickup_webhook, list_registered_webhooks, create_webhook,
 };
 use utils::{AppError, logging::*};
 
 // Importar novo módulo OAuth2
 use auth::{OAuth2Config, TokenManager, OAuth2State, start_oauth_flow, handle_oauth_callback};
+
+// ============================================================================
+// ClickUp Handlers usando diretamente o crate clickup
+// ============================================================================
+
+/// Handler para listar tarefas de uma lista específica do ClickUp
+async fn list_clickup_tasks(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>
+) -> Result<axum::response::Json<serde_json::Value>, AppError> {
+    use serde_json::json;
+    
+    log_request_received("/admin/clickup/tasks", "GET");
+
+    match state.clickup.get_tasks_in_list(None).await {
+        Ok(tasks) => {
+            log_info(&format!("✅ Listadas {} tasks", tasks.len()));
+            Ok(axum::response::Json(json!({
+                "success": true,
+                "tasks": tasks,
+                "count": tasks.len(),
+                "list_id": state.settings.clickup.list_id,
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            })))
+        },
+        Err(e) => {
+            log_clickup_api_error("get_tasks_in_list", None, &e.to_string());
+            Err(AppError::ClickUpApi(e.to_string()))
+        }
+    }
+}
+
+/// Handler para obter informações detalhadas sobre uma lista do ClickUp
+async fn get_clickup_list_info(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>
+) -> Result<axum::response::Json<serde_json::Value>, AppError> {
+    use serde_json::json;
+    
+    log_request_received("/admin/clickup/list", "GET");
+
+    match state.clickup.get_list_info(None).await {
+        Ok(list_info) => {
+            Ok(axum::response::Json(json!({
+                "success": true,
+                "list": list_info,
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            })))
+        },
+        Err(e) => {
+            log_clickup_api_error("get_list_info", None, &e.to_string());
+            Err(AppError::ClickUpApi(e.to_string()))
+        }
+    }
+}
+
+/// Handler para receber eventos de webhooks do ClickUp
+async fn handle_clickup_webhook(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    request: axum::extract::Request<axum::body::Body>,
+) -> Result<axum::response::Json<serde_json::Value>, AppError> {
+    use tokio::time::Instant;
+    use serde_json::json;
+    
+    let start_time = Instant::now();
+    log_request_received("/webhooks/clickup", "POST");
+
+    // Extrair body como bytes
+    let body_bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
+        .await
+        .map_err(|e| AppError::InternalError(format!("Failed to read request body: {}", e)))?;
+
+    // Validar assinatura
+    let signature = headers
+        .get("X-Signature")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| AppError::ValidationError("Missing X-Signature header".to_string()))?;
+
+    let webhook_secret = std::env::var("CLICKUP_WEBHOOK_SECRET")
+        .map_err(|_| AppError::ConfigError("CLICKUP_WEBHOOK_SECRET não configurado".to_string()))?;
+
+    if !clickup::webhooks::WebhookPayload::verify_signature(signature, &webhook_secret, &body_bytes) {
+        log_warning("❌ Assinatura inválida do webhook ClickUp!");
+        return Err(AppError::ValidationError("Invalid webhook signature".to_string()));
+    }
+
+    log_info("✅ Assinatura do webhook validada");
+
+    // Parsear payload
+    let body_str = String::from_utf8(body_bytes.to_vec())
+        .map_err(|e| AppError::ValidationError(format!("Invalid UTF-8: {}", e)))?;
+
+    let payload: clickup::webhooks::WebhookPayload = serde_json::from_str(&body_str)
+        .map_err(|e| AppError::ValidationError(format!("Invalid JSON: {}", e)))?;
+
+    log_info(&format!(
+        "📥 Evento ClickUp recebido: {:?} (webhook_id: {})",
+        payload.event, payload.webhook_id
+    ));
+
+    // Publicar no Pub/Sub
+    match publish_clickup_webhook_to_pubsub(&state, &payload).await {
+        Ok(_) => {
+            let processing_time = start_time.elapsed().as_millis() as u64;
+            log_request_processed("/webhooks/clickup", 200, processing_time);
+
+            Ok(axum::response::Json(json!({
+                "status": "success",
+                "message": "Event published to Pub/Sub"
+            })))
+        }
+        Err(e) => {
+            log_error(&format!("❌ Erro ao publicar evento no Pub/Sub: {}", e));
+            Err(AppError::InternalError(format!("Failed to publish event: {}", e)))
+        }
+    }
+}
+
+/// Handler para listar webhooks registrados
+async fn list_registered_webhooks(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+) -> Result<axum::response::Json<serde_json::Value>, AppError> {
+    use serde_json::json;
+    
+    log_request_received("/admin/clickup/webhooks", "GET");
+
+    // Obter token e workspace_id
+    let api_token = state.settings.clickup.token.clone();
+    let workspace_id = state.settings.clickup.workspace_id
+        .as_ref()
+        .ok_or_else(|| AppError::ConfigError("CLICKUP_WORKSPACE_ID não configurado".to_string()))?
+        .clone();
+
+    // Criar WebhookManager
+    let manager = clickup::webhooks::WebhookManager::from_token(api_token, workspace_id)
+        .map_err(|e| AppError::ClickUpApi(format!("Failed to create WebhookManager: {}", e)))?;
+
+    // Listar webhooks
+    let webhooks = manager.list_webhooks()
+        .await
+        .map_err(|e| AppError::ClickUpApi(format!("Failed to list webhooks: {}", e)))?;
+
+    log_info(&format!("📋 Listados {} webhooks", webhooks.len()));
+
+    Ok(axum::response::Json(json!({
+        "count": webhooks.len(),
+        "webhooks": webhooks
+    })))
+}
+
+/// Handler para criar webhook
+async fn create_webhook(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::Json(body): axum::Json<serde_json::Value>,
+) -> Result<axum::response::Json<serde_json::Value>, AppError> {
+    use serde_json::json;
+    
+    log_request_received("/admin/clickup/webhooks", "POST");
+
+    // Parsear body
+    let endpoint = body.get("endpoint")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AppError::ValidationError("Missing 'endpoint' field".to_string()))?
+        .to_string();
+
+    let events: Vec<clickup::webhooks::WebhookEvent> = body.get("events")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .ok_or_else(|| AppError::ValidationError("Invalid 'events' field".to_string()))?;
+
+    // Criar WebhookManager
+    let api_token = state.settings.clickup.token.clone();
+    let workspace_id = state.settings.clickup.workspace_id
+        .as_ref()
+        .ok_or_else(|| AppError::ConfigError("CLICKUP_WORKSPACE_ID não configurado".to_string()))?
+        .clone();
+
+    let manager = clickup::webhooks::WebhookManager::from_token(api_token, workspace_id)
+        .map_err(|e| AppError::ClickUpApi(format!("Failed to create WebhookManager: {}", e)))?;
+
+    // Criar webhook
+    let config = clickup::webhooks::WebhookConfig {
+        endpoint,
+        events,
+        status: Some("active".to_string()),
+    };
+
+    let webhook = manager.create_webhook(&config)
+        .await
+        .map_err(|e| AppError::ClickUpApi(format!("Failed to create webhook: {}", e)))?;
+
+    log_info(&format!("✅ Webhook criado: {}", webhook.id));
+
+    Ok(axum::response::Json(json!({
+        "status": "success",
+        "webhook": webhook
+    })))
+}
+
+/// Função auxiliar para publicar evento do ClickUp no Pub/Sub
+async fn publish_clickup_webhook_to_pubsub(
+    state: &AppState,
+    payload: &clickup::webhooks::WebhookPayload,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use google_cloud_pubsub::client::{Client, ClientConfig};
+    use google_cloud_googleapis::pubsub::v1::PubsubMessage;
+    use serde_json::json;
+
+    let config = ClientConfig::default().with_auth().await?;
+    let client = Client::new(config).await?;
+
+    let topic_name = state.settings.gcp.clickup_webhook_topic
+        .as_ref()
+        .map(|s| s.as_str())
+        .unwrap_or("clickup-webhook-events");
+
+    let topic = client.topic(topic_name);
+
+    if !topic.exists(None).await? {
+        return Err(format!("Topic '{}' does not exist", topic_name).into());
+    }
+
+    let publisher = topic.new_publisher(None);
+
+    let envelope = json!({
+        "webhook_id": payload.webhook_id,
+        "event": payload.event,
+        "task_id": payload.task_id,
+        "list_id": payload.list_id,
+        "folder_id": payload.folder_id,
+        "space_id": payload.space_id,
+        "data": payload.data,
+        "received_at": chrono::Utc::now().to_rfc3339(),
+        "source": "clickup-webhook"
+    });
+
+    let msg_bytes = serde_json::to_vec(&envelope)?;
+    let msg = PubsubMessage {
+        data: msg_bytes.into(),
+        ..Default::default()
+    };
+
+    // Publicar com retry
+    const MAX_RETRIES: u32 = 3;
+    const INITIAL_BACKOFF_MS: u64 = 100;
+
+    for attempt in 1..=MAX_RETRIES {
+        match publisher.publish(msg.clone()).await.get().await {
+            Ok(_) => {
+                tracing::info!(
+                    "✅ Evento ClickUp publicado no Pub/Sub - tópico: '{}', evento: {:?}",
+                    topic_name, payload.event
+                );
+                return Ok(());
+            }
+            Err(e) => {
+                if attempt < MAX_RETRIES {
+                    let backoff_ms = INITIAL_BACKOFF_MS * 2u64.pow(attempt - 1);
+                    tracing::warn!(
+                        "⚠️ Tentativa {}/{} falhou. Retry em {}ms...",
+                        attempt, MAX_RETRIES, backoff_ms
+                    );
+                    tokio::time::sleep(tokio::time::Duration::from_millis(backoff_ms)).await;
+                } else {
+                    return Err(e.into());
+                }
+            }
+        }
+    }
+
+    unreachable!()
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -172,12 +440,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ✅ Inicializar cliente ChatGuru uma única vez no AppState
     let chatguru_client = {
-        let api_token = settings.chatguru.api_token.clone()
-            .unwrap_or_else(|| "default_token".to_string());
+        // Tentar obter credenciais do config, senão buscar nos secrets
+        let api_token = match settings.chatguru.api_token.clone() {
+            Some(token) if !token.is_empty() => token,
+            _ => {
+                log_info("🔐 Buscando CHATGURU_API_TOKEN no Secret Manager...");
+                secret_manager.get_secret_value("chatguru-api-token").await
+                    .map_err(|e| format!("Falha ao buscar chatguru-api-token no Secret Manager: {}", e))?
+            }
+        };
+        
         let api_endpoint = settings.chatguru.api_endpoint.clone()
-            .unwrap_or_else(|| "https://s15.chatguru.app/api/v1".to_string());
-        let account_id = settings.chatguru.account_id.clone()
-            .unwrap_or_else(|| "default_account".to_string());
+            .ok_or("CHATGURU_API_ENDPOINT não configurado no default.toml")?;
+            
+        let account_id = match settings.chatguru.account_id.clone() {
+            Some(id) if !id.is_empty() => id,
+            _ => {
+                log_info("🔐 Buscando CHATGURU_ACCOUNT_ID no Secret Manager...");
+                secret_manager.get_secret_value("chatguru-account-id").await
+                    .map_err(|e| format!("Falha ao buscar chatguru-account-id no Secret Manager: {}", e))?
+            }
+        };
         
         chatguru::ChatGuruClient::new(api_token, api_endpoint, account_id)
     };

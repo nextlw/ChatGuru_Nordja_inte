@@ -14,8 +14,11 @@ WORKDIR /app
 # Copy Cargo files first to cache dependencies
 COPY Cargo.toml Cargo.lock ./
 
-# Copy workspace crates
-COPY crates ./crates
+# Copy workspace crates (estrutura atualizada)
+COPY chatguru ./chatguru
+COPY clickup ./clickup
+COPY ia-service ./ia-service
+COPY mensageria ./mensageria
 
 # Copy source code and config (migrations não são necessárias no runtime)
 COPY src ./src

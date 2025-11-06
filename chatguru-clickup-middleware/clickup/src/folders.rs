@@ -116,6 +116,7 @@ struct ClickUpCustomField {
     value: Option<serde_json::Value>,
 }
 
+#[derive(Debug)]
 pub struct SmartFolderFinder {
     client: ClickUpClient,
     workspace_id: String,

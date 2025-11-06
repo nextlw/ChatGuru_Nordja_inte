@@ -104,219 +104,6 @@ pub struct FieldIds {
 }
 
 impl AiPromptConfig {
-    // FUNÇÃO DESABILITADA - Sem PostgreSQL
-    // pub async fn from_database(db: &PgPool) -> AppResult<Self> {
-    /*
-    pub async fn from_database_DISABLED(db: &PgPool) -> AppResult<Self> {
-        use crate::utils::logging::{log_info, log_error};
-
-        log_info("🗄️  Loading AI prompt config from PostgreSQL database");
-
-        // Se DB não está disponível, usa configuração padrão
-        if db.is_closed() {
-            log_error("❌ Database connection is closed, falling back to YAML");
-            return Self::load_default();
-        }
-
-        // Carregar configurações básicas
-        let system_role = sqlx::query_scalar::<_, String>(
-            "SELECT value FROM prompt_config WHERE key = 'system_role' AND is_active = true"
-        )
-        .fetch_optional(db)
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| "Você é um assistente IA especializado em categorização de tarefas.".to_string());
-
-        let task_description = sqlx::query_scalar::<_, String>(
-            "SELECT value FROM prompt_config WHERE key = 'task_description' AND is_active = true"
-        )
-        .fetch_optional(db)
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| "Analise a mensagem e extraia informações para criação de tarefa.".to_string());
-
-        let response_format = sqlx::query_scalar::<_, String>(
-            "SELECT value FROM prompt_config WHERE key = 'response_format' AND is_active = true"
-        )
-        .fetch_optional(db)
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| "JSON válido conforme especificação".to_string());
-
-        // Carregar categorias
-        let categories: Vec<String> = sqlx::query_scalar::<_, String>(
-            "SELECT name FROM categories WHERE is_active = true ORDER BY display_order"
-        )
-        .fetch_all(db)
-        .await
-        .unwrap_or_else(|_| vec!["Geral".to_string()]);
-
-        // Carregar tipos de atividade usando runtime query
-        let activity_types_rows = sqlx::query_as::<_, (String, Option<String>, String)>(
-            "SELECT name, description, clickup_field_id FROM activity_types WHERE is_active = true"
-        )
-        .fetch_all(db)
-        .await
-        .unwrap_or_default();
-
-        let activity_types: Vec<ActivityType> = activity_types_rows
-            .into_iter()
-            .map(|(name, description, clickup_field_id)| ActivityType {
-                name,
-                description: description.unwrap_or_default(),
-                id: clickup_field_id,
-            })
-            .collect();
-
-        // Carregar status usando runtime query
-        let status_rows = sqlx::query_as::<_, (String, String)>(
-            "SELECT name, clickup_field_id FROM status_options WHERE is_active = true ORDER BY display_order"
-        )
-        .fetch_all(db)
-        .await
-        .unwrap_or_default();
-
-        let status_options: Vec<StatusOption> = status_rows
-            .into_iter()
-            .map(|(name, clickup_field_id)| StatusOption {
-                name,
-                id: clickup_field_id,
-            })
-            .collect();
-
-        // Carregar mapeamentos de categorias usando runtime query
-        let category_rows = sqlx::query_as::<_, (String, String)>(
-            "SELECT name, clickup_field_id FROM categories WHERE is_active = true"
-        )
-        .fetch_all(db)
-        .await
-        .unwrap_or_default();
-
-        let mut category_mappings = HashMap::new();
-        for (name, clickup_field_id) in category_rows {
-            category_mappings.insert(
-                name.clone(),
-                CategoryMapping {
-                    id: clickup_field_id,
-                },
-            );
-        }
-
-        // Carregar subcategorias usando runtime query
-        let subcategory_rows = sqlx::query_as::<_, (String, String, String, Option<i32>)>(
-            r#"
-            SELECT c.name as category_name, s.name as sub_name, s.clickup_field_id, s.stars
-            FROM subcategories s
-            JOIN categories c ON s.category_id = c.id
-            WHERE s.is_active = true
-            ORDER BY c.display_order, s.display_order
-            "#
-        )
-        .fetch_all(db)
-        .await
-        .unwrap_or_default();
-
-        let mut subcategory_mappings: HashMap<String, Vec<SubcategoryMapping>> = HashMap::new();
-        for (category_name, sub_name, clickup_field_id, stars) in subcategory_rows {
-            let mapping = SubcategoryMapping {
-                name: sub_name,
-                id: clickup_field_id,
-                stars: stars.unwrap_or(1) as u8,
-            };
-
-            subcategory_mappings
-                .entry(category_name)
-                .or_insert_with(Vec::new)
-                .push(mapping);
-        }
-
-        // Carregar regras usando runtime query
-        let rules: Vec<String> = sqlx::query_scalar::<_, String>(
-            "SELECT rule_text FROM prompt_rules WHERE is_active = true ORDER BY display_order"
-        )
-        .fetch_all(db)
-        .await
-        .unwrap_or_default();
-
-        // Carregar field IDs usando runtime queries com fallbacks
-        let category_field_id = sqlx::query_scalar::<_, String>(
-            "SELECT value FROM prompt_config WHERE key = 'category_field_id' AND is_active = true"
-        )
-        .fetch_optional(db)
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| "default_category_field".to_string());
-
-        let subcategory_field_id = sqlx::query_scalar::<_, String>(
-            "SELECT value FROM prompt_config WHERE key = 'subcategory_field_id' AND is_active = true"
-        )
-        .fetch_optional(db)
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| "default_subcategory_field".to_string());
-
-        let activity_type_field_id = sqlx::query_scalar::<_, String>(
-            "SELECT value FROM prompt_config WHERE key = 'activity_type_field_id' AND is_active = true"
-        )
-        .fetch_optional(db)
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| "default_activity_field".to_string());
-
-        let status_field_id = sqlx::query_scalar::<_, String>(
-            "SELECT value FROM prompt_config WHERE key = 'status_field_id' AND is_active = true"
-        )
-        .fetch_optional(db)
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| "default_status_field".to_string());
-
-        let stars_field_id = sqlx::query_scalar::<_, String>(
-            "SELECT value FROM prompt_config WHERE key = 'stars_field_id' AND is_active = true"
-        )
-        .fetch_optional(db)
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| "default_stars_field".to_string());
-
-        log_info(&format!(
-            "✅ AI prompt config loaded from database successfully: {} categories, {} activity_types, {} rules",
-            categories.len(),
-            activity_types.len(),
-            rules.len()
-        ));
-
-        Ok(AiPromptConfig {
-            system_role,
-            task_description,
-            categories,
-            activity_types,
-            status_options,
-            category_mappings,
-            subcategory_mappings,
-            subcategory_examples: HashMap::new(), // Pode ser populado depois se necessário
-            rules,
-            response_format,
-            cliente_solicitante_mappings: HashMap::new(), // TODO: carregar do banco
-            field_ids: Some(FieldIds {
-                category_field_id,
-                subcategory_field_id,
-                activity_type_field_id,
-                status_field_id,
-                stars_field_id,
-            }),
-        })
-    }
-    */
-
     /// Carrega a configuração do prompt de um arquivo YAML
     pub fn from_file<P: AsRef<Path>>(path: P) -> AppResult<Self> {
         use crate::utils::logging::log_info;
@@ -483,6 +270,119 @@ impl AiPromptConfig {
                 Self::from_file("config/ai_prompt.yaml")
             }
         }
+    }
+
+    /// Load configuration with GCS fallback
+    /// First tries to load from local YAML file, then from GCS bucket
+    pub async fn load_with_gcs_fallback() -> AppResult<Self> {
+        use crate::utils::logging::{log_info, log_warning, log_error};
+        
+        // 1. First attempt: try to load from local YAML file
+        match Self::from_file("config/ai_prompt.yaml") {
+            Ok(config) => {
+                log_info("✅ Prompt config loaded from local YAML file");
+                Ok(config)
+            },
+            Err(local_err) => {
+                log_warning(&format!("⚠️ Local YAML file not found, trying GCS fallback: {}", local_err));
+                
+                // 2. Fallback: try to load from GCS bucket
+                match Self::load_from_gcs().await {
+                    Ok(config) => {
+                        log_info("✅ Prompt config loaded from GCS bucket");
+                        Ok(config)
+                    },
+                    Err(gcs_err) => {
+                        log_error(&format!("❌ Both local and GCS loading failed. Local: {} | GCS: {}", local_err, gcs_err));
+                        Err(AppError::InternalError(format!(
+                            "Failed to load prompt config from both local file and GCS. Local: {} | GCS: {}",
+                            local_err, gcs_err
+                        )))
+                    }
+                }
+            }
+        }
+    }
+
+    /// Load configuration from GCS bucket (private method)
+    async fn load_from_gcs() -> AppResult<Self> {
+        use crate::utils::logging::{log_info, log_error};
+        use google_cloud_storage::client::{Client, ClientConfig};
+        use google_cloud_storage::http::objects::download::Range;
+        use google_cloud_storage::http::objects::get::GetObjectRequest;
+        
+        let bucket_name = "chatguru-clickup-configs";
+        let object_name = "ai_prompt.yaml";
+        
+        log_info(&format!("🌐 Attempting to load prompt config from GCS: gs://{}/{}", bucket_name, object_name));
+        
+        // Initialize GCS client
+        let config = ClientConfig::default().with_auth().await.map_err(|e| {
+            AppError::InternalError(format!("Failed to initialize GCS client: {}", e))
+        })?;
+        let client = Client::new(config);
+        
+        // Download the file content
+        let request = GetObjectRequest {
+            bucket: bucket_name.to_string(),
+            object: object_name.to_string(),
+            ..Default::default()
+        };
+        
+        let response = client.download_object(&request, &Range::default()).await.map_err(|e| {
+            log_error(&format!("❌ Failed to download from GCS: {}", e));
+            AppError::InternalError(format!("Failed to download prompt config from GCS: {}", e))
+        })?;
+        
+        // Parse YAML content
+        let yaml_content = String::from_utf8(response).map_err(|e| {
+            AppError::InternalError(format!("Failed to parse GCS content as UTF-8: {}", e))
+        })?;
+        
+        // Parse usando a estrutura YAML auxiliar
+        let yaml_config: YamlAiPromptConfig = serde_yaml::from_str(&yaml_content)
+            .map_err(|e| AppError::InternalError(format!("Failed to parse YAML from GCS: {}", e)))?;
+        
+        // Converter category_mappings de Vec<YamlCategoryField> para HashMap<String, CategoryMapping>
+        let mut category_mappings = HashMap::new();
+        for field in yaml_config.category_mappings {
+            for option in field.type_config.options {
+                category_mappings.insert(
+                    option.name.clone(),
+                    CategoryMapping {
+                        id: option.id.clone(),
+                    },
+                );
+            }
+        }
+        
+        let categories = if yaml_config.categories.is_empty() {
+            category_mappings.keys().cloned().collect()
+        } else {
+            yaml_config.categories
+        };
+        
+        log_info(&format!(
+            "✅ Successfully loaded prompt config from GCS bucket: {} categories, {} activity_types, {} rules",
+            categories.len(),
+            yaml_config.activity_types.len(),
+            yaml_config.rules.len()
+        ));
+        
+        Ok(AiPromptConfig {
+            system_role: yaml_config.system_role,
+            task_description: yaml_config.task_description,
+            categories,
+            activity_types: yaml_config.activity_types,
+            status_options: yaml_config.status_options,
+            category_mappings,
+            subcategory_mappings: yaml_config.subcategory_mappings,
+            subcategory_examples: yaml_config.subcategory_examples,
+            rules: yaml_config.rules,
+            response_format: yaml_config.response_format,
+            field_ids: yaml_config.field_ids,
+            cliente_solicitante_mappings: yaml_config.cliente_solicitante_mappings,
+        })
     }
     
     /// Gera o prompt formatado para o Vertex AI

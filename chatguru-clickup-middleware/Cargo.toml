@@ -1,10 +1,10 @@
 [workspace]
 members = [
     ".",
-    "crates/mensageria",
-    "crates/ia-service",
-    "crates/clickup",
-    "crates/chatguru",
+    "mensageria",
+    "ia-service",
+    "clickup",
+    "chatguru",
 ]
 resolver = "2"
 
@@ -25,10 +25,10 @@ path = "src/main.rs"
 
 [dependencies]
 # Local crates
-mensageria = { path = "crates/mensageria" }
-ia-service = { path = "crates/ia-service" }
-clickup = { path = "crates/clickup" }
-chatguru = { path = "crates/chatguru" }
+mensageria = { path = "mensageria" }
+ia-service = { path = "ia-service" }
+clickup = { path = "clickup" }
+chatguru = { path = "chatguru" }
 
 # Web framework
 axum = { version = "0.7", features = ["json", "macros", "tokio"] }
@@ -62,11 +62,17 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 # Time handling
 chrono = { version = "0.4", features = ["serde"] }
 
-# String similarity (fuzzy matching)
+# JSON Path queries for hierarchical navigation
+jmespath = "0.3"
+
+# String similarity (fuzzy matching) - MANTIDO temporariamente para compatibilidade
 strsim = "0.11"
 
-# Unicode normalization (remove accents)
+# Unicode normalization (remove accents) - MANTIDO temporariamente para compatibilidade  
 deunicode = "1.6"
+
+# Unicode NFKD normalization for advanced text processing
+unicode-normalization = "0.1"
 
 # Cryptography
 hmac = "0.12"

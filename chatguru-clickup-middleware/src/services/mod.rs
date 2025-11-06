@@ -3,11 +3,13 @@
 // NOTA: ChatGuru agora é um crate separado em crates/chatguru/
 pub mod secrets;
 pub mod prompts;  // Configuração de prompts AI (YAML-only, sem PostgreSQL)
+pub mod workspace_hierarchy;  // Validação simplificada da hierarquia do workspace
 
 // Re-exports (explícitos para evitar ambiguidade)
 pub use chatguru::ChatGuruClient;
 pub use prompts::AiPromptConfig;
 pub use secrets::SecretManagerService;  // ✅ Exporta SecretManagerService
+pub use workspace_hierarchy::{WorkspaceHierarchyService, WorkspaceValidation};
 
 // Re-exporta do crate mensageria
 pub use mensageria::{MessageQueueService, QueuedMessage};

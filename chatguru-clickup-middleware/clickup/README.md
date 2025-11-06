@@ -1,6 +1,6 @@
 # ClickUp API Client
 
-Cliente completo e tipo-seguro para a API do ClickUp, com funcionalidades avançadas de busca inteligente (fuzzy matching), suporte híbrido para API v2 e v3, e tipos estruturados.
+Cliente completo e tipo-seguro para a API do ClickUp, com funcionalidades avançadas de busca inteligente (fuzzy matching) e tipos estruturados.
 
 ## 🎯 Features
 
@@ -11,7 +11,7 @@ Cliente completo e tipo-seguro para a API do ClickUp, com funcionalidades avanç
 - ✅ **Task Manager**: CRUD completo com assignees, status, subtasks, due dates, dependencies
 - ✅ **Webhook Manager**: Gerenciamento completo de webhooks (create, list, update, delete)
 - ✅ **Webhook Signature Verification**: Validação HMAC-SHA256 para segurança
-- ✅ **API Híbrida v2+v3**: Suporte para ambas as versões da API
+- ✅ **API v2**: Usa exclusivamente a API v2 estável do ClickUp
 - ✅ **Error Handling**: Tipos de erro específicos com `thiserror`
 - ✅ **Async/Await**: Totalmente assíncrono com Tokio
 - ✅ **Cache**: Sistema de cache in-memory para otimização
@@ -235,13 +235,9 @@ crates/clickup/src/
 └── lib.rs            # Re-exports públicos
 ```
 
-### API Híbrida v2 + v3
+### API ClickUp v2
 
-Este crate implementa uma **estratégia híbrida**:
-
-- **API v2**: Usado para spaces, folders, lists, tasks, custom fields (endpoints estáveis)
-- **API v3**: Preparado para workspaces, groups, docs (quando disponível)
-- **Nomenclatura v3**: Usa `workspace_id` internamente para clareza
+Este crate utiliza exclusivamente a API v2 do ClickUp que é estável e completa:
 
 #### Cliente HTTP
 
@@ -249,38 +245,35 @@ Este crate implementa uma **estratégia híbrida**:
 pub struct ClickUpClient {
     http_client: HttpClient,
     api_token: String,
-    base_url_v2: String,  // "https://api.clickup.com/api/v2"
-    base_url_v3: String,  // "https://api.clickup.com/api/v3"
+    base_url: String,  // "https://api.clickup.com/api/v2"
 }
 ```
 
 **Métodos disponíveis**:
-- `get_json(endpoint)` - Padrão usa v2
-- `post_json(endpoint, body)` - Padrão usa v2
-- `put_json(endpoint, body)` - Padrão usa v2
-- `delete_json(endpoint)` - Padrão usa v2
-- `get_json_v3(endpoint)` - Força v3 (para migração futura)
-- `post_json_v3(endpoint, body)` - Força v3
+- `get_json(endpoint)` - Requisição GET com JSON
+- `post_json(endpoint, body)` - Requisição POST com JSON
+- `put_json(endpoint, body)` - Requisição PUT com JSON
+- `delete_json(endpoint)` - Requisição DELETE com JSON
 
-#### Mapeamento de Endpoints
+#### Endpoints Principais
 
-| Recurso | API v2 (atual) | API v3 (futuro) |
-|---------|----------------|-----------------|
-| Spaces | `/team/{team_id}/space` | `/workspaces/{workspace_id}/spaces` |
-| Folders | `/space/{space_id}/folder` | ❌ Não migrado |
-| Lists | `/folder/{folder_id}/list` | ❌ Não migrado |
-| Tasks | `/list/{list_id}/task` | ❌ Não migrado |
-| Workspaces | ❌ Não existe | `/workspaces` ✅ |
-| Groups | `/team/{team_id}/group` | `/workspaces/{workspace_id}/groups` ✅ |
+| Recurso | Endpoint API v2 |
+|---------|----------------|
+| Spaces | `/team/{team_id}/space` |
+| Folders | `/space/{space_id}/folder` |
+| Lists | `/folder/{folder_id}/list` |
+| Tasks | `/list/{list_id}/task` |
+| Webhooks | `/team/{team_id}/webhook` |
+| Custom Fields | `/list/{list_id}/field` |
 
 #### Nomenclatura
 
 **Interno (código)**:
 ```rust
-let workspace_id = "9013037641"; // ✅ Nomenclatura v3
+let workspace_id = "9013037641"; // workspace_id usado internamente
 ```
 
-**API calls (atual)**:
+**API calls**:
 ```rust
 // Internamente: workspace_id = "9013037641"
 // Na API v2: /team/9013037641/space

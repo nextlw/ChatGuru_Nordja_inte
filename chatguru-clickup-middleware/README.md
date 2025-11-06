@@ -207,6 +207,9 @@ gcloud secrets create clickup-oauth-token --data-file=-
 
 # ChatGuru API Token
 echo "token..." | gcloud secrets create chatguru-api-token --data-file=-
+
+# ChatGuru Account ID
+echo "account_id..." | gcloud secrets create chatguru-account-id --data-file=-
 ```
 
 ### Mapeamento de Clientes

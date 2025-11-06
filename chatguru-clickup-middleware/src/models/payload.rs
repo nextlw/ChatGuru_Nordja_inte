@@ -516,7 +516,7 @@ impl WebhookPayload {
         let info_2_str = payload.campos_personalizados.get("Info_2").and_then(|v| v.as_str());
         let nome_contato = if !payload.nome.is_empty() { Some(payload.nome.as_str()) } else { None };
 
-        match AiPromptConfig::load_default().await {
+        match AiPromptConfig::load_with_gcs_fallback().await {
             Ok(config) => {
                 tracing::info!("✅ Config carregado com sucesso, {} clientes mapeados",
                     config.cliente_solicitante_mappings.len());
