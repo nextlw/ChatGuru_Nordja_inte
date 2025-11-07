@@ -213,11 +213,12 @@ impl WebhookPayload {
     /// Converte payload para dados do ClickUp com classificação AI
     pub async fn to_clickup_task_data_with_ai(
         &self,
-        ai_classification: Option<&crate::services::OpenAIClassification>
+        ai_classification: Option<&crate::services::OpenAIClassification>,
+        prompt_config: &AiPromptConfig,
     ) -> serde_json::Value {
         match self {
             WebhookPayload::ChatGuru(payload) => {
-                self.chatguru_to_clickup_with_ai(payload, ai_classification).await
+                self.chatguru_to_clickup_with_ai(payload, ai_classification, prompt_config).await
             },
             WebhookPayload::EventType(payload) => {
                 self.eventtype_to_clickup(payload)
@@ -232,7 +233,8 @@ impl WebhookPayload {
     async fn chatguru_to_clickup_with_ai(
         &self,
         payload: &ChatGuruPayload,
-        ai_classification: Option<&crate::services::OpenAIClassification>
+        ai_classification: Option<&crate::services::OpenAIClassification>,
+        prompt_config: &AiPromptConfig,
     ) -> serde_json::Value {
         // NOVO FORMATO: descrição focada na mensagem
         let mut description = String::new();
@@ -364,94 +366,85 @@ impl WebhookPayload {
                 tracing::info!("📋 List sugerida pela AI: {}", list_name);
             }
             
-            // Carregar configuração para obter os IDs corretos
-            // Por enquanto usar os IDs hardcoded, mas idealmente isso viria do prompt_config
-            // TODO: Passar o prompt_config como parâmetro ou carregá-lo aqui
+            // Configuração carregada uma vez no worker e reutilizada aqui (melhoria de performance)
             
             // Tipo de Atividade (dropdown) - OTIMIZADO: usar YAML como única fonte
             if let Some(ref tipo) = ai.tipo_atividade {
-                if let Ok(config) = AiPromptConfig::load_default().await {
-                    // Buscar ID do tipo de atividade
-                    if let Some(activity_type) = config.activity_types.iter().find(|at| at.name == *tipo) {
-                        let field_id = config.get_field_ids()
-                            .map(|ids| ids.activity_type_field_id.clone())
-                            .unwrap_or_else(|| "f1259ffb-7be8-49ff-92f8-5ff9882888d0".to_string());
+                // Buscar ID do tipo de atividade
+                if let Some(activity_type) = prompt_config.activity_types.iter().find(|at| at.name == *tipo) {
+                    let field_id = prompt_config.get_field_ids()
+                        .map(|ids| ids.activity_type_field_id.clone())
+                        .unwrap_or_else(|| "f1259ffb-7be8-49ff-92f8-5ff9882888d0".to_string());
 
-                        custom_fields.push(serde_json::json!({
-                            "id": field_id,
-                            "value": activity_type.id
-                        }));
-                    } else {
-                        tracing::warn!("Tipo de atividade '{}' não encontrado no YAML config", tipo);
-                    }
+                    custom_fields.push(serde_json::json!({
+                        "id": field_id,
+                        "value": activity_type.id
+                    }));
+                } else {
+                    tracing::warn!("Tipo de atividade '{}' não encontrado no YAML config", tipo);
                 }
             }
             
             // Categoria (dropdown) - OTIMIZADO: usar YAML como única fonte
             if let Some(ref category) = ai.category {
-                if let Ok(config) = AiPromptConfig::load_default().await {
-                    // Obter ID da categoria do YAML
-                    if let Some(cat_id) = config.get_category_id(category) {
-                        // Obter ID do campo categoria do YAML
-                        let field_id = config.get_field_ids()
-                            .map(|ids| ids.category_field_id.clone())
-                            .unwrap_or_else(|| "c19b4f95-1ff7-4966-b201-02905d33cec6".to_string());
+                // Obter ID da categoria do YAML
+                if let Some(cat_id) = prompt_config.get_category_id(category) {
+                    // Obter ID do campo categoria do YAML
+                    let field_id = prompt_config.get_field_ids()
+                        .map(|ids| ids.category_field_id.clone())
+                        .unwrap_or_else(|| "c19b4f95-1ff7-4966-b201-02905d33cec6".to_string());
 
-                        custom_fields.push(serde_json::json!({
-                            "id": field_id,
-                            "value": cat_id
-                        }));
-                    } else {
-                        tracing::warn!("Categoria '{}' não encontrada no YAML config", category);
-                    }
+                    custom_fields.push(serde_json::json!({
+                        "id": field_id,
+                        "value": cat_id
+                    }));
                 } else {
-                    tracing::error!("Falha ao carregar ai_prompt.yaml para obter ID da categoria");
+                    tracing::warn!("Categoria '{}' não encontrada no YAML config", category);
                 }
             }
             
             // Subcategoria (dropdown) - OTIMIZADO: usar mapeamento com IDs e estrelas
             if let Some(ref sub_categoria) = ai.sub_categoria {
                 if let Some(ref category) = ai.category {
-                    if let Ok(config) = AiPromptConfig::load_default().await {
-                        if let Some(subcat_id) = config.get_subcategory_id(category, sub_categoria) {
-                            let field_id = config.get_field_ids()
-                                .map(|ids| ids.subcategory_field_id.clone())
-                                .unwrap_or_else(|| "5333c095-eb40-4a5a-b0c2-76bfba4b1094".to_string());
+                    if let Some(subcat_id) = prompt_config.get_subcategory_id(category, sub_categoria) {
+                        let field_id = prompt_config.get_field_ids()
+                            .map(|ids| ids.subcategory_field_id.clone())
+                            .unwrap_or_else(|| "5333c095-eb40-4a5a-b0c2-76bfba4b1094".to_string());
+
+                        custom_fields.push(serde_json::json!({
+                            "id": field_id,
+                            "value": subcat_id
+                        }));
+
+                        // Adicionar campo de Estrelas (emoji rating)
+                        if let Some(stars) = prompt_config.get_subcategory_stars(category, sub_categoria) {
+                            let stars_field_id = prompt_config.get_field_ids()
+                                .map(|ids| ids.stars_field_id.clone())
+                                .unwrap_or_else(|| "83afcb8c-2866-498f-9c62-8ea9666b104b".to_string());
 
                             custom_fields.push(serde_json::json!({
-                                "id": field_id,
-                                "value": subcat_id
+                                "id": stars_field_id,
+                                "value": stars  // Número inteiro de 1 a 4
                             }));
 
-                            // Adicionar campo de Estrelas (emoji rating)
-                            if let Some(stars) = config.get_subcategory_stars(category, sub_categoria) {
-                                let stars_field_id = config.get_field_ids()
-                                    .map(|ids| ids.stars_field_id.clone())
-                                    .unwrap_or_else(|| "83afcb8c-2866-498f-9c62-8ea9666b104b".to_string());
-
-                                custom_fields.push(serde_json::json!({
-                                    "id": stars_field_id,
-                                    "value": stars  // Número inteiro de 1 a 4
-                                }));
-
-                                tracing::info!(
-                                    "✨ Tarefa classificada: '{}' > '{}' ({} estrela{})",
-                                    category, sub_categoria, stars, if stars > 1 { "s" } else { "" }
-                                );
-                            }
-                        } else {
-                            tracing::warn!(
-                                "⚠️ Subcategoria '{}' não encontrada para categoria '{}'",
-                                sub_categoria, category
+                            tracing::info!(
+                                "✨ Tarefa classificada: '{}' > '{}' ({} estrela{})",
+                                category, sub_categoria, stars, if stars > 1 { "s" } else { "" }
                             );
                         }
+                    } else {
+                        tracing::warn!(
+                            "⚠️ Subcategoria '{}' não encontrada para categoria '{}'",
+                            sub_categoria, category
+                        );
                     }
                 }
             }
 
             // GARANTIR PRESENÇA DOS CAMPOS CATEGORIA_NOVA E SUBCATEGORIA_NOVA SEMPRE
             // Estes campos usam o ID da opção, não o nome
-            if let Ok(config) = AiPromptConfig::load_default().await {
+            {
+                let config = prompt_config; // Usar config passado como parâmetro
                 if let Some(field_ids) = config.get_field_ids() {
                     // Verificar se Categoria_nova já foi adicionada
                     if !custom_fields.iter().any(|f| f["id"] == field_ids.category_field_id) {
@@ -491,19 +484,17 @@ impl WebhookPayload {
             
             // Status Back Office (dropdown) - OTIMIZADO: usar YAML como única fonte
             if let Some(ref status) = ai.status_back_office {
-                if let Ok(config) = AiPromptConfig::load_default().await {
-                    if let Some(status_id) = config.get_status_id(status) {
-                        let field_id = config.get_field_ids()
-                            .map(|ids| ids.status_field_id.clone())
-                            .unwrap_or_else(|| "6abbfe79-f80b-4b55-9b4b-9bd7f65b6458".to_string());
+                if let Some(status_id) = prompt_config.get_status_id(status) {
+                    let field_id = prompt_config.get_field_ids()
+                        .map(|ids| ids.status_field_id.clone())
+                        .unwrap_or_else(|| "6abbfe79-f80b-4b55-9b4b-9bd7f65b6458".to_string());
 
-                        custom_fields.push(serde_json::json!({
-                            "id": field_id,
-                            "value": status_id
-                        }));
-                    } else {
-                        tracing::warn!("Status '{}' não encontrado no YAML config", status);
-                    }
+                    custom_fields.push(serde_json::json!({
+                        "id": field_id,
+                        "value": status_id
+                    }));
+                } else {
+                    tracing::warn!("Status '{}' não encontrado no YAML config", status);
                 }
             }
         }

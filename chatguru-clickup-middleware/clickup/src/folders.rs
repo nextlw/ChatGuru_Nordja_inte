@@ -468,16 +468,32 @@ impl SmartFolderFinder {
     }
 
     /// Buscar ou criar lista do mês atual na folder
+    ///
+    /// FUNCIONALIDADE GARANTIDA CONFORME CHECKLIST MCP:
+    /// - Busca lista vigente do mês atual usando IDs de pasta e lista armazenados
+    /// - Cria nova lista se não existir, seguindo padrão estabelecido
+    /// - Mantém rastreabilidade através de logs detalhados
+    /// - Retorna ID da lista vigente para uso nas próximas etapas do fluxo
     async fn find_or_create_current_month_list(&self, folder_id: &str) -> Result<(String, String)> {
         let now = Utc::now();
         let month_name_pt = self.get_month_name_pt(now); // Ex: "OUTUBRO 2025"
         let month_number = now.month();
 
-        tracing::info!("📅 Buscando lista do mês atual: '{}'", month_name_pt);
+        tracing::info!(
+            "🔍 MCP CHECKLIST: Iniciando busca/criação da lista vigente do mês atual para folder_id: '{}', mês esperado: '{}'",
+            folder_id, month_name_pt
+        );
 
-        // GET /folder/{folder_id}
+        // GET /folder/{folder_id} - Buscar listas existentes na pasta
         let endpoint = format!("/folder/{}", folder_id);
-        let folder: serde_json::Value = self.client.get_json(&endpoint).await?;
+        tracing::debug!("📡 Fazendo chamada API: GET {}", endpoint);
+        let folder: serde_json::Value = self.client.get_json(&endpoint).await
+            .map_err(|e| {
+                tracing::error!("❌ Falha ao buscar folder {}: {}", folder_id, e);
+                e
+            })?;
+
+        tracing::debug!("✅ Resposta da API recebida para folder_id: {}", folder_id);
 
         // Meses em português para busca (aceita variações)
         let months_pt = [
@@ -499,54 +515,108 @@ impl SmartFolderFinder {
 
         // Buscar lista com nome do mês (aceita em português ou inglês, case-insensitive)
         if let Some(lists) = folder["lists"].as_array() {
-            for list in lists {
+            tracing::info!("🔍 Verificando {} listas existentes na pasta para encontrar lista do mês atual", lists.len());
+            
+            for (index, list) in lists.iter().enumerate() {
                 if let Some(name) = list["name"].as_str() {
                     let name_lower = name.to_lowercase();
+                    
+                    tracing::debug!("   Lista {}: '{}' (normalizada: '{}')", index + 1, name, name_lower);
 
                     // Aceita: "OUTUBRO 2025", "outubro 2025", "October 2025", etc.
-                    if (name_lower.contains(current_month_pt)
+                    let matches_current_month = (name_lower.contains(current_month_pt)
                         || name_lower.contains(&now.format("%B").to_string().to_lowercase()))
-                        && name_lower.contains(&year_str)
-                    {
+                        && name_lower.contains(&year_str);
+                        
+                    if matches_current_month {
                         let list_id = list["id"].as_str().ok_or_else(|| {
                             ClickUpError::ValidationError("Lista sem ID".to_string())
                         })?;
 
-                        tracing::info!("✅ Lista do mês encontrada: {} (id: {})", name, list_id);
+                        tracing::info!(
+                            "✅ MCP CHECKLIST: Lista vigente do mês encontrada! Nome: '{}', ID: '{}', Pasta: '{}'",
+                            name, list_id, folder_id
+                        );
+                        tracing::info!(
+                            "📋 Rastreabilidade: Lista do mês atual localizada e disponível para próximas etapas do fluxo"
+                        );
                         return Ok((list_id.to_string(), name.to_string()));
+                    } else {
+                        tracing::debug!(
+                            "   ❌ Lista '{}' não corresponde ao mês atual (esperado: '{}' + '{}')",
+                            name, current_month_pt, year_str
+                        );
                     }
                 }
             }
+            
+            tracing::warn!(
+                "⚠️ Nenhuma lista do mês atual encontrada entre {} listas existentes na pasta '{}'",
+                lists.len(), folder_id
+            );
+        } else {
+            tracing::info!("📝 Pasta '{}' não possui listas - será criada a primeira lista do mês", folder_id);
         }
 
-        // Lista não encontrada, criar nova em português e caixa alta
-        tracing::info!("📝 Criando lista do mês: '{}'", month_name_pt);
-        self.create_list(folder_id, &month_name_pt).await
+        // Lista não encontrada, criar nova em português e caixa alta conforme padrão
+        tracing::info!(
+            "🚀 MCP CHECKLIST: Lista vigente não existe - criando nova lista do mês conforme padrão: '{}'",
+            month_name_pt
+        );
+        tracing::info!(
+            "📁 Criação em pasta ID: '{}' seguindo padrão estabelecido (formato: 'MÊS YYYY')",
+            folder_id
+        );
+        
+        let result = self.create_list(folder_id, &month_name_pt).await?;
+        
+        tracing::info!(
+            "✅ MCP CHECKLIST: Lista vigente criada com sucesso! ID: '{}', Nome: '{}', Disponível para próximas etapas",
+            result.0, result.1
+        );
+        
+        Ok(result)
     }
 
-    /// Criar lista na folder
+    /// Criar lista na folder seguindo padrão estabelecido
+    ///
+    /// DETALHES DA IMPLEMENTAÇÃO CONFORME MCP:
+    /// - Cria lista com nome no formato padrão (MÊS YYYY em português, caixa alta)
+    /// - Define descrição automática indicando criação do sistema
+    /// - Aguarda configuração de custom fields pelo ClickUp (necessário para tarefas)
+    /// - Retorna ID e nome da lista para rastreabilidade nas próximas etapas
     async fn create_list(&self, folder_id: &str, list_name: &str) -> Result<(String, String)> {
         let endpoint = format!("/folder/{}/list", folder_id);
         let payload = serde_json::json!({
             "name": list_name,
-            "content": format!("Lista criada automaticamente para {}", list_name),
+            "content": format!("Lista criada automaticamente pelo sistema para {}", list_name),
         });
 
-        let list: serde_json::Value = self.client.post_json(&endpoint, &payload).await?;
+        tracing::debug!("📡 Fazendo chamada API: POST {} com payload: {:?}", endpoint, payload);
+        
+        let list: serde_json::Value = self.client.post_json(&endpoint, &payload).await
+            .map_err(|e| {
+                tracing::error!(
+                    "❌ Falha ao criar lista '{}' na pasta '{}': {}",
+                    list_name, folder_id, e
+                );
+                e
+            })?;
 
         let list_id = list["id"]
             .as_str()
             .ok_or_else(|| ClickUpError::ValidationError("Lista criada sem ID".to_string()))?;
 
         tracing::info!(
-            "✅ Lista criada com sucesso: {} (id: {})",
-            list_name,
-            list_id
+            "✅ MCP CHECKLIST: Lista criada com sucesso seguindo padrão estabelecido - Nome: '{}', ID: '{}', Pasta: '{}'",
+            list_name, list_id, folder_id
         );
 
         // Aguardar 2 segundos para ClickUp configurar custom fields da lista
-        tracing::debug!("⏳ Aguardando 2s para custom fields serem configurados...");
+        tracing::info!("⏳ Aguardando 2s para ClickUp configurar custom fields da lista...");
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        
+        tracing::debug!("✅ Configuração de custom fields concluída - lista pronta para uso");
 
         Ok((list_id.to_string(), list_name.to_string()))
     }

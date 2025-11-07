@@ -44,8 +44,313 @@ use clickup::assignees::SmartAssigneeFinder;
 // REMOVIDO: use clickup::fields::CustomFieldManager;
 // Motivo: Eliminação da lógica do campo "Cliente Solicitante"
 
+/// 🏗️ ESTRUTURA: Contexto organizacional para enriquecer classificação IA
+///
+/// OBJETIVO: Encapsular informações de estrutura organizacional (folder/list) 
+/// para fornecer contexto rico à IA na classificação de tarefas
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct OrganizationalContext {
+    /// ID da pasta no ClickUp
+    folder_id: String,
+    /// Nome da pasta para contexto
+    folder_name: String,
+    /// ID da lista no ClickUp
+    list_id: String,
+    /// Nome da lista para contexto
+    list_name: String,
+}
+
+/// 🧠 RESULTADO DA CLASSIFICAÇÃO IA
+///
+/// Estrutura que armazena o resultado detalhado da análise IA sobre o conteúdo
+#[derive(Debug, Clone)]
+struct AiClassificationResult {
+    /// Se o conteúdo é uma task válida
+    is_task: bool,
+    /// Nível de confiança da classificação (0.0 a 1.0)
+    confidence: f32,
+    /// Razão para a classificação
+    reason: String,
+    /// Campanha identificada (opcional)
+    campanha: Option<String>,
+    /// Sub-categoria da atividade (opcional)
+    sub_categoria: Option<String>,
+    /// Prioridade sugerida (1-4, sendo 1 mais urgente)
+    priority: Option<u8>,
+    /// Se contexto organizacional foi usado na análise
+    organizational_context_used: bool,
+}
+
 // Configuração de retry
 const MAX_RETRY_ATTEMPTS: u32 = 3;
+
+/// 🤖 FUNÇÃO PRINCIPAL: Classificação IA de conteúdo
+///
+/// OBJETIVO: Determinar se o conteúdo recebido constitui uma task válida para criação no ClickUp
+/// BENEFÍCIO: Automatiza a triagem de mensagens, reduzindo ruído e melhorando qualidade das tarefas
+///
+/// PARÂMETROS:
+/// - payload: Payload completo do ChatGuru com todo contexto da conversa
+/// - organizational_context: Contexto organizacional opcional (folder/list) para enriquecer análise
+///
+/// RETORNO:
+/// - Ok(AiClassificationResult): Resultado detalhado da classificação
+/// - Err(AppError): Erro na comunicação com IA ou processamento
+///
+/// INTEGRAÇÃO: Utiliza serviços OpenAI via SecretsService para análise de texto
+async fn classify_content_with_ai(
+    payload: &WebhookPayload,
+    organizational_context: Option<&OrganizationalContext>,
+) -> Result<AiClassificationResult, AppError> {
+    // 📋 LOG DE INÍCIO DA CLASSIFICAÇÃO IA
+    log_info("🤖 INICIANDO CLASSIFICAÇÃO IA DE CONTEÚDO");
+    
+    // 🔑 OBTENÇÃO DE CREDENCIAIS OPENAI
+    let secrets_service = match services::SecretManagerService::new().await {
+        Ok(service) => service,
+        Err(e) => {
+            log_error(&format!("❌ Falha ao inicializar SecretsService: {}", e));
+            return Err(AppError::ConfigError(format!("Secrets service error: {}", e)));
+        }
+    };
+
+    let openai_api_key = match secrets_service.get_openai_api_key().await {
+        Ok(key) => key,
+        Err(e) => {
+            log_error(&format!("❌ Falha ao obter chave OpenAI: {}", e));
+            return Err(AppError::ConfigError(format!("OpenAI key error: {}", e)));
+        }
+    };
+
+    // 📝 EXTRAÇÃO DE CONTEXTO PARA IA
+    // 📝 EXTRAÇÃO DE CONTEXTO PARA IA - baseado na estrutura correta do WebhookPayload
+    let (message_content, client_name, attendant_name) = match payload {
+        WebhookPayload::ChatGuru(chatguru_payload) => {
+            let message = if !chatguru_payload.texto_mensagem.is_empty() {
+                chatguru_payload.texto_mensagem.clone()
+            } else {
+                "[Conteúdo não disponível]".to_string()
+            };
+            
+            let cliente = chatguru_payload.campos_personalizados
+                .get("Info_2")
+                .and_then(|v| v.as_str())
+                .unwrap_or("[Cliente não identificado]")
+                .to_string();
+                
+            let atendente = chatguru_payload.campos_personalizados
+                .get("Info_1")
+                .and_then(|v| v.as_str())
+                .unwrap_or("[Atendente não identificado]")
+                .to_string();
+                
+            (message, cliente, atendente)
+        },
+        WebhookPayload::EventType(event_payload) => {
+            let message = event_payload.data.annotation
+                .as_ref()
+                .unwrap_or(&"[Conteúdo não disponível]".to_string())
+                .clone();
+            let cliente = event_payload.data.lead_name
+                .as_ref()
+                .unwrap_or(&"[Cliente não identificado]".to_string())
+                .clone();
+            let atendente = "[Atendente não identificado]".to_string();
+            (message, cliente, atendente)
+        },
+        WebhookPayload::Generic(generic_payload) => {
+            let message = generic_payload.mensagem
+                .as_ref()
+                .unwrap_or(&"[Conteúdo não disponível]".to_string())
+                .clone();
+            let cliente = generic_payload.nome
+                .as_ref()
+                .unwrap_or(&"[Cliente não identificado]".to_string())
+                .clone();
+            let atendente = "[Atendente não identificado]".to_string();
+            (message, cliente, atendente)
+        }
+    };
+
+    // 🏢 PREPARAÇÃO DO CONTEXTO ORGANIZACIONAL
+    let context_info = if let Some(ctx) = organizational_context {
+        format!(
+            "\n📁 CONTEXTO ORGANIZACIONAL:\n- Pasta: {} ({})\n- Lista: {} ({})",
+            ctx.folder_name, ctx.folder_id, ctx.list_name, ctx.list_id
+        )
+    } else {
+        "\n⚠️ Sem contexto organizacional específico".to_string()
+    };
+
+    // 🧠 CONSTRUÇÃO DO PROMPT PARA IA
+    let ai_prompt = format!(
+        r#"ANÁLISE DE CLASSIFICAÇÃO DE TASK - ChatGuru ClickUp Integration
+
+OBJETIVO: Determinar se o conteúdo é uma TASK VÁLIDA para ClickUp.
+
+CONTEÚDO DA MENSAGEM:
+"{}"
+
+CONTEXTO:
+- Cliente: {}
+- Atendente: {}{}
+
+CRITÉRIOS PARA SER TASK:
+✅ SIM se contém:
+- Solicitação de trabalho específico
+- Ação concreta a ser executada
+- Demanda de entrega/resultado
+- Pedido de desenvolvimento, design, análise
+- Briefing de projeto ou campanha
+
+❌ NÃO se contém apenas:
+- Saudações e conversas casuais
+- Dúvidas simples ou perguntas
+- Agradecimentos ou confirmações
+- Informações sem ação requerida
+- Conversas administrativas
+
+RESPONDA EM JSON:
+{{
+  "is_task": boolean,
+  "confidence": 0.0-1.0,
+  "reason": "explicação clara da decisão",
+  "campanha": "nome da campanha se identificada ou null",
+  "sub_categoria": "categoria da atividade ou null",
+  "priority": 1-4 ou null (1=urgente, 4=baixa)
+}}
+
+Seja rigoroso: apenas conteúdo que realmente demanda execução deve ser classificado como task."#,
+        message_content, client_name, attendant_name, context_info
+    );
+
+    // 📡 CHAMADA PARA OPENAI
+    log_info("📡 Enviando solicitação para OpenAI...");
+    
+    let client = reqwest::Client::new();
+    let response = client
+        .post("https://api.openai.com/v1/chat/completions")
+        .header("Authorization", format!("Bearer {}", openai_api_key))
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({
+            "model": "gpt-4",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "Você é um especialista em classificação de tarefas para sistemas de gestão de projetos. Responda sempre em JSON válido conforme solicitado."
+                },
+                {
+                    "role": "user",
+                    "content": ai_prompt
+                }
+            ],
+            "temperature": 0.3,
+            "max_tokens": 500
+        }))
+        .send()
+        .await
+        .map_err(|e| AppError::HttpError(e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        log_error(&format!("❌ OpenAI API error: {} - {}", status, error_text));
+        return Err(AppError::InternalError(format!("OpenAI API error: {}", error_text)));
+    }
+
+    // 🔍 PROCESSAMENTO DA RESPOSTA
+    let openai_response: serde_json::Value = response.json().await
+        .map_err(|e| AppError::HttpError(e))?;
+
+    let ai_content = openai_response["choices"][0]["message"]["content"]
+        .as_str()
+        .ok_or_else(|| AppError::InternalError("Invalid OpenAI response format".to_string()))?;
+
+    // 📊 PARSING DO RESULTADO JSON
+    let ai_result: serde_json::Value = serde_json::from_str(ai_content.trim())
+        .map_err(|e| AppError::JsonError(e))?;
+
+    let classification_result = AiClassificationResult {
+        is_task: ai_result["is_task"].as_bool().unwrap_or(false),
+        confidence: ai_result["confidence"].as_f64().unwrap_or(0.0) as f32,
+        reason: ai_result["reason"].as_str().unwrap_or("Não especificado").to_string(),
+        campanha: ai_result["campanha"].as_str().map(|s| s.to_string()),
+        sub_categoria: ai_result["sub_categoria"].as_str().map(|s| s.to_string()),
+        priority: ai_result["priority"].as_u64().map(|p| p as u8),
+        organizational_context_used: organizational_context.is_some(),
+    };
+
+    // ✅ LOG DO RESULTADO
+    log_info(&format!(
+        "🎯 CLASSIFICAÇÃO IA CONCLUÍDA - É Task: {} | Confiança: {:.1}% | Razão: {}",
+        classification_result.is_task,
+        classification_result.confidence * 100.0,
+        classification_result.reason
+    ));
+
+    if let Some(campanha) = &classification_result.campanha {
+        log_info(&format!("🎪 Campanha identificada: {}", campanha));
+    }
+
+    Ok(classification_result)
+}
+
+/// 🏗️ FUNÇÃO AUXILIAR: Extração de contexto organizacional
+///
+/// OBJETIVO: Extrair informações de estrutura organizacional (folder/list) do payload
+/// para enriquecer a análise IA com contexto específico do cliente/atendente
+///
+/// PARÂMETROS:
+/// - payload: Payload completo do ChatGuru
+///
+/// RETORNO:
+/// - Ok(Some(OrganizationalContext)): Contexto organizacional encontrado
+/// - Ok(None): Sem contexto organizacional disponível
+/// - Err(AppError): Erro ao processar contexto
+async fn extract_organizational_context(payload: &WebhookPayload) -> Result<Option<OrganizationalContext>, AppError> {
+    // Extrair cliente e atendente do payload
+    let (cliente, atendente) = match payload {
+        WebhookPayload::ChatGuru(chatguru_payload) => {
+            let info_1 = chatguru_payload.campos_personalizados
+                .get("Info_1")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+                
+            let info_2 = chatguru_payload.campos_personalizados
+                .get("Info_2")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+                
+            (info_1, info_2)
+        },
+        _ => (None, None)
+    };
+
+    // Se não temos cliente ou atendente, não há contexto organizacional
+    let (cliente_name, atendente_name) = match (cliente, atendente) {
+        (Some(c), Some(a)) => (c, a),
+        _ => {
+            log_info("ℹ️ Contexto organizacional incompleto (faltam info_1 ou info_2)");
+            return Ok(None);
+        }
+    };
+
+    log_info(&format!("🔍 Buscando contexto organizacional para Cliente: '{}' | Atendente: '{}'",
+        cliente_name, atendente_name));
+
+    // TODO: Aqui deveria integrar com o workspace_hierarchy service para buscar
+    // a estrutura organizacional real. Por enquanto, retorna None até a integração
+    // completa estar disponível.
+    //
+    // INTEGRAÇÃO FUTURA:
+    // let workspace_service = services::workspace_hierarchy::WorkspaceHierarchyService::new();
+    // let structure = workspace_service.resolve_structure(&cliente_name, &atendente_name).await?;
+    
+    log_info("⚠️ Integração com workspace_hierarchy service pendente - retornando None por enquanto");
+    
+    // Retorna None por enquanto (implementação completa virá em próxima iteração)
+    Ok(None)
+}
 
 /// Handler do worker
 /// Retorna 200 OK se processado com sucesso
@@ -633,7 +938,79 @@ async fn handle_worker_internal(
 
     // Extrair force_classification se presente
     let force_classification = envelope.get("force_classification");
+
+    // 🧠 ETAPA CRÍTICA: CLASSIFICAÇÃO IA DO CONTEÚDO
+    //
+    // OBJETIVO: Determinar automaticamente se o conteúdo recebido constitui uma task válida
+    // antes de prosseguir com o processo de criação no ClickUp
+    //
+    // BENEFÍCIOS:
+    // - Reduz ruído no ClickUp (evita tasks desnecessárias)
+    // - Melhora qualidade das tarefas criadas
+    // - Fornece rastreabilidade da decisão
+    // - Enriquece contexto para próximas etapas
+
+    log_info("🤖 INICIANDO ANÁLISE IA - Classificação de conteúdo");
+    
+    // Extrair contexto organizacional se disponível (para enriquecer análise IA)
+    let organizational_context = match extract_organizational_context(&payload).await {
+        Ok(Some(ctx)) => {
+            log_info(&format!("📁 Contexto organizacional extraído: {} / {}",
+                ctx.folder_name, ctx.list_name));
+            Some(ctx)
+        },
+        Ok(None) => {
+            log_info("ℹ️ Sem contexto organizacional específico disponível");
+            None
+        },
+        Err(e) => {
+            log_warning(&format!("⚠️ Erro ao extrair contexto organizacional: {}", e));
+            None
+        }
+    };
+
+    // Realizar classificação IA com contexto organizacional
+    let ai_classification = match classify_content_with_ai(&payload, organizational_context.as_ref()).await {
+        Ok(result) => {
+            log_info(&format!(
+                "🎯 CLASSIFICAÇÃO IA CONCLUÍDA - É Task: {} | Confiança: {:.1}% | Razão: {}",
+                result.is_task,
+                result.confidence * 100.0,
+                result.reason
+            ));
+            Some(result)
+        },
+        Err(e) => {
+            log_error(&format!("❌ ERRO NA CLASSIFICAÇÃO IA: {} - Continuando sem classificação", e));
+            // Em caso de erro na IA, continua processamento sem classificação
+            None
+        }
+    };
+
+    // Armazenar resultado da classificação para uso nas próximas etapas
+    // (será usado em process_message para decidir se criar task ou apenas anotar)
+    let classification_result = ai_classification.clone();
+
+    // Log detalhado do resultado da classificação para rastreabilidade
+    if let Some(ref classification) = classification_result {
+        log_info(&format!(
+            "📊 RESULTADO CLASSIFICAÇÃO ARMAZENADO - Task: {} | Confiança: {:.1}% | Contexto Org: {}",
+            classification.is_task,
+            classification.confidence * 100.0,
+            classification.organizational_context_used
+        ));
+        
+        if let Some(campanha) = &classification.campanha {
+            log_info(&format!("🎪 Campanha identificada pela IA: {}", campanha));
+        }
+        
+        if let Some(prioridade) = &classification.priority {
+            log_info(&format!("📈 Prioridade sugerida pela IA: {}", prioridade));
+        }
+    }
+
 // Processar mensagem com tratamento robusto de resposta
+// TODO: Integrar classification_result no process_message para usar na decisão de criação
 match process_message(&state, &payload, force_classification).await {
     Ok(result) => {
         let processing_time = start_time.elapsed().as_millis() as u64;
@@ -770,6 +1147,11 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
         message_preview
     ));
 
+    // Carregar configuração de prompt (necessária para ambos os cenários: forçado e IA)
+    use chatguru_clickup_middleware::services::prompts::AiPromptConfig;
+    let prompt_config = AiPromptConfig::load_default().await
+        .map_err(|e| AppError::InternalError(format!("Failed to load prompt config: {}", e)))?;
+
     // Verificar se há classificação forçada (bypass OpenAI)
     let classification = if let Some(forced) = force_classification {
         log_info("🔧 Usando classificação forçada (bypass OpenAI)");
@@ -813,69 +1195,271 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
             status_back_office: None,
         }
     } else {
-        // Classificar com IaService (OpenAI)
+        // 🤖 CLASSIFICAÇÃO IA MELHORADA: Utilizando contextos extraídos (info_2, folder_id, list_id)
+        //
+        // OBJETIVO: Implementar classificação automatizada que aproveita os contextos já extraídos
+        // para fornecer informações mais ricas à IA, melhorando a precisão da classificação.
+        //
+        // MELHORIAS IMPLEMENTADAS:
+        // 1. Pré-validação e extração de contextos organizacionais (folder/list)
+        // 2. Enriquecimento do prompt com informações estruturadas do ClickUp
+        // 3. Logs detalhados para rastreabilidade completa do processo
+        // 4. Armazenamento estruturado do resultado para etapas posteriores
+        //
+        // FLUXO:
+        // 1. Extrai info_2 e valida disponibilidade
+        // 2. Busca contexto organizacional (folder_id, list_id) via WorkspaceHierarchyService
+        // 3. Enriquece o prompt com contextos estruturados
+        // 4. Executa classificação IA com timeout otimizado
+        // 5. Armazena resultado estruturado para próximas etapas
+        
         log_info(&format!(
-            "🤖 INICIANDO CLASSIFICAÇÃO IA - ChatID: {} | Sender: {}",
+            "🤖 INICIANDO CLASSIFICAÇÃO IA MELHORADA - ChatID: {} | Sender: {}",
             chat_id.as_deref().unwrap_or("N/A"),
             nome
         ));
         
-        let ia_service = state.ia_service.as_ref()
-            .ok_or_else(|| AppError::InternalError("IaService não disponível no AppState".to_string()))?;
-
-        // Carregar configuração de prompt
-        use chatguru_clickup_middleware::services::prompts::AiPromptConfig;
-        let prompt_config = AiPromptConfig::load_default().await
-            .map_err(|e| AppError::InternalError(format!("Failed to load prompt config: {}", e)))?;
-
-        // Montar contexto enriquecido com informações dos campos personalizados
+        // 🔍 EXTRAÇÃO E VALIDAÇÃO DE CONTEXTOS OBRIGATÓRIOS
         let info_2 = extract_info_2_from_payload(payload).unwrap_or_default();
+        
+        log_info(&format!(
+            "🔍 CONTEXTO EXTRAÍDO - Info_2: '{}' | Chat: {} | Telefone: {}",
+            info_2,
+            chat_id.as_deref().unwrap_or("N/A"),
+            phone.as_deref().unwrap_or("N/A")
+        ));
+        
+        // VALIDAÇÃO OBRIGATÓRIA: info_2 é essencial para o processamento
+        if info_2.is_empty() {
+            log_warning(&format!(
+                "⚠️ CAMPO INFO_2 VAZIO - ChatID: {} | Sender: {} | Processamento cancelado",
+                chat_id.as_deref().unwrap_or("N/A"),
+                nome
+            ));
+            return Ok(json!({
+                "status": "skipped",
+                "reason": "info_2_not_found",
+                "message": "Campo Info_2 é obrigatório para processar tarefas"
+            }));
+        }
+
+        // 🏗️ PRÉ-BUSCA DE CONTEXTO ORGANIZACIONAL (folder_id, list_id)
+        //
+        // RAZÃO: Fornecer contexto organizacional à IA para melhor classificação
+        // BENEFÍCIO: IA pode considerar a estrutura organizacional ao determinar se é uma task
+        let mut organizational_context = String::new();
+        let mut folder_context_info: Option<OrganizationalContext> = None;
+        
+        log_info(&format!(
+            "🏗️ INICIANDO PRÉ-BUSCA DE CONTEXTO ORGANIZACIONAL para Info_2: '{}'",
+            info_2
+        ));
+
+        // Tentar obter contexto organizacional com fallback automático
+        let fallback_enabled = std::env::var("ENABLE_ORGANIZATIONAL_FALLBACK")
+            .unwrap_or_else(|_| "true".to_string())
+            .to_lowercase() == "true";
+
+        match execute_with_fallback(
+            || async {
+                match get_organizational_context_for_ai(&info_2).await {
+                    Ok(context_info) => {
+                        if let Some(ref ctx) = context_info {
+                            log_info(&format!(
+                                "✅ CONTEXTO ORGANIZACIONAL OBTIDO - Pasta: '{}' | Lista: '{}'",
+                                ctx.folder_name, ctx.list_name
+                            ));
+                            Ok(serde_json::json!({
+                                "success": true,
+                                "context": context_info
+                            }))
+                        } else {
+                            log_info("ℹ️ CONTEXTO ORGANIZACIONAL: Cliente não mapeado");
+                            Ok(serde_json::json!({
+                                "success": true,
+                                "context": null
+                            }))
+                        }
+                    },
+                    Err(e) => {
+                        // Verificar se é elegível para fallback
+                        if is_fallback_eligible_error(&e) {
+                            log_warning(&format!(
+                                "⚠️ ERRO ELEGÍVEL PARA FALLBACK na busca organizacional: {}",
+                                e
+                            ));
+                            return Err(e);
+                        } else {
+                            log_warning(&format!(
+                                "⚠️ ERRO NÃO ELEGÍVEL na busca organizacional: {} | Prosseguindo",
+                                e
+                            ));
+                            Ok(serde_json::json!({
+                                "success": false,
+                                "error": e.to_string()
+                            }))
+                        }
+                    }
+                }
+            },
+            "busca de contexto organizacional",
+            payload,
+            fallback_enabled,
+        ).await {
+            Ok(result) => {
+                if result.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    if let Some(context_value) = result.get("context") {
+                        if !context_value.is_null() {
+                            // Deserializar context_info de volta
+                            folder_context_info = serde_json::from_value(context_value.clone()).ok();
+                            if let Some(ref ctx) = folder_context_info {
+                                organizational_context = format!(
+                                    "\nContexto Organizacional:\n- Pasta: {} (ID: {})\n- Lista: {} (ID: {})",
+                                    ctx.folder_name, ctx.folder_id, ctx.list_name, ctx.list_id
+                                );
+                            }
+                        } else {
+                            organizational_context = "\nContexto Organizacional: Cliente não mapeado".to_string();
+                        }
+                    }
+                } else {
+                    // Se retornou do AppEngine via fallback, não temos contexto específico
+                    organizational_context = "\nContexto Organizacional: Processado via fallback".to_string();
+                }
+            },
+            Err(e) => {
+                log_error(&format!(
+                    "❌ FALHA CRÍTICA na busca de contexto organizacional: {}",
+                    e
+                ));
+                organizational_context = "\nContexto Organizacional: Erro crítico".to_string();
+            }
+        }
+        
         let responsavel_nome = extract_responsavel_nome_from_payload(payload).unwrap_or_default();
         
-        // REMOVIDO: referência ao "Cliente Solicitante (Info_2)" do contexto
-        // Motivo: Eliminação da lógica do campo "Cliente Solicitante"
-        let context = format!(
-            "Campanha: WhatsApp\nOrigem: whatsapp\nNome: {}\nMensagem: {}\nTelefone: {}\nInfo_2: {}\nResponsável: {}",
-            nome, message, phone.as_deref().unwrap_or("N/A"), info_2, responsavel_nome
+        // 🔤 MONTAGEM DE CONTEXTO ENRIQUECIDO PARA IA
+        //
+        // ESTRUTURA MELHORADA: Inclui contextos organizacionais e estruturados
+        // OBJETIVO: Fornecer máximo contexto possível para classificação precisa
+        let enriched_context = format!(
+            "Dados da Conversa:\n- Origem: WhatsApp\n- Nome: {}\n- Telefone: {}\n- Mensagem: {}\n\nDados Organizacionais:\n- Cliente (Info_2): {}\n- Responsável: {}{}",
+            nome,
+            phone.as_deref().unwrap_or("N/A"),
+            message,
+            info_2,
+            responsavel_nome,
+            organizational_context
         );
 
         // Gerar prompt usando a configuração
-        let formatted_prompt = prompt_config.generate_prompt(&context);
+        let formatted_prompt = prompt_config.generate_prompt(&enriched_context);
 
         log_info(&format!(
-            "📝 PROMPT GERADO - ChatID: {} | Context size: {} chars | Prompt size: {} chars",
+            "📝 PROMPT ENRIQUECIDO GERADO - ChatID: {} | Context size: {} chars | Prompt size: {} chars",
             chat_id.as_deref().unwrap_or("N/A"),
-            context.len(),
+            enriched_context.len(),
             formatted_prompt.len()
         ));
 
-        // Classificar com IA com timeout (máx 8 segundos)
+        log_info(&format!(
+            "🔍 CONTEXTO DETALHADO - Cliente: '{}' | Org Context: {} | Message Preview: '{}'",
+            info_2,
+            if folder_context_info.is_some() { "Disponível" } else { "Não disponível" },
+            if message.len() > 100 {
+                format!("{}...", &message[..100])
+            } else {
+                message.clone()
+            }
+        ));
+
+        // 🤖 EXECUÇÃO DA CLASSIFICAÇÃO IA MELHORADA COM NOVA IMPLEMENTAÇÃO
+        // INTEGRAÇÃO: Utilizando classify_content_with_ai() para classificação aprimorada
+        // CONTEXTO: Aproveita todos os contextos organizacionais já extraídos
+        log_info("🚀 EXECUTANDO CLASSIFICAÇÃO IA APRIMORADA com contexto organizacional...");
+        
+        // Preparar contexto organizacional para a nova função
+        let organizational_context = folder_context_info.as_ref().map(|ctx|
+            OrganizationalContext {
+                folder_id: ctx.folder_id.clone(),
+                folder_name: ctx.folder_name.clone(),
+                list_id: ctx.list_id.clone(),
+                list_name: ctx.list_name.clone(),
+            }
+        );
+        
+        // 🎯 EXECUÇÃO DA NOVA CLASSIFICAÇÃO IA COM TIMEOUT OTIMIZADO
         match tokio::time::timeout(
             std::time::Duration::from_secs(8),
-            ia_service.classify_activity(&formatted_prompt)
+            classify_content_with_ai(payload, organizational_context.as_ref())
         ).await {
-            Ok(Ok(c)) => {
+            Ok(Ok(ai_result)) => {
                 log_info(&format!(
-                    "✅ CLASSIFICAÇÃO IA CONCLUÍDA - ChatID: {} | Is_activity: {} | Category: {} | Confidence: {}",
+                    "✅ CLASSIFICAÇÃO IA APRIMORADA CONCLUÍDA - ChatID: {} | Is_task: {} | Categoria: {} | Cliente: '{}'",
                     chat_id.as_deref().unwrap_or("N/A"),
-                    c.is_activity,
-                    c.category.as_deref().unwrap_or("N/A"),
-                    "N/A" // Confidence não está disponível na struct atual
+                    ai_result.is_task,
+                    ai_result.campanha.as_deref().unwrap_or("N/A"),
+                    info_2
                 ));
-                c
+                
+                // 📊 LOG DETALHADO PARA RASTREABILIDADE COMPLETA
+                log_info("📊 RESULTADO DETALHADO DA CLASSIFICAÇÃO APRIMORADA:");
+                log_info(&format!(
+                    "   🎯 É tarefa: {} | Categoria: {} | Confiança: {:.2}%",
+                    ai_result.is_task,
+                    ai_result.campanha.as_deref().unwrap_or("N/A"),
+                    ai_result.confidence
+                ));
+                log_info(&format!(
+                    "   📝 Razão: '{}'",
+                    ai_result.reason
+                ));
+                log_info(&format!(
+                    "   🏢 Contexto organizacional utilizado: {}",
+                    if organizational_context.is_some() { "Sim" } else { "Não" }
+                ));
+                log_info(&format!(
+                    "   📋 Cliente (Info_2): '{}' | Responsável: '{}'",
+                    info_2,
+                    responsavel_nome
+                ));
+                
+                // Converter AiClassificationResult para OpenAIClassification (compatibilidade)
+                use crate::services::OpenAIClassification;
+                OpenAIClassification {
+                    reason: ai_result.reason,
+                    is_activity: ai_result.is_task,
+                    category: ai_result.campanha.clone(),
+                    campanha: ai_result.campanha.clone(), // Usar campanha
+                    description: Some(format!("Classificação IA: {} ({}% confiança)",
+                        if ai_result.is_task { "Tarefa válida" } else { "Não é tarefa" },
+                        (ai_result.confidence * 100.0) as u8
+                    )),
+                    space_name: None,
+                    folder_name: organizational_context.as_ref().map(|ctx| ctx.folder_name.clone()),
+                    list_name: organizational_context.as_ref().map(|ctx| ctx.list_name.clone()),
+                    info_1: None,
+                    info_2: Some(info_2.clone()),
+                    tipo_atividade: ai_result.campanha.clone(),
+                    sub_categoria: ai_result.sub_categoria.clone(),
+                    subtasks: vec![],
+                    status_back_office: None,
+                }
             },
             Ok(Err(e)) => {
                 log_error(&format!(
-                    "❌ FALHA NA CLASSIFICAÇÃO IA - ChatID: {} | Error: {}",
+                    "❌ FALHA NA CLASSIFICAÇÃO IA APRIMORADA - ChatID: {} | Cliente: '{}' | Error: {}",
                     chat_id.as_deref().unwrap_or("N/A"),
+                    info_2,
                     e
                 ));
                 return Err(AppError::InternalError(format!("IA classification failed: {}", e)));
             },
             Err(_) => {
                 log_error(&format!(
-                    "❌ TIMEOUT NA CLASSIFICAÇÃO IA - ChatID: {} | Exceeded 8s",
-                    chat_id.as_deref().unwrap_or("N/A")
+                    "❌ TIMEOUT NA CLASSIFICAÇÃO IA APRIMORADA - ChatID: {} | Cliente: '{}' | Exceeded 8s",
+                    chat_id.as_deref().unwrap_or("N/A"),
+                    info_2
                 ));
                 return Err(AppError::Timeout("IA classification timeout".to_string()));
             }
@@ -888,16 +1472,16 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
         log_info(&format!("✅ Atividade identificada: {}", classification.reason));
 
         // NOVA LÓGICA SIMPLIFICADA:
-        // 1. Extrai Info_2 do payload
-        // 2. Se Info_2 vazio → interrompe processamento (não classifica, não adiciona à fila)
+        // 1. Extrai Info_2 do payload (já validado anteriormente)
+        // 2. Se Info_2 vazio → processo foi encerrado antes da classificação IA
         // 3. Busca hierarquia do workspace unificada
         // 4. Verifica se alguma pasta é compatível com Info_2 (normalização)
-        // 5. Se não encontrar pasta compatível → interrompe processamento
+        // 5. Se não encontrar pasta compatível → usa fallback se habilitado
         // 6. Se encontrar → verifica/cria lista do mês vigente
         // 7. Cria tarefa com folder_id e list_id determinados
 
+        // Re-extrair Info_2 (já foi validado como não-vazio anteriormente)
         let info_2 = extract_info_2_from_payload(payload).unwrap_or_default();
-        
         log_info(&format!("🔍 Validação simplificada: Info_2='{}'", info_2));
 
         // Inicializar serviço de hierarquia do workspace
@@ -946,18 +1530,89 @@ if !validation_result.is_valid {
         payload,
         &classification,
         &info_2,
-        &api_token
+        &api_token,
+        &prompt_config
     ).await;
         }
 
+        // ⚠️ VERIFICAÇÃO CRÍTICA: Se pasta ou lista não foram encontradas, encerrar como "não-cliente"
+        // Implementado conforme checklist MCP para economia de recursos e fail-fast
+        if validation_result.folder_id.is_none() || validation_result.list_id.is_none() {
+            log_warning(&format!(
+                "🚫 MCP CHECKLIST: Pasta ou lista vigente não encontrada para cliente '{}' - encerrando processamento",
+                info_2
+            ));
+            log_info("❌ Motivo: Sistema não conseguiu localizar/criar estrutura organizacional necessária");
+            return Ok(json!({
+                "status": "skipped",
+                "reason": "not_a_client",
+                "message": "Não foi encontrada pasta ou lista vigente para este cliente"
+            }));
+        }
+
+        // 🎯 MCP CHECKLIST: Extração dos IDs validados de pasta e lista vigente
         let folder_id = validation_result.folder_id.clone().unwrap();
         let folder_name = validation_result.folder_name.clone().unwrap();
         let list_id = validation_result.list_id.clone().unwrap();
         let list_name = validation_result.list_name.clone().unwrap();
+        
+        log_info(&format!(
+            "🎯 MCP CHECKLIST: IDs extraídos com sucesso - Folder: '{}' ({}), List: '{}' ({})",
+            folder_name, folder_id, list_name, list_id
+        ));
+
+        // 📋 ARMAZENAMENTO EXPLÍCITO DE CONTEXTO: IDs de Pasta e Lista
+        //
+        // OBJETIVO: Garantir rastreabilidade e disponibilidade dos IDs para etapas seguintes
+        // CONTEXTO: Após validação bem-sucedida da hierarquia, os IDs devem ser explicitamente
+        //          armazenados para uso posterior (criação de tarefa, análise IA, logs, etc.)
+        //
+        // ESTRUTURA: WorkspaceContext contém os identificadores essenciais do ClickUp
+        // USO POSTERIOR: Disponível para todas as etapas seguintes do fluxo de processamento
+        #[derive(Debug, Clone)]
+        struct WorkspaceContext {
+            /// ID da pasta no ClickUp onde a tarefa será criada
+            folder_id: String,
+            /// Nome da pasta para logs e rastreabilidade
+            folder_name: String,
+            /// ID da lista no ClickUp onde a tarefa será criada
+            list_id: String,
+            /// Nome da lista para logs e rastreabilidade
+            list_name: String,
+            /// Cliente identificado via Info_2 para contexto
+            client_info_2: String,
+        }
+
+        let workspace_context = WorkspaceContext {
+            folder_id: folder_id.clone(),
+            folder_name: folder_name.clone(),
+            list_id: list_id.clone(),
+            list_name: list_name.clone(),
+            client_info_2: info_2.clone(),
+        };
 
         log_info(&format!(
             "✅ Validação aprovada: Pasta='{}' ({}), Lista='{}' ({})",
             folder_name, folder_id, list_name, list_id
+        ));
+
+        // 📊 MCP CHECKLIST: LOG DE RASTREABILIDADE - Contexto completo armazenado
+        log_info(&format!(
+            "📋 MCP CHECKLIST: WORKSPACE CONTEXT ARMAZENADO com lista vigente garantida"
+        ));
+        log_info(&format!(
+            "   📁 Cliente: '{}' | Folder: '{}' (ID: {})",
+            workspace_context.client_info_2,
+            workspace_context.folder_name,
+            workspace_context.folder_id
+        ));
+        log_info(&format!(
+            "   📋 Lista vigente: '{}' (ID: {}) - disponível para próximas etapas do fluxo",
+            workspace_context.list_name,
+            workspace_context.list_id
+        ));
+        log_info(&format!(
+            "   ✅ Rastreabilidade: IDs mantidos no WorkspaceContext para uso posterior"
         ));
 
         // Buscar assignee (responsável) se disponível
@@ -1002,7 +1657,7 @@ if !validation_result.is_valid {
         };
 
         // Criar task_data
-        let mut task_data = payload.to_clickup_task_data_with_ai(Some(&classification)).await;
+        let mut task_data = payload.to_clickup_task_data_with_ai(Some(&classification), &prompt_config).await;
 
         // Adicionar assignee ao task_data se encontrado
         if let Some(assignee_info) = assignee_result {
@@ -1022,12 +1677,12 @@ if !validation_result.is_valid {
             
             log_info(&format!(
                 "🎯 Criando tarefa diretamente na lista: {} (folder: {})",
-                list_id, folder_id
+                workspace_context.list_id, workspace_context.folder_id
             ));
 
-            // Adicionar list_id ao task_data
+            // Adicionar list_id ao task_data usando workspace_context
             if let Some(obj) = task_data.as_object_mut() {
-                obj.insert("list_id".to_string(), serde_json::json!(list_id));
+                obj.insert("list_id".to_string(), serde_json::json!(workspace_context.list_id));
             }
 
             // Converter Value para Task tipada
@@ -1035,7 +1690,7 @@ if !validation_result.is_valid {
 
             // Deduplicação: checar se já existe tarefa com o mesmo título antes de criar
             let existing = state.clickup.find_existing_task_in_list(
-                Some(&list_id),
+                Some(&workspace_context.list_id),
                 &task.name
             ).await;
 
@@ -1052,7 +1707,20 @@ if !validation_result.is_valid {
                     // Só cria a task se não houver duplicata
                     match state.clickup.create_task(&task).await {
                         Ok(created_task) => {
-                            log_info(&format!("✅ Tarefa criada: {}", created_task.id.as_ref().unwrap_or(&"?".to_string())));
+                            let default_id = "?".to_string();
+                            let task_id = created_task.id.as_ref().unwrap_or(&default_id);
+                            
+                            // 📋 LOG DETALHADO COM WORKSPACE CONTEXT: Rastreabilidade completa da tarefa criada
+                            log_info(&format!(
+                                "✅ TAREFA CRIADA COM SUCESSO - ID: {} | Cliente: '{}' | Folder: {} ({}) | List: {} ({})",
+                                task_id,
+                                workspace_context.client_info_2,
+                                workspace_context.folder_name,
+                                workspace_context.folder_id,
+                                workspace_context.list_name,
+                                workspace_context.list_id
+                            ));
+                            
                             serde_json::to_value(&created_task)
                                 .unwrap_or_else(|_| serde_json::json!({"id": created_task.id}))
                         }
@@ -1068,56 +1736,205 @@ if !validation_result.is_valid {
                 }
             }
         };
-        // Montar anotação com informações da task
-        let task_id = task_result.get("id").and_then(|v| v.as_str()).unwrap_or("N/A");
+        // 📝 MCP CHECKLIST: MONTAGEM DE ANOTAÇÃO E RESPOSTA FINAL COMPLETA
+        //
+        // OBJETIVO: Criar anotação rica para o ChatGuru e resposta estruturada
+        //          contendo todos os dados da tarefa criada e contexto organizacional
+        //
+        // DADOS INCLUÍDOS:
+        // - task_id, task_url: Identificadores da tarefa criada
+        // - classification: Resultado da análise IA (categoria, subcategoria)
+        // - workspace_context: Estrutura organizacional completa
+        // - assignee info: Responsável atribuído (se disponível)
+        //
+        let task_id = task_result.get("id").and_then(|v| v.as_str()).unwrap_or("UNKNOWN");
         let task_url = task_result.get("url").and_then(|v| v.as_str()).unwrap_or("");
+        let task_name = task_result.get("name").and_then(|v| v.as_str()).unwrap_or("N/A");
 
+        log_info(&format!(
+            "📝 MCP CHECKLIST: PREPARANDO ANOTAÇÃO FINAL - Task ID: {} | URL presente: {}",
+            task_id,
+            !task_url.is_empty()
+        ));
+
+        // Extrair prioridade da tarefa criada para exibição
+        let priority_stars = task_result.get("priority")
+            .and_then(|p| p.get("orderindex"))
+            .and_then(|o| o.as_str())
+            .map(|s| match s {
+                "1" => "4",  // Urgent = 4 estrelas
+                "2" => "3",  // High = 3 estrelas
+                "3" => "2",  // Normal = 2 estrelas
+                _ => "1"     // Low = 1 estrela
+            })
+            .unwrap_or("N/A");
+
+        // 📋 ANOTAÇÃO ENRIQUECIDA COM CONTEXTO COMPLETO
         let annotation = format!(
-            "✅ Tarefa criada no ClickUp\\n\\n📋 Descrição: {}\\n🏷️ Categoria: {}\\n📂 Subcategoria: {}\\n⭐ Prioridade: {} estrela(s)\\n🔗 Link: {}",
+            "✅ Tarefa criada no ClickUp\\n\\n📋 Descrição: {}\\n🏷️ Categoria: {}\\n📂 Subcategoria: {}\\n⭐ Prioridade: {} estrela(s)\\n📁 Pasta: {}\\n📋 Lista: {}\\n👤 Cliente: {}\\n🔗 Link: {}",
             classification.reason,
             classification.campanha.as_deref().unwrap_or("N/A"),
             classification.sub_categoria.as_deref().unwrap_or("N/A"),
-            // Extrair prioridade da task_result se disponível
-            task_result.get("priority")
-                .and_then(|p| p.get("orderindex"))
-                .and_then(|o| o.as_str())
-                .map(|s| match s {
-                    "1" => "4",
-                    "2" => "3",
-                    "3" => "2",
-                    _ => "1"
-                })
-                .unwrap_or("N/A"),
+            priority_stars,
+            workspace_context.folder_name,
+            workspace_context.list_name,
+            workspace_context.client_info_2,
             task_url
         );
 
-        // Enviar anotação ao ChatGuru
+        log_info(&format!(
+            "📱 MCP CHECKLIST: ENVIANDO ANOTAÇÃO ao ChatGuru - Size: {} chars",
+            annotation.len()
+        ));
+
+        // 📤 ENVIO DA ANOTAÇÃO AO CHATGURU
         if let Err(e) = send_annotation_to_chatguru(state, payload, &annotation).await {
-            log_warning(&format!("⚠️  Falha ao enviar anotação ao ChatGuru: {}", e));
-            // Não falhar o processamento se anotação falhar
+            log_warning(&format!(
+                "⚠️ MCP CHECKLIST: FALHA ao enviar anotação ao ChatGuru - Erro: {} | Processamento continua",
+                e
+            ));
+            // Não falhar o processamento se anotação falhar - a tarefa foi criada com sucesso
+        } else {
+            log_info("✅ MCP CHECKLIST: ANOTAÇÃO ENVIADA COM SUCESSO ao ChatGuru");
         }
 
-        Ok(json!({
+        // 📊 MCP CHECKLIST: RESPOSTA FINAL ESTRUTURADA
+        //
+        // OBJETIVO: Retornar resposta completa com todos os dados para rastreabilidade
+        //          externa e possível uso por outros sistemas/webhooks
+        //
+        // ESTRUTURA INCLUI:
+        // - status: Estado do processamento
+        // - task_data: Informações completas da tarefa criada
+        // - classification: Resultado da análise IA
+        // - workspace_context: Estrutura organizacional utilizada
+        // - annotation: Texto enviado ao ChatGuru para referência
+        //
+        let response = json!({
             "status": "processed",
             "is_activity": true,
-            "task_id": task_id,
-            "annotation": annotation
-        }))
+            "message": "Tarefa criada com sucesso no ClickUp",
+            "task_data": {
+                "id": task_id,
+                "name": task_name,
+                "url": task_url,
+                "priority_stars": priority_stars
+            },
+            "classification": {
+                "reason": classification.reason,
+                "category": classification.campanha,
+                "subcategory": classification.sub_categoria,
+                "is_activity": classification.is_activity
+            },
+            "workspace_context": {
+                "folder_id": workspace_context.folder_id,
+                "folder_name": workspace_context.folder_name,
+                "list_id": workspace_context.list_id,
+                "list_name": workspace_context.list_name,
+                "client_info_2": workspace_context.client_info_2
+            },
+            "annotation_sent": annotation,
+            "metadata": {
+                "processing_timestamp": chrono::Utc::now().to_rfc3339(),
+                "worker_version": "mcp_checklist_implementation"
+            }
+        });
+
+        log_info(&format!(
+            "✅ MCP CHECKLIST: PROCESSAMENTO CONCLUÍDO COM SUCESSO"
+        ));
+        log_info(&format!(
+            "   🎯 Tarefa ID: {} | Cliente: '{}' | Pasta: '{}'",
+            task_id,
+            workspace_context.client_info_2,
+            workspace_context.folder_name
+        ));
+        log_info(&format!(
+            "   📋 Classificação: {} | Categoria: {} | Prioridade: {} estrelas",
+            if classification.is_activity { "✅ É Tarefa" } else { "❌ Não é Tarefa" },
+            classification.campanha.as_deref().unwrap_or("N/A"),
+            priority_stars
+        ));
+
+        Ok(response)
     } else {
-        log_info(&format!("❌ Não é atividade: {}", classification.reason));
+        // ============================================================================
+        // MCP CHECKLIST: PROCESSAMENTO DE NÃO TAREFA
+        // ============================================================================
+        // OBJETIVO: Criar anotação rica para o ChatGuru explicando por que não é tarefa
+        // GARANTIA: Rastreabilidade completa e contexto claro para o usuário
+        //
+        log_info(&format!("❌ NÃO É TAREFA DETECTADO: {}", classification.reason));
 
-        let annotation = format!("Não é uma tarefa: {}", classification.reason);
+        // Extrair contexto adicional para enriquecer a anotação
+        let cliente = extract_info_2_from_payload(payload).unwrap_or_else(|| "Cliente não identificado".to_string());
+        let atendente = _extract_info_1_from_payload(payload).unwrap_or_else(|| "Atendente não identificado".to_string());
+        let chat_id = extract_chat_id_from_payload(payload).unwrap_or_else(|| "N/A".to_string());
 
-        // Apenas enviar anotação
+        // Criar anotação rica com contexto completo
+        let annotation = format!(
+            "🚫 NÃO É TAREFA\n\n📋 **Motivo:** {}\n\n🏢 **Cliente:** {}\n👤 **Atendente:** {}\n🆔 **Chat ID:** {}\n\n⏰ **Processado em:** {}",
+            classification.reason,
+            cliente,
+            atendente,
+            chat_id,
+            chrono::Utc::now().format("%d/%m/%Y %H:%M:%S UTC")
+        );
+
+        log_info(&format!(
+            "📝 MCP CHECKLIST: PREPARANDO ANOTAÇÃO DE NÃO TAREFA"
+        ));
+        log_info(&format!(
+            "   📋 Motivo: {} | Cliente: '{}' | Atendente: '{}'",
+            classification.reason,
+            cliente,
+            atendente
+        ));
+
+        // Enviar anotação enriquecida ao ChatGuru
         if let Err(e) = send_annotation_to_chatguru(state, payload, &annotation).await {
-            log_warning(&format!("⚠️  Falha ao enviar anotação ao ChatGuru: {}", e));
+            log_warning(&format!(
+                "⚠️ MCP CHECKLIST: FALHA ao enviar anotação de não tarefa ao ChatGuru - Erro: {} | ChatID: {}",
+                e,
+                chat_id
+            ));
+        } else {
+            log_info(&format!(
+                "✅ MCP CHECKLIST: ANOTAÇÃO DE NÃO TAREFA ENVIADA COM SUCESSO ao ChatGuru | ChatID: {}",
+                chat_id
+            ));
         }
 
-        Ok(json!({
+        // Resposta estruturada para rastreabilidade
+        let response = json!({
             "status": "processed",
             "is_activity": false,
-            "annotation": annotation
-        }))
+            "message": "Mensagem analisada e classificada como não tarefa",
+            "classification": {
+                "reason": classification.reason,
+                "category": classification.campanha,
+                "subcategory": classification.sub_categoria,
+                "is_activity": classification.is_activity
+            },
+            "context": {
+                "client_info_2": cliente,
+                "attendant_info_1": atendente,
+                "chat_id": chat_id
+            },
+            "annotation_sent": annotation,
+            "metadata": {
+                "processing_timestamp": chrono::Utc::now().to_rfc3339(),
+                "worker_version": "mcp_checklist_non_task_implementation"
+            }
+        });
+
+        log_info(&format!(
+            "✅ MCP CHECKLIST: PROCESSAMENTO DE NÃO TAREFA CONCLUÍDO | Motivo: '{}' | ChatID: {}",
+            classification.reason,
+            chat_id
+        ));
+
+        Ok(response)
     }
 }
 
@@ -1293,6 +2110,7 @@ async fn process_with_fallback_configurations(
     classification: &crate::services::OpenAIClassification,
     info_2: &str,
     api_token: &str,
+    prompt_config: &chatguru_clickup_middleware::services::prompts::AiPromptConfig,
 ) -> AppResult<Value> {
     log_info(&format!("🔧 Iniciando processamento com configurações customizadas + fallback para Info_2: '{}'", info_2));
     
@@ -1402,7 +2220,7 @@ async fn process_with_fallback_configurations(
     };
     
     // Criar task_data com configurações customizadas (APLICAR ESTRELAS E CATEGORIAS)
-    let mut task_data = payload.to_clickup_task_data_with_ai(Some(classification)).await;
+    let mut task_data = payload.to_clickup_task_data_with_ai(Some(classification), &prompt_config).await;
     
     log_info(&format!("🌟 Configurações customizadas aplicadas: categoria='{}', subcategoria='{}'",
         classification.campanha.as_deref().unwrap_or("N/A"),
@@ -1467,51 +2285,131 @@ async fn process_with_fallback_configurations(
             return Err(AppError::ClickUpApi(e.to_string()));
         }
     };
+
+    Ok(task_result)
+}
+
+
+/// 🏗️ FUNÇÃO AUXILIAR: Busca contexto organizacional para enriquecer classificação IA
+///
+/// OBJETIVO: Fornecer informações de folder_id e list_id à IA para melhorar a classificação
+/// BENEFÍCIO: IA pode considerar a estrutura organizacional ao determinar se é uma task
+///
+/// PARÂMETROS:
+/// - info_2: Cliente identificado via campos personalizados
+///
+/// RETORNO:
+/// - Ok(Some(context)): Contexto organizacional encontrado
+/// - Ok(None): Cliente não mapeado, mas sem erro
+/// - Err: Erro na busca (não deve interromper o processamento principal)
+///
+/// IMPLEMENTAÇÃO: Utiliza WorkspaceHierarchyService para busca rápida de estrutura organizacional
+async fn get_organizational_context_for_ai(info_2: &str) -> Result<Option<OrganizationalContext>, AppError> {
+    // 📋 LOG DE INÍCIO DA BUSCA DE CONTEXTO ORGANIZACIONAL
+    log_info(&format!(
+        "🔍 INICIANDO BUSCA DE CONTEXTO ORGANIZACIONAL - Cliente: '{}'",
+        info_2
+    ));
+
+    // Validação de entrada
+    if info_2.is_empty() {
+        log_warning("⚠️ CONTEXTO ORGANIZACIONAL: Info_2 vazio, retornando contexto nulo");
+        return Ok(None);
+    }
+
+    // 🔑 OBTENÇÃO DE CREDENCIAIS E CONFIGURAÇÃO
+    let secrets_service = match services::SecretManagerService::new().await {
+        Ok(service) => service,
+        Err(e) => {
+            log_warning(&format!(
+                "⚠️ CONTEXTO ORGANIZACIONAL: Falha ao inicializar SecretsService: {}",
+                e
+            ));
+            return Ok(None); // Não é erro crítico, retorna contexto nulo
+        }
+    };
     
-    // Montar anotação com informações da task (incluindo indicação de fallback)
-    let task_id = task_result.get("id").and_then(|v| v.as_str()).unwrap_or("N/A");
-    let task_url = task_result.get("url").and_then(|v| v.as_str()).unwrap_or("");
-    
-    let annotation = format!(
-        "✅ Tarefa criada no ClickUp (Fallback)\\\\n\\\\n📋 Descrição: {}\\\\n🏷️ Categoria: {}\\\\n📂 Subcategoria: {}\\\\n⭐ Prioridade: {} estrela(s)\\\\n📁 Pasta: {} (Fallback)\\\\n📋 Lista: {}\\\\n🔗 Link: {}",
-        classification.reason,
-        classification.campanha.as_deref().unwrap_or("N/A"),
-        classification.sub_categoria.as_deref().unwrap_or("N/A"),
-        // Extrair prioridade da task_result se disponível
-        task_result.get("priority")
-            .and_then(|p| p.get("orderindex"))
-            .and_then(|o| o.as_str())
-            .map(|s| match s {
-                "1" => "4",
-                "2" => "3",
-                "3" => "2",
-                _ => "1"
-            })
-            .unwrap_or("N/A"),
-        fallback_folder_name,
-        list_name,
-        task_url
+    let api_token = match secrets_service.get_clickup_api_token().await {
+        Ok(token) => token,
+        Err(e) => {
+            log_warning(&format!(
+                "⚠️ CONTEXTO ORGANIZACIONAL: Falha ao obter token ClickUp: {}",
+                e
+            ));
+            return Ok(None); // Não é erro crítico, retorna contexto nulo
+        }
+    };
+
+    let workspace_id = std::env::var("CLICKUP_WORKSPACE_ID")
+        .or_else(|_| std::env::var("CLICKUP_TEAM_ID"))
+        .unwrap_or_else(|_| "9013037641".to_string()); // Default workspace da Nordja
+
+    // 🏗️ INICIALIZAÇÃO DO WORKSPACE HIERARCHY SERVICE
+    let clickup_client = match clickup::ClickUpClient::new(api_token.clone()) {
+        Ok(client) => client,
+        Err(e) => {
+            log_warning(&format!(
+                "⚠️ CONTEXTO ORGANIZACIONAL: Falha ao criar ClickUpClient: {}",
+                e
+            ));
+            return Ok(None); // Não é erro crítico
+        }
+    };
+
+    let mut hierarchy_service = services::WorkspaceHierarchyService::new(
+        clickup_client,
+        workspace_id.clone()
     );
-    
-    // Enviar anotação ao ChatGuru
-    if let Err(e) = send_annotation_to_chatguru(state, payload, &annotation).await {
-        log_warning(&format!("⚠️ Falha ao enviar anotação ao ChatGuru: {}", e));
-        // Não falhar o processamento se anotação falhar
+
+    // 🎯 VALIDAÇÃO E BUSCA DE ESTRUTURA ORGANIZACIONAL
+    log_info(&format!(
+        "🎯 EXECUTANDO VALIDAÇÃO DE ESTRUTURA para cliente '{}'",
+        info_2
+    ));
+
+    match hierarchy_service.validate_and_find_target(info_2).await {
+        Ok(validation_result) => {
+            if validation_result.is_valid
+                && validation_result.folder_id.is_some()
+                && validation_result.list_id.is_some() {
+                
+                let context = OrganizationalContext {
+                    folder_id: validation_result.folder_id.clone().unwrap(),
+                    folder_name: validation_result.folder_name.clone().unwrap_or_else(|| "Pasta Desconhecida".to_string()),
+                    list_id: validation_result.list_id.clone().unwrap(),
+                    list_name: validation_result.list_name.clone().unwrap_or_else(|| "Lista Desconhecida".to_string()),
+                };
+
+                log_info(&format!(
+                    "✅ CONTEXTO ORGANIZACIONAL ENCONTRADO - Pasta: '{}' ({}), Lista: '{}' ({})",
+                    context.folder_name,
+                    context.folder_id,
+                    context.list_name,
+                    context.list_id
+                ));
+
+                Ok(Some(context))
+            } else {
+                log_info(&format!(
+                    "ℹ️ CLIENTE NÃO MAPEADO '{}': {} | Validation: folder={}, list={}",
+                    info_2,
+                    validation_result.reason,
+                    validation_result.folder_id.is_some(),
+                    validation_result.list_id.is_some()
+                ));
+                Ok(None) // Cliente não mapeado, mas não é erro
+            }
+        },
+        Err(e) => {
+            log_warning(&format!(
+                "⚠️ ERRO NA BUSCA DE CONTEXTO ORGANIZACIONAL para '{}': {}",
+                info_2,
+                e
+            ));
+            Ok(None) // Não é erro crítico, retorna contexto nulo para não interromper classificação IA
+        }
     }
     
-    log_info(&format!("✅ Processamento com fallback concluído: task_id={}, folder={}, list={}",
-        task_id, fallback_folder_name, list_name));
-    
-    Ok(json!({
-        "status": "processed",
-        "is_activity": true,
-        "task_id": task_id,
-        "annotation": annotation,
-        "fallback_used": true,
-        "fallback_folder": fallback_folder_name,
-        "fallback_list": list_name,
-        "client_info_2": info_2
-    }))
 }
 
 /// Retorna o nome do mês em português
@@ -1537,48 +2435,286 @@ fn get_month_name_pt(month: u32) -> &'static str {
 // App Engine Fallback
 // ============================================================================
 
-/// Encaminha payload original do ChatGuru para o App Engine (fallback)
+/// Verifica se um erro é elegível para fallback para AppEngine
 ///
-/// Usado quando o SmartFolderFinder não consegue encontrar o folder do cliente.
-/// O App Engine processa o payload com sua própria lógica e pode ter outros
-/// folders/listas cadastrados.
-async fn _forward_to_app_engine(payload: &WebhookPayload) -> AppResult<()> {
+/// # Condições para Fallback:
+/// 1. Timeout ou erro de conexão com CloudRun/ClickUp
+/// 2. Autorização negada (401/403) nas consultas de spaces, pastas ou listas
+/// 3. Indisponibilidade do serviço CloudRun
+fn is_fallback_eligible_error(error: &AppError) -> bool {
+    match error {
+        // Timeouts são sempre elegíveis
+        AppError::Timeout(_) => true,
+        
+        // Erros internos que podem indicar problemas de conexão
+        AppError::InternalError(msg) => {
+            let msg_lower = msg.to_lowercase();
+            msg_lower.contains("timeout") ||
+            msg_lower.contains("connection") ||
+            msg_lower.contains("network") ||
+            msg_lower.contains("dns") ||
+            msg_lower.contains("refused") ||
+            msg_lower.contains("unreachable") ||
+            msg_lower.contains("failed to connect")
+        },
+        
+        // Erros do ClickUp API com códigos de autorização
+        AppError::ClickUpApi(msg) => {
+            let msg_lower = msg.to_lowercase();
+            msg_lower.contains("401") ||
+            msg_lower.contains("403") ||
+            msg_lower.contains("unauthorized") ||
+            msg_lower.contains("forbidden") ||
+            msg_lower.contains("authentication") ||
+            msg_lower.contains("permission denied") ||
+            msg_lower.contains("timeout") ||
+            msg_lower.contains("connection")
+        },
+        
+        // Erros de configuração relacionados a autenticação
+        AppError::ConfigError(msg) => {
+            let msg_lower = msg.to_lowercase();
+            msg_lower.contains("token") ||
+            msg_lower.contains("auth") ||
+            msg_lower.contains("credential")
+        },
+        
+        // Outros tipos não são elegíveis por padrão
+        _ => false,
+    }
+}
+
+/// Encaminha payload original do ChatGuru para o App Engine (fallback inteligente)
+///
+/// # Objetivo:
+/// Garante continuidade operacional quando o CloudRun está indisponível ou com problemas
+/// de autenticação. Mantém contexto completo e logs detalhados para rastreabilidade.
+///
+/// # Condições de Acionamento:
+/// - Timeout ou erro de conexão com CloudRun/ClickUp
+/// - Autorização negada (401/403) nas consultas de spaces, pastas ou listas
+/// - Indisponibilidade do serviço CloudRun
+///
+/// # Parâmetros:
+/// - `payload`: Payload original do ChatGuru
+/// - `fallback_reason`: Motivo detalhado que causou o fallback
+/// - `original_error`: Erro original que triggou o fallback
+///
+/// # Retorno:
+/// - `Ok(Value)`: Response estruturada indicando sucesso do fallback
+/// - `Err(AppError)`: Erro se o próprio AppEngine falhar
+async fn forward_to_app_engine_with_context(
+    payload: &WebhookPayload,
+    fallback_reason: &str,
+    original_error: &str
+) -> AppResult<Value> {
     const APP_ENGINE_URL: &str = "https://buzzlightear.rj.r.appspot.com/webhook";
+    
+    // Extrair contexto básico para logs detalhados
+    let chat_id = extract_chat_id_from_payload(payload).unwrap_or_else(|| "N/A".to_string());
+    let info_2 = extract_info_2_from_payload(payload).unwrap_or_else(|| "N/A".to_string());
+    let nome = extract_nome_from_payload(payload);
 
-    log_info("🔄 Encaminhando payload para App Engine...");
+    log_info(&format!(
+        "🔄 INICIANDO FALLBACK PARA APP ENGINE - ChatID: {} | Cliente: '{}' | Sender: {}",
+        chat_id, info_2, nome
+    ));
+    log_info(&format!(
+        "   📋 Motivo do fallback: {} | Erro original: {}",
+        fallback_reason, original_error
+    ));
 
-    // Serializar o payload completo
-    let payload_json = serde_json::to_value(payload)
+    // Serializar o payload completo mantendo contexto
+    let mut payload_json = serde_json::to_value(payload)
         .map_err(|e| AppError::InternalError(format!("Failed to serialize payload: {}", e)))?;
 
-    // Fazer POST para o App Engine
+    // Adicionar metadados de fallback para rastreabilidade no AppEngine
+    if let Some(obj) = payload_json.as_object_mut() {
+        obj.insert("_fallback_metadata".to_string(), serde_json::json!({
+            "triggered_by": "cloud_run_middleware",
+            "fallback_reason": fallback_reason,
+            "original_error": original_error,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "chat_id": chat_id,
+            "client_info_2": info_2
+        }));
+    }
+
+    // Cliente HTTP com configuração robusta para AppEngine
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(45)) // Timeout mais generoso para AppEngine
+        .connect_timeout(std::time::Duration::from_secs(10))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
-    let response = client
+    log_info(&format!(
+        "📡 ENVIANDO PAYLOAD PARA APP ENGINE - URL: {} | Payload size: {} bytes",
+        APP_ENGINE_URL,
+        serde_json::to_string(&payload_json).unwrap_or_default().len()
+    ));
+
+    // Executar POST para AppEngine com tratamento robusto
+    let response_result = client
         .post(APP_ENGINE_URL)
         .header("Content-Type", "application/json")
-        .header("X-Forwarded-From", "cloud-run-middleware")
+        .header("X-Forwarded-From", "cloud-run-middleware-fallback")
+        .header("X-Fallback-Reason", fallback_reason)
+        .header("X-Original-Error", original_error)
+        .header("X-Chat-ID", &chat_id)
+        .header("X-Client-Info", &info_2)
         .json(&payload_json)
         .send()
-        .await
-        .map_err(|e| AppError::InternalError(format!("Failed to forward to App Engine: {}", e)))?;
+        .await;
 
-    let status = response.status();
+    match response_result {
+        Ok(response) => {
+            let status = response.status();
+            let response_body = response.text().await.unwrap_or_default();
 
-    if status.is_success() {
-        let response_body = response.text().await.unwrap_or_default();
-        log_info(&format!("✅ App Engine response ({}): {}", status, response_body));
-        Ok(())
-    } else {
-        let error_body = response.text().await.unwrap_or_default();
-        log_error(&format!("❌ App Engine returned error ({}): {}", status, error_body));
-        Err(AppError::InternalError(format!(
-            "App Engine returned status {}: {}",
-            status, error_body
-        )))
+            if status.is_success() {
+                log_info(&format!(
+                    "✅ FALLBACK PARA APP ENGINE SUCESSO - Status: {} | ChatID: {} | Cliente: '{}'",
+                    status, chat_id, info_2
+                ));
+                log_info(&format!(
+                    "   📋 Response body: {} | Size: {} chars",
+                    if response_body.len() > 200 {
+                        format!("{}...", &response_body[..200])
+                    } else {
+                        response_body.clone()
+                    },
+                    response_body.len()
+                ));
+
+                // Retornar resposta estruturada indicando sucesso do fallback
+                Ok(serde_json::json!({
+                    "status": "processed_via_fallback",
+                    "fallback_target": "app_engine",
+                    "app_engine_status": status.as_u16(),
+                    "app_engine_response": response_body,
+                    "fallback_metadata": {
+                        "reason": fallback_reason,
+                        "original_error": original_error,
+                        "chat_id": chat_id,
+                        "client_info_2": info_2,
+                        "timestamp": chrono::Utc::now().to_rfc3339()
+                    }
+                }))
+            } else {
+                log_error(&format!(
+                    "❌ FALLBACK PARA APP ENGINE FALHOU - Status: {} | ChatID: {} | Cliente: '{}'",
+                    status, chat_id, info_2
+                ));
+                log_error(&format!(
+                    "   📋 Error body: {} | Fallback reason: {}",
+                    response_body, fallback_reason
+                ));
+                
+                Err(AppError::InternalError(format!(
+                    "App Engine fallback failed - Status: {}, Body: {}, Original reason: {}",
+                    status, response_body, fallback_reason
+                )))
+            }
+        },
+        Err(e) => {
+            log_error(&format!(
+                "❌ ERRO DE REDE NO FALLBACK PARA APP ENGINE - ChatID: {} | Cliente: '{}' | Network Error: {}",
+                chat_id, info_2, e
+            ));
+            log_error(&format!(
+                "   📋 Fallback reason: {} | Original error: {}",
+                fallback_reason, original_error
+            ));
+
+            Err(AppError::InternalError(format!(
+                "Failed to connect to App Engine fallback: {} (Original: {})",
+                e, original_error
+            )))
+        }
+    }
+}
+
+/// Executa operação com fallback automático para AppEngine
+///
+/// # Funcionalidade:
+/// Wrapper inteligente que executa uma operação e, em caso de falha elegível,
+/// automaticamente aciona o fallback para AppEngine mantendo contexto completo.
+///
+/// # Parâmetros:
+/// - `operation`: Closure async que executa a operação principal
+/// - `operation_name`: Nome da operação para logs
+/// - `payload`: Payload original para fallback
+/// - `fallback_enabled`: Se fallback está habilitado (padrão: true)
+///
+/// # Retorno:
+/// - `Ok(Value)`: Resultado da operação ou do fallback
+/// - `Err(AppError)`: Erro se ambos falharem ou fallback desabilitado
+async fn execute_with_fallback<F, Fut>(
+    operation: F,
+    operation_name: &str,
+    payload: &WebhookPayload,
+    fallback_enabled: bool,
+) -> AppResult<Value>
+where
+    F: FnOnce() -> Fut + Send,
+    Fut: std::future::Future<Output = AppResult<Value>> + Send,
+{
+    // Executar operação principal
+    match operation().await {
+        Ok(result) => {
+            log_info(&format!("✅ {} executado com sucesso", operation_name));
+            Ok(result)
+        },
+        Err(error) => {
+            log_warning(&format!(
+                "⚠️ FALHA EM {} - Error: {} | Verificando elegibilidade para fallback",
+                operation_name, error
+            ));
+
+            // Verificar se erro é elegível para fallback
+            if !is_fallback_eligible_error(&error) {
+                log_info(&format!(
+                    "❌ Erro não elegível para fallback - Tipo: {:?} | Operation: {}",
+                    std::mem::discriminant(&error), operation_name
+                ));
+                return Err(error);
+            }
+
+            if !fallback_enabled {
+                log_info(&format!(
+                    "❌ Fallback desabilitado - Operation: {} | Error: {}",
+                    operation_name, error
+                ));
+                return Err(error);
+            }
+
+            log_info(&format!(
+                "🔄 ACIONANDO FALLBACK PARA APP ENGINE - Operation: {} | Error elegível detectado",
+                operation_name
+            ));
+
+            // Acionar fallback para AppEngine
+            forward_to_app_engine_with_context(
+                payload,
+                &format!("Falha em {}", operation_name),
+                &format!("{}", error),
+            ).await
+        }
+    }
+}
+
+/// Encaminha payload original do ChatGuru para o App Engine (compatibilidade)
+///
+/// Mantida para compatibilidade com código existente.
+/// Para novos usos, prefira `forward_to_app_engine_with_context` ou `execute_with_fallback`.
+async fn _forward_to_app_engine(payload: &WebhookPayload) -> AppResult<()> {
+    match forward_to_app_engine_with_context(
+        payload,
+        "Legacy fallback call",
+        "Unspecified error"
+    ).await {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e),
     }
 }
 

@@ -9,11 +9,21 @@
 //! - ✅ Removida dependência de custom fields para identificação
 //! - ✅ Mantém validação robusta de hierarquia organizacional
 //! - ✅ Integração transparente com sistema refatorado
+//! - ✅ **MCP CHECKLIST IMPLEMENTADO**: Garantia de lista vigente do mês atual
 //!
+//! ## FUNCIONALIDADE MCP CHECKLIST:
 //! Este módulo implementa a validação simplificada solicitada:
 //! 1. Verifica se Info_2 é compatível com alguma pasta do workspace
-//! 2. Garante que existe lista do mês vigente na pasta encontrada
-//! 3. Se Info_2 vazio ou sem pasta compatível → interrompe processamento
+//! 2. **GARANTE QUE EXISTE LISTA VIGENTE DO MÊS** na pasta encontrada
+//! 3. Se lista não existir, **CRIA AUTOMATICAMENTE** conforme padrão
+//! 4. Mantém **RASTREABILIDADE COMPLETA** através de logs detalhados
+//! 5. Se Info_2 vazio ou sem pasta compatível → interrompe processamento
+//! 6. Retorna **IDs DE PASTA E LISTA** para uso nas próximas etapas do fluxo
+//!
+//! ## INTEGRAÇÃO COM SmartFolderFinder:
+//! A função `find_folder_for_client()` automaticamente chama
+//! `find_or_create_current_month_list()` quando encontra uma pasta compatível,
+//! garantindo que sempre haverá uma lista vigente do mês disponível.
 
 use crate::utils::error::AppError;
 use clickup::folders::SmartFolderFinder;
@@ -68,18 +78,22 @@ impl WorkspaceHierarchyService {
         }
     }
 
-    /// Validação principal simplificada - BUSCA POR NOME DE PASTA
+    /// Validação principal simplificada - BUSCA POR NOME DE PASTA + MCP CHECKLIST
     ///
     /// LÓGICA DE BUSCA (sem campos customizados):
     /// 1. Se info_2 vazio → retorna inválido (interrompe)
     /// 2. Usa SmartFolderFinder para buscar pasta por SIMILARIDADE DE NOME
     /// 3. SmartFolderFinder compara info_2 com nomes de pastas do ClickUp
     /// 4. Se não encontrar pasta compatível → retorna inválido (interrompe)
-    /// 5. Se encontrar → já retorna com lista do mês vigente
-    /// 6. Retorna válido com folder_id e list_id
+    /// 5. **MCP CHECKLIST**: Se encontrar → BUSCA/CRIA lista vigente do mês automaticamente
+    /// 6. Retorna válido com folder_id e list_id garantidos
     ///
     /// MOTIVAÇÃO: Sistema independente de campos customizados, busca baseada
     /// exclusivamente em nomes de pastas fornecidos pelo worker/core.
+    ///
+    /// **GARANTIA MCP**: Esta função SEMPRE retorna list_id válido quando
+    /// is_valid=true, pois o SmartFolderFinder automaticamente busca/cria
+    /// a lista do mês vigente conforme padrão estabelecido.
     pub async fn validate_and_find_target(&mut self, info_2: &str) -> Result<WorkspaceValidation, AppError> {
         tracing::info!("🔍 Iniciando validação simplificada para Info_2: '{}'", info_2);
         
