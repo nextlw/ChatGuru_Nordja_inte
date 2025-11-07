@@ -3,7 +3,7 @@
 use crate::error::{ClickUpError, Result};
 use reqwest::{Client as HttpClient, Response};
 use serde::de::DeserializeOwned;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::time::Duration;
 
 /// Cliente para interagir com a API do ClickUp (v2 apenas)
@@ -203,7 +203,99 @@ impl ClickUpClient {
     pub fn base_url(&self) -> &str {
         &self.base_url
     }
+
+    /// Busca uma lista por nome em uma pasta específica
+    ///
+    /// # Argumentos
+    ///
+    /// * `folder_id` - ID da pasta onde buscar a lista
+    /// * `list_name` - Nome da lista a ser encontrada
+    ///
+    /// # Retorna
+    ///
+    /// `Ok(Some(list))` se a lista for encontrada
+    /// `Ok(None)` se a lista não for encontrada
+    /// `Err(...)` em caso de erro na API
+    pub async fn find_list_by_name(&self, folder_id: &str, list_name: &str) -> Result<Option<ListInfo>> {
+        let endpoint = format!("/folder/{}", folder_id);
+        let folder_data: Value = self.get_json(&endpoint).await?;
+
+        if let Some(lists) = folder_data["lists"].as_array() {
+            for list in lists {
+                if let Some(name) = list["name"].as_str() {
+                    if name.eq_ignore_ascii_case(list_name) {
+                        let id = list["id"].as_str()
+                            .map(|s| s.to_string())
+                            .or_else(|| list["id"].as_u64().map(|n| n.to_string()))
+                            .unwrap_or_else(|| String::new());
+                        
+                        return Ok(Some(ListInfo {
+                            id,
+                            name: name.to_string(),
+                        }));
+                    }
+                }
+            }
+        }
+        
+        Ok(None)
+    }
+
+    /// Cria uma nova lista em uma pasta
+    ///
+    /// # Argumentos
+    ///
+    /// * `folder_id` - ID da pasta onde criar a lista
+    /// * `list_data` - Dados da lista a ser criada
+    ///
+    /// # Retorna
+    ///
+    /// A lista criada com o ID atribuído pela API
+    pub async fn create_list(&self, folder_id: &str, list_data: &CreateListRequest) -> Result<ListInfo> {
+        let endpoint = format!("/folder/{}/list", folder_id);
+        
+        let body = json!({
+            "name": list_data.name,
+            "content": list_data.content,
+            "due_date": list_data.due_date,
+            "priority": list_data.priority,
+            "assignee": list_data.assignee,
+            "status": list_data.status
+        });
+
+        let response: Value = self.post_json(&endpoint, &body).await?;
+        
+        let id = response["id"].as_str()
+            .map(|s| s.to_string())
+            .or_else(|| response["id"].as_u64().map(|n| n.to_string()))
+            .unwrap_or_else(|| String::new());
+            
+        let name = response["name"].as_str()
+            .unwrap_or(&list_data.name)
+            .to_string();
+
+        Ok(ListInfo { id, name })
+    }
 }
+
+/// Informações básicas de uma lista
+#[derive(Debug, Clone)]
+pub struct ListInfo {
+    pub id: String,
+    pub name: String,
+}
+
+/// Dados para criar uma nova lista
+#[derive(Debug, Clone)]
+pub struct CreateListRequest {
+    pub name: String,
+    pub content: Option<String>,
+    pub due_date: Option<i64>,
+    pub priority: Option<u32>,
+    pub assignee: Option<String>,
+    pub status: Option<String>,
+}
+
 
 #[cfg(test)]
 mod tests {

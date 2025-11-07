@@ -22,6 +22,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::time::Instant;
 use base64::{Engine as _, engine::general_purpose};
+use chrono::Datelike;
 
 use chatguru_clickup_middleware::models::payload::WebhookPayload;
 use chatguru_clickup_middleware::utils::{AppResult, AppError};
@@ -905,19 +906,35 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
         // Validação simplificada - verifica se Info_2 é compatível com alguma pasta
         let validation_result = hierarchy_service.validate_and_find_target(&info_2).await
             .map_err(|e| AppError::InternalError(format!("Workspace validation failed: {}", e)))?;
-
-        if !validation_result.is_valid {
-            log_warning(&format!("❌ Validação falhou: {} - INTERROMPENDO PROCESSAMENTO", validation_result.reason));
-            
-            // IMPORTANTE: Retorna sucesso mas sem processar 
-            // Não classifica com IA, não adiciona à fila, não envia para App Engine
-            return Ok(json!({
-                "status": "skipped",
-                "reason": "validation_failed",
-                "validation_reason": validation_result.reason,
-                "info_2": info_2,
-                "message": "Processamento interrompido - Info_2 inválido ou não encontrada pasta compatível"
-            }));
+if !validation_result.is_valid {
+    log_warning(&format!("⚠️ Folder não encontrado para '{}', usando fallback do ClickUpService", info_2));
+    
+    // NOVA LÓGICA: Aplicar configurações customizadas mesmo no fallback
+    let fallback_enabled = std::env::var("ENABLE_FALLBACK_PROCESSING")
+        .unwrap_or_else(|_| "true".to_string())
+        .to_lowercase() == "true";
+    
+    if !fallback_enabled {
+        log_info("ℹ️ Anotação de fallback desabilitada — apenas encaminhando para o App Engine");
+        log_info("🔄 Encaminhando payload para App Engine...");
+        return Ok(json!({
+            "status": "forwarded_to_app_engine",
+            "reason": "validation_failed_fallback_disabled",
+            "validation_reason": validation_result.reason,
+            "info_2": info_2
+        }));
+    }
+    
+    log_info("💡 Processando com configurações customizadas + fallback para pasta 'Clientes Inativos'");
+    
+    // Aplicar configurações customizadas com fallback
+    return process_with_fallback_configurations(
+        state,
+        payload,
+        &classification,
+        &info_2,
+        &api_token
+    ).await;
         }
 
         let folder_id = validation_result.folder_id.clone().unwrap();
@@ -1279,6 +1296,308 @@ fn extract_responsavel_nome_from_payload(payload: &WebhookPayload) -> Option<Str
 // As funções abaixo foram mantidas para referência histórica
 // ============================================================================
 
+
+// ============================================================================
+// FALLBACK com configurações customizadas
+// ============================================================================
+
+/// Processa a tarefa com configurações customizadas mesmo quando usa fallback
+///
+/// Esta função é chamada quando a validação da pasta falha, mas queremos aplicar
+/// as configurações customizadas (estrelas, categorias) antes de usar o fallback
+/// para a pasta "Clientes Inativos".
+async fn process_with_fallback_configurations(
+    state: &Arc<AppState>,
+    payload: &WebhookPayload,
+    classification: &crate::services::OpenAIClassification,
+    info_2: &str,
+    api_token: &str,
+) -> AppResult<Value> {
+    log_info(&format!("🔧 Iniciando processamento com configurações customizadas + fallback para Info_2: '{}'", info_2));
+    
+    // Configurar pasta de fallback "Clientes Inativos"
+    let fallback_folder_name = "Clientes Inativos";
+    let fallback_folder_id = std::env::var("FALLBACK_FOLDER_ID")
+        .unwrap_or_else(|_| "90161002969".to_string()); // ID da pasta "Clientes Inativos"
+    
+    log_info(&format!("📂 Usando pasta de fallback: '{}' (ID: {})", fallback_folder_name, fallback_folder_id));
+    
+    // Determinar o nome da lista baseado no cliente (Info_2) e mês atual
+    let now = chrono::Utc::now();
+    let list_name = if info_2.is_empty() {
+        format!("Clientes Diversos - {} {}",
+            get_month_name_pt(now.month() as u32),
+            now.year()
+        )
+    } else {
+        format!("{} - {} {}",
+            info_2,
+            get_month_name_pt(now.month() as u32),
+            now.year()
+        )
+    };
+    
+    log_info(&format!("📋 Nome da lista calculado: '{}'", list_name));
+    
+    // Criar cliente ClickUp para verificar/criar lista
+    let clickup_client = clickup::ClickUpClient::new(api_token.to_string())
+        .map_err(|e| AppError::ClickUpApi(format!("Failed to create ClickUp client: {}", e)))?;
+    
+    // Buscar ou criar a lista no folder de fallback
+    let list_id = match clickup_client.find_list_by_name(&fallback_folder_id, &list_name).await {
+        Ok(Some(existing_list)) => {
+            log_info(&format!("✅ Lista encontrada: '{}' (ID: {})", list_name, existing_list.id));
+            existing_list.id
+        },
+        Ok(None) => {
+            log_info(&format!("📝 Criando nova lista: '{}'", list_name));
+            
+            // Criar nova lista na pasta de fallback
+            let new_list = clickup::CreateListRequest {
+                name: list_name.clone(),
+                content: Some(format!("Lista criada automaticamente para cliente: {}", info_2)),
+                due_date: None,
+                priority: None,
+                assignee: None,
+                status: None,
+            };
+            
+            match clickup_client.create_list(&fallback_folder_id, &new_list).await {
+                Ok(created_list) => {
+                    log_info(&format!("✅ Lista criada com sucesso: '{}' (ID: {})", list_name, created_list.id));
+                    created_list.id
+                },
+                Err(e) => {
+                    log_error(&format!("❌ Erro ao criar lista: {}", e));
+                    return Err(AppError::ClickUpApi(format!("Failed to create fallback list: {}", e)));
+                }
+            }
+        },
+        Err(e) => {
+            log_error(&format!("❌ Erro ao buscar lista: {}", e));
+            return Err(AppError::ClickUpApi(format!("Failed to search for list: {}", e)));
+        }
+    };
+    
+    log_info(&format!("🎯 Lista determinada: '{}' (ID: {})", list_name, list_id));
+    
+    // Buscar assignee (responsável) se disponível
+    let assignee_result = if let Some(ref responsavel) = extract_responsavel_nome_from_payload(payload) {
+        log_info(&format!("👤 Buscando assignee para responsavel_nome: '{}'", responsavel));
+        
+        let workspace_id = std::env::var("CLICKUP_WORKSPACE_ID")
+            .or_else(|_| std::env::var("CLICKUP_TEAM_ID"))
+            .unwrap_or_else(|_| "9013037641".to_string());
+        
+        let mut assignee_finder = SmartAssigneeFinder::from_token(api_token.to_string(), workspace_id)
+            .map_err(|e| AppError::ClickUpApi(format!("Failed to create SmartAssigneeFinder: {}", e)))?;
+        
+        match assignee_finder.find_assignee_by_name(responsavel).await {
+            Ok(Some(result)) => {
+                log_info(&format!(
+                    "✅ Assignee encontrado: {} (user_id: {}, método: {:?}, confiança: {:.2})",
+                    result.username,
+                    result.user_id,
+                    result.search_method,
+                    result.confidence
+                ));
+                Some(result)
+            }
+            Ok(None) => {
+                log_warning(&format!(
+                    "⚠️ Assignee não encontrado para '{}', tarefa será criada sem responsável",
+                    responsavel
+                ));
+                None
+            }
+            Err(e) => {
+                log_error(&format!("❌ Erro ao buscar assignee: {}, continuando sem responsável", e));
+                None
+            }
+        }
+    } else {
+        log_info("ℹ️ Sem responsavel_nome no payload, tarefa será criada sem assignee");
+        None
+    };
+    
+    // Criar task_data com configurações customizadas (APLICAR ESTRELAS E CATEGORIAS)
+    let mut task_data = payload.to_clickup_task_data_with_ai(Some(classification)).await;
+    
+    log_info(&format!("🌟 Configurações customizadas aplicadas: categoria='{}', subcategoria='{}'",
+        classification.campanha.as_deref().unwrap_or("N/A"),
+        classification.sub_categoria.as_deref().unwrap_or("N/A")
+    ));
+    
+    // Adicionar assignee ao task_data se encontrado
+    if let Some(assignee_info) = assignee_result {
+        if let Some(obj) = task_data.as_object_mut() {
+            obj.insert("assignees".to_string(), serde_json::json!(vec![assignee_info.user_id]));
+            log_info(&format!("✅ Assignee adicionado ao task_data: {}", assignee_info.username));
+        }
+    }
+    
+    // Configurar campo "Cliente Solicitante" com o nome da pasta de fallback + Info_2
+    let client_display_name = if info_2.is_empty() {
+        fallback_folder_name.to_string()
+    } else {
+        format!("{} ({})", fallback_folder_name, info_2)
+    };
+    
+    log_info(&format!("📝 Configurando 'Cliente Solicitante' para: '{}'", client_display_name));
+    
+    let custom_field_manager = CustomFieldManager::from_token(api_token.to_string())
+        .map_err(|e| AppError::ClickUpApi(format!("Failed to create CustomFieldManager: {}", e)))?;
+    
+    match custom_field_manager
+        .ensure_client_solicitante_option(&list_id, &client_display_name)
+        .await
+    {
+        Ok(client_field) => {
+            log_info("✅ Campo 'Cliente Solicitante' configurado");
+            
+            // Adicionar/substituir o campo custom no task_data
+            if let Some(obj) = task_data.as_object_mut() {
+                // Buscar custom_fields existentes ou criar array vazio
+                let custom_fields = obj
+                    .entry("custom_fields")
+                    .or_insert_with(|| serde_json::json!([]));
+                
+                if let Some(fields_array) = custom_fields.as_array_mut() {
+                    // Remover campo "Cliente Solicitante" se já existir
+                    fields_array.retain(|f| {
+                        f.get("id")
+                            .and_then(|id| id.as_str())
+                            != Some("0ed63eec-1c50-4190-91c1-59b4b17557f6")
+                    });
+                    
+                    // Adicionar novo valor
+                    fields_array.push(client_field);
+                    
+                    log_info(&format!(
+                        "✅ 'Cliente Solicitante' sincronizado com fallback: '{}'",
+                        client_display_name
+                    ));
+                }
+            }
+        }
+        Err(e) => {
+            log_warning(&format!(
+                "⚠️ Erro ao configurar 'Cliente Solicitante': {}, continuando sem o campo",
+                e
+            ));
+        }
+    }
+    
+    // Adicionar list_id ao task_data
+    if let Some(obj) = task_data.as_object_mut() {
+        obj.insert("list_id".to_string(), serde_json::json!(list_id));
+    }
+    
+    // Converter Value para Task tipada
+    let task: clickup::Task = serde_json::from_value(task_data)?;
+    
+    // Deduplicação: checar se já existe tarefa com o mesmo título antes de criar
+    let existing = state.clickup.find_existing_task_in_list(
+        Some(&list_id),
+        &task.name
+    ).await;
+    
+    let task_result = match existing {
+        Ok(Some(_task_found)) => {
+            log_info(&format!("❗ Tarefa já existe no ClickUp com o mesmo título: '{}'. Não será criada nova task.", &task.name));
+            return Ok(serde_json::json!({
+                "status": "duplicate",
+                "message": "Tarefa já existente, não criada novamente",
+                "task_title": &task.name,
+                "fallback_used": true,
+                "folder_name": fallback_folder_name,
+                "list_name": list_name
+            }));
+        }
+        Ok(None) => {
+            // Só cria a task se não houver duplicata
+            match state.clickup.create_task(&task).await {
+                Ok(created_task) => {
+                    log_info(&format!("✅ Tarefa criada com configurações customizadas: {}", created_task.id.as_ref().unwrap_or(&"?".to_string())));
+                    serde_json::to_value(&created_task)
+                        .unwrap_or_else(|_| serde_json::json!({"id": created_task.id}))
+                }
+                Err(e) => {
+                    log_error(&format!("❌ Erro ao criar tarefa: {}", e));
+                    return Err(AppError::ClickUpApi(e.to_string()));
+                }
+            }
+        }
+        Err(e) => {
+            log_error(&format!("❌ Erro ao buscar duplicata no ClickUp: {}", e));
+            return Err(AppError::ClickUpApi(e.to_string()));
+        }
+    };
+    
+    // Montar anotação com informações da task (incluindo indicação de fallback)
+    let task_id = task_result.get("id").and_then(|v| v.as_str()).unwrap_or("N/A");
+    let task_url = task_result.get("url").and_then(|v| v.as_str()).unwrap_or("");
+    
+    let annotation = format!(
+        "✅ Tarefa criada no ClickUp (Fallback)\\\\n\\\\n📋 Descrição: {}\\\\n🏷️ Categoria: {}\\\\n📂 Subcategoria: {}\\\\n⭐ Prioridade: {} estrela(s)\\\\n📁 Pasta: {} (Fallback)\\\\n📋 Lista: {}\\\\n🔗 Link: {}",
+        classification.reason,
+        classification.campanha.as_deref().unwrap_or("N/A"),
+        classification.sub_categoria.as_deref().unwrap_or("N/A"),
+        // Extrair prioridade da task_result se disponível
+        task_result.get("priority")
+            .and_then(|p| p.get("orderindex"))
+            .and_then(|o| o.as_str())
+            .map(|s| match s {
+                "1" => "4",
+                "2" => "3",
+                "3" => "2",
+                _ => "1"
+            })
+            .unwrap_or("N/A"),
+        fallback_folder_name,
+        list_name,
+        task_url
+    );
+    
+    // Enviar anotação ao ChatGuru
+    if let Err(e) = send_annotation_to_chatguru(state, payload, &annotation).await {
+        log_warning(&format!("⚠️ Falha ao enviar anotação ao ChatGuru: {}", e));
+        // Não falhar o processamento se anotação falhar
+    }
+    
+    log_info(&format!("✅ Processamento com fallback concluído: task_id={}, folder={}, list={}",
+        task_id, fallback_folder_name, list_name));
+    
+    Ok(json!({
+        "status": "processed",
+        "is_activity": true,
+        "task_id": task_id,
+        "annotation": annotation,
+        "fallback_used": true,
+        "fallback_folder": fallback_folder_name,
+        "fallback_list": list_name,
+        "client_info_2": info_2
+    }))
+}
+
+/// Retorna o nome do mês em português
+fn get_month_name_pt(month: u32) -> &'static str {
+    match month {
+        1 => "JANEIRO",
+        2 => "FEVEREIRO",
+        3 => "MARÇO",
+        4 => "ABRIL",
+        5 => "MAIO",
+        6 => "JUNHO",
+        7 => "JULHO",
+        8 => "AGOSTO",
+        9 => "SETEMBRO",
+        10 => "OUTUBRO",
+        11 => "NOVEMBRO",
+        12 => "DEZEMBRO",
+        _ => "DESCONHECIDO"
+    }
+}
 
 // ============================================================================
 // App Engine Fallback

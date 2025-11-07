@@ -59,7 +59,7 @@ pub mod types;     // ✅ Type-safe structures (Task, Priority, Status, CustomFi
 pub mod webhooks;  // ✅ Webhook management (create, list, update, delete)
 
 // Re-exports principais
-pub use client::ClickUpClient;
+pub use client::{ClickUpClient, ListInfo, CreateListRequest};
 pub use error::{ClickUpError, Result};
 
 // Re-exports de types para conveniência
