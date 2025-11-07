@@ -1,3 +1,7 @@
+use crate::client::ClickUpClient;
+use crate::error::Result;
+use serde::Deserialize;
+use serde_json::Value;
 /// Smart Assignee Finder: Busca inteligente de assignee (responsável) por nome
 ///
 /// Estratégia:
@@ -10,12 +14,7 @@
 /// - "William" → user_id do William
 /// - "anne" → user_id da Anne
 /// - "Gabriel Moreno" → user_id do Gabriel
-
 use std::collections::HashMap;
-use serde::Deserialize;
-use serde_json::Value;
-use crate::error::Result;
-use crate::client::ClickUpClient;
 
 const FUZZY_THRESHOLD: f64 = 0.70; // Reduzido de 0.85 para 0.70
 
@@ -126,10 +125,16 @@ impl SmartAssigneeFinder {
     /// 2. Team members API com fuzzy matching
     /// 3. Historical search em tarefas anteriores (assignees)
     /// 4. Fallback (retorna None)
-    pub async fn find_assignee_by_name(&mut self, responsavel_nome: &str) -> Result<Option<AssigneeSearchResult>> {
+    pub async fn find_assignee_by_name(
+        &mut self,
+        responsavel_nome: &str,
+    ) -> Result<Option<AssigneeSearchResult>> {
         let normalized_name = Self::normalize_name(responsavel_nome);
 
-        tracing::info!("🔍 SmartAssigneeFinder: Buscando assignee para '{}'", responsavel_nome);
+        tracing::info!(
+            "🔍 SmartAssigneeFinder: Buscando assignee para '{}'",
+            responsavel_nome
+        );
 
         // 1. Cache lookup
         if let Some(cached) = self.cache.get(&normalized_name) {
@@ -144,10 +149,15 @@ impl SmartAssigneeFinder {
                 return Ok(Some(result));
             }
             Ok(None) => {
-                tracing::info!("⚠️ Não encontrado via Team Members API, tentando busca histórica...");
+                tracing::info!(
+                    "⚠️ Não encontrado via Team Members API, tentando busca histórica..."
+                );
             }
             Err(e) => {
-                tracing::warn!("⚠️ Erro na busca via Team Members API: {}, tentando busca histórica...", e);
+                tracing::warn!(
+                    "⚠️ Erro na busca via Team Members API: {}, tentando busca histórica...",
+                    e
+                );
             }
         }
 
@@ -158,7 +168,10 @@ impl SmartAssigneeFinder {
                 return Ok(Some(result));
             }
             Ok(None) => {
-                tracing::warn!("⚠️ Responsável '{}' não encontrado (nem Team API, nem histórico)", responsavel_nome);
+                tracing::warn!(
+                    "⚠️ Responsável '{}' não encontrado (nem Team API, nem histórico)",
+                    responsavel_nome
+                );
             }
             Err(e) => {
                 tracing::error!("❌ Erro na busca histórica de assignees: {}", e);
@@ -170,17 +183,24 @@ impl SmartAssigneeFinder {
     }
 
     /// Fase 1: Buscar membros do time via API do ClickUp
-    async fn search_team_members(&self, normalized_name: &str) -> Result<Option<AssigneeSearchResult>> {
+    async fn search_team_members(
+        &self,
+        normalized_name: &str,
+    ) -> Result<Option<AssigneeSearchResult>> {
         tracing::info!("👥 Buscando team members via API do ClickUp...");
 
         // GET /team/{workspace_id} (API v2)
         let endpoint = format!("/team/{}", self.workspace_id);
         let team_response: ClickUpTeamResponse = self.client.get_json(&endpoint).await?;
 
-        tracing::info!("👥 Total de membros encontrados: {}", team_response.team.members.len());
+        tracing::info!(
+            "👥 Total de membros encontrados: {}",
+            team_response.team.members.len()
+        );
 
         // Buscar melhor match usando fuzzy matching
-        self.find_best_assignee_match(normalized_name, &team_response.team.members).await
+        self.find_best_assignee_match(normalized_name, &team_response.team.members)
+            .await
     }
 
     /// Encontrar melhor match de assignee usando fuzzy matching
@@ -205,8 +225,12 @@ impl SmartAssigneeFinder {
             // 2. Fuzzy match (Jaro-Winkler)
             let similarity = strsim::jaro_winkler(normalized_name, &normalized_username);
 
-            tracing::debug!("  Comparando: '{}' vs '{}' → score: {:.3}",
-                normalized_name, normalized_username, similarity);
+            tracing::debug!(
+                "  Comparando: '{}' vs '{}' → score: {:.3}",
+                normalized_name,
+                normalized_username,
+                similarity
+            );
 
             if similarity >= FUZZY_THRESHOLD {
                 if let Some((_, best_score, _)) = &best_match {
@@ -233,14 +257,23 @@ impl SmartAssigneeFinder {
     }
 
     /// Fase 2: Buscar em tarefas anteriores pelos assignees
-    async fn search_historical_assignees(&self, normalized_name: &str) -> Result<Option<AssigneeSearchResult>> {
+    async fn search_historical_assignees(
+        &self,
+        normalized_name: &str,
+    ) -> Result<Option<AssigneeSearchResult>> {
         tracing::info!("🕐 Buscando assignees em tarefas históricas...");
 
         // GET /team/{workspace_id}/task with query params (API v2)
-        let endpoint = format!("/team/{}/task?archived=false&subtasks=false&include_closed=true", self.workspace_id);
+        let endpoint = format!(
+            "/team/{}/task?archived=false&subtasks=false&include_closed=true",
+            self.workspace_id
+        );
         let tasks_response: ClickUpTasksResponse = self.client.get_json(&endpoint).await?;
 
-        tracing::info!("📋 Total de tarefas encontradas: {}", tasks_response.tasks.len());
+        tracing::info!(
+            "📋 Total de tarefas encontradas: {}",
+            tasks_response.tasks.len()
+        );
 
         // Buscar assignees que correspondem ao nome
         let mut all_assignees: Vec<ClickUpUser> = Vec::new();
@@ -254,7 +287,10 @@ impl SmartAssigneeFinder {
             }
         }
 
-        tracing::info!("👥 Total de assignees únicos encontrados: {}", all_assignees.len());
+        tracing::info!(
+            "👥 Total de assignees únicos encontrados: {}",
+            all_assignees.len()
+        );
 
         // Buscar melhor match usando fuzzy matching
         let mut best_match: Option<(ClickUpUser, f64)> = None;
@@ -291,7 +327,10 @@ impl SmartAssigneeFinder {
                 search_method: SearchMethod::HistoricalMatch,
             }))
         } else {
-            tracing::warn!("⚠️ Nenhum assignee histórico encontrado para '{}'", normalized_name);
+            tracing::warn!(
+                "⚠️ Nenhum assignee histórico encontrado para '{}'",
+                normalized_name
+            );
             Ok(None)
         }
     }
@@ -318,9 +357,18 @@ mod tests {
     #[test]
     fn test_normalize_name() {
         assert_eq!(SmartAssigneeFinder::normalize_name("William"), "william");
-        assert_eq!(SmartAssigneeFinder::normalize_name("Anne Souza"), "anne souza");
-        assert_eq!(SmartAssigneeFinder::normalize_name("Gabriel Moreno"), "gabriel moreno");
-        assert_eq!(SmartAssigneeFinder::normalize_name("WILLIAM DUARTE"), "william duarte");
+        assert_eq!(
+            SmartAssigneeFinder::normalize_name("Anne Souza"),
+            "anne souza"
+        );
+        assert_eq!(
+            SmartAssigneeFinder::normalize_name("Gabriel Moreno"),
+            "gabriel moreno"
+        );
+        assert_eq!(
+            SmartAssigneeFinder::normalize_name("WILLIAM DUARTE"),
+            "william duarte"
+        );
         assert_eq!(SmartAssigneeFinder::normalize_name("  Anne  "), "anne");
     }
 
@@ -329,15 +377,15 @@ mod tests {
         let test_cases = vec![
             // (nome_original, nome_digitado, deve_dar_match)
             ("William", "william", true),
-            ("William", "Wiliam", true),   // Typo
+            ("William", "Wiliam", true), // Typo
             ("Anne", "anne", true),
-            ("Anne", "Ann", true),          // Abreviação
+            ("Anne", "Ann", true), // Abreviação
             ("Gabriel Moreno", "gabriel moreno", true),
             ("Gabriel Moreno", "gabriel", true), // Nome parcial
             ("William Duarte", "william duarte", true),
             ("Renata", "renata", true),
-            ("Renata", "Renatta", true),    // Typo
-            ("William", "João", false),     // Nome diferente
+            ("Renata", "Renatta", true), // Typo
+            ("William", "João", false),  // Nome diferente
         ];
 
         for (original, digitado, should_match) in test_cases {

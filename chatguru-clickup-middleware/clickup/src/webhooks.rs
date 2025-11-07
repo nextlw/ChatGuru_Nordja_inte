@@ -141,7 +141,11 @@ impl WebhookManager {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn update_webhook(&self, webhook_id: &str, config: &WebhookConfig) -> Result<Webhook> {
+    pub async fn update_webhook(
+        &self,
+        webhook_id: &str,
+        config: &WebhookConfig,
+    ) -> Result<Webhook> {
         let endpoint = format!("/webhook/{}", webhook_id);
 
         let body = serde_json::json!({
@@ -402,20 +406,12 @@ impl WebhookEvent {
 
     /// Retorna eventos essenciais de task (create, update, delete)
     pub fn essential_task_events() -> Vec<Self> {
-        vec![
-            Self::TaskCreated,
-            Self::TaskUpdated,
-            Self::TaskDeleted,
-        ]
+        vec![Self::TaskCreated, Self::TaskUpdated, Self::TaskDeleted]
     }
 
     /// Retorna todos os eventos relacionados a listas
     pub fn all_list_events() -> Vec<Self> {
-        vec![
-            Self::ListCreated,
-            Self::ListUpdated,
-            Self::ListDeleted,
-        ]
+        vec![Self::ListCreated, Self::ListUpdated, Self::ListDeleted]
     }
 
     /// Retorna todos os eventos de estrutura (space, folder, list)
@@ -555,7 +551,11 @@ mod tests {
         let valid_signature = hex::encode(mac.finalize().into_bytes());
 
         // Verificar
-        assert!(WebhookPayload::verify_signature(&valid_signature, secret, body));
+        assert!(WebhookPayload::verify_signature(
+            &valid_signature,
+            secret,
+            body
+        ));
         assert!(!WebhookPayload::verify_signature("invalid", secret, body));
     }
 }

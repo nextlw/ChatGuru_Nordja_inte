@@ -1,3 +1,8 @@
+use crate::client::ClickUpClient;
+use crate::error::{ClickUpError, Result};
+use chrono::{Datelike, Utc};
+use serde::Deserialize;
+use serde_json::Value;
 /// Smart Folder Finder: Busca inteligente de folder_id usando API do ClickUp
 ///
 /// Estratégia em 2 fases:
@@ -8,13 +13,7 @@
 /// - folder_id: ID da pasta encontrada
 /// - list_id: ID da lista do mês atual (ou cria se não existir)
 /// - confidence: Nível de confiança da busca (1.0 = exact, 0.85+ = fuzzy, 0.5 = historical)
-
 use std::collections::HashMap;
-use serde::Deserialize;
-use serde_json::Value;
-use chrono::{Utc, Datelike};
-use crate::error::{Result, ClickUpError};
-use crate::client::ClickUpClient;
 
 const CLIENT_SOLICITANTE_FIELD_ID: &str = "0ed63eec-1c50-4190-91c1-59b4b17557f6";
 const FUZZY_THRESHOLD: f64 = 0.70; // Reduzido de 0.85 para 0.70
@@ -146,10 +145,16 @@ impl SmartFolderFinder {
     /// 2. API search com fuzzy matching
     /// 3. Historical search em tarefas anteriores
     /// 4. Fallback (retorna None)
-    pub async fn find_folder_for_client(&mut self, client_name: &str) -> Result<Option<FolderSearchResult>> {
+    pub async fn find_folder_for_client(
+        &mut self,
+        client_name: &str,
+    ) -> Result<Option<FolderSearchResult>> {
         let normalized_name = Self::normalize_name(client_name);
 
-        tracing::info!("🔍 SmartFolderFinder: Buscando folder para '{}'", client_name);
+        tracing::info!(
+            "🔍 SmartFolderFinder: Buscando folder para '{}'",
+            client_name
+        );
 
         // 1. Cache lookup
         if let Some(cached) = self.cache.get(&normalized_name) {
@@ -167,7 +172,10 @@ impl SmartFolderFinder {
                 tracing::info!("⚠️ Não encontrado via API, tentando busca histórica...");
             }
             Err(e) => {
-                tracing::warn!("⚠️ Erro na busca via API: {}, tentando busca histórica...", e);
+                tracing::warn!(
+                    "⚠️ Erro na busca via API: {}, tentando busca histórica...",
+                    e
+                );
             }
         }
 
@@ -178,7 +186,10 @@ impl SmartFolderFinder {
                 return Ok(Some(result));
             }
             Ok(None) => {
-                tracing::warn!("⚠️ Cliente '{}' não encontrado (nem API, nem histórico)", client_name);
+                tracing::warn!(
+                    "⚠️ Cliente '{}' não encontrado (nem API, nem histórico)",
+                    client_name
+                );
             }
             Err(e) => {
                 tracing::error!("❌ Erro na busca histórica: {}", e);
@@ -190,7 +201,10 @@ impl SmartFolderFinder {
     }
 
     /// Fase 1: Buscar folders via API do ClickUp
-    async fn search_folders_via_api(&self, normalized_client: &str) -> Result<Option<FolderSearchResult>> {
+    async fn search_folders_via_api(
+        &self,
+        normalized_client: &str,
+    ) -> Result<Option<FolderSearchResult>> {
         tracing::info!("📡 Buscando folders via API do ClickUp...");
 
         // GET /team/{team_id}/space (API v2)
@@ -200,13 +214,15 @@ impl SmartFolderFinder {
         let endpoint = format!("/team/{}/space", self.workspace_id);
         let spaces: serde_json::Value = self.client.get_json(&endpoint).await?;
 
-        let spaces_array = spaces["spaces"].as_array()
-            .ok_or_else(|| ClickUpError::ValidationError("Campo 'spaces' não é array".to_string()))?;
+        let spaces_array = spaces["spaces"].as_array().ok_or_else(|| {
+            ClickUpError::ValidationError("Campo 'spaces' não é array".to_string())
+        })?;
 
         // Para cada space, buscar folders
         let mut all_folders = Vec::new();
         for space in spaces_array {
-            let space_id = space["id"].as_str()
+            let space_id = space["id"]
+                .as_str()
                 .ok_or_else(|| ClickUpError::ValidationError("Space sem ID".to_string()))?;
 
             match self.fetch_folders_from_space(space_id).await {
@@ -220,7 +236,8 @@ impl SmartFolderFinder {
         tracing::info!("📁 Total de folders encontrados: {}", all_folders.len());
 
         // Buscar melhor match usando fuzzy matching
-        self.find_best_folder_match(normalized_client, &all_folders).await
+        self.find_best_folder_match(normalized_client, &all_folders)
+            .await
     }
 
     /// Buscar folders de um space específico
@@ -251,8 +268,12 @@ impl SmartFolderFinder {
             // 2. Fuzzy match (Jaro-Winkler)
             let similarity = strsim::jaro_winkler(normalized_client, &normalized_folder);
 
-            tracing::debug!("  Comparando: '{}' vs '{}' → score: {:.3}",
-                normalized_client, normalized_folder, similarity);
+            tracing::debug!(
+                "  Comparando: '{}' vs '{}' → score: {:.3}",
+                normalized_client,
+                normalized_folder,
+                similarity
+            );
 
             if similarity >= FUZZY_THRESHOLD {
                 if let Some((_, best_score, _)) = &best_match {
@@ -266,27 +287,46 @@ impl SmartFolderFinder {
 
             // 3. Token-based matching (para casos como "Breno / Leticia" → "Leticia e Breno")
             // Verifica se os principais tokens estão presentes, independente da ordem
-            if best_match.is_none() || best_match.as_ref().map(|(_, score, _)| *score).unwrap_or(0.0) < 0.90 {
+            if best_match.is_none()
+                || best_match
+                    .as_ref()
+                    .map(|(_, score, _)| *score)
+                    .unwrap_or(0.0)
+                    < 0.90
+            {
                 let client_tokens = Self::extract_name_tokens(normalized_client);
                 let folder_tokens = Self::extract_name_tokens(&normalized_folder);
 
                 if !client_tokens.is_empty() && !folder_tokens.is_empty() {
-                    let matching_tokens = client_tokens.iter()
-                        .filter(|ct| folder_tokens.iter().any(|ft| strsim::jaro_winkler(ct, ft) >= 0.90))
+                    let matching_tokens = client_tokens
+                        .iter()
+                        .filter(|ct| {
+                            folder_tokens
+                                .iter()
+                                .any(|ft| strsim::jaro_winkler(ct, ft) >= 0.90)
+                        })
                         .count();
 
-                    let token_score = matching_tokens as f64 / client_tokens.len().max(folder_tokens.len()) as f64;
+                    let token_score = matching_tokens as f64
+                        / client_tokens.len().max(folder_tokens.len()) as f64;
 
-                    if token_score >= 0.60 {  // Pelo menos 60% dos tokens devem dar match
-                        tracing::debug!("  Token match: {}/{} tokens → score: {:.3}",
-                            matching_tokens, client_tokens.len().max(folder_tokens.len()), token_score);
+                    if token_score >= 0.60 {
+                        // Pelo menos 60% dos tokens devem dar match
+                        tracing::debug!(
+                            "  Token match: {}/{} tokens → score: {:.3}",
+                            matching_tokens,
+                            client_tokens.len().max(folder_tokens.len()),
+                            token_score
+                        );
 
                         if let Some((_, best_score, _)) = &best_match {
                             if token_score > *best_score {
-                                best_match = Some((folder.clone(), token_score, SearchMethod::FuzzyMatch));
+                                best_match =
+                                    Some((folder.clone(), token_score, SearchMethod::FuzzyMatch));
                             }
                         } else {
-                            best_match = Some((folder.clone(), token_score, SearchMethod::FuzzyMatch));
+                            best_match =
+                                Some((folder.clone(), token_score, SearchMethod::FuzzyMatch));
                         }
                     }
                 }
@@ -311,15 +351,27 @@ impl SmartFolderFinder {
     }
 
     /// Fase 2: Buscar em tarefas anteriores pelo campo "Cliente Solicitante"
-    async fn search_historical_tasks(&self, normalized_client: &str) -> Result<Option<FolderSearchResult>> {
-        tracing::info!("🕐 Buscando tarefas históricas com 'Cliente Solicitante' = '{}'", normalized_client);
+    async fn search_historical_tasks(
+        &self,
+        normalized_client: &str,
+    ) -> Result<Option<FolderSearchResult>> {
+        tracing::info!(
+            "🕐 Buscando tarefas históricas com 'Cliente Solicitante' = '{}'",
+            normalized_client
+        );
 
         // GET /team/{team_id}/task with query params (API v2)
         // Nota: Na v2, usa-se "team" mas internamente chamamos de "workspace"
-        let endpoint = format!("/team/{}/task?archived=false&subtasks=false&include_closed=true", self.workspace_id);
+        let endpoint = format!(
+            "/team/{}/task?archived=false&subtasks=false&include_closed=true",
+            self.workspace_id
+        );
         let tasks_response: ClickUpTasksResponse = self.client.get_json(&endpoint).await?;
 
-        tracing::info!("📋 Total de tarefas encontradas: {}", tasks_response.tasks.len());
+        tracing::info!(
+            "📋 Total de tarefas encontradas: {}",
+            tasks_response.tasks.len()
+        );
 
         // Filtrar tarefas que contêm o cliente no campo "Cliente Solicitante"
         for task in tasks_response.tasks {
@@ -331,7 +383,8 @@ impl SmartFolderFinder {
                                 let normalized_value = Self::normalize_name(client_value);
 
                                 // Fuzzy match com threshold menor (histórico é menos confiável)
-                                let similarity = strsim::jaro_winkler(normalized_client, &normalized_value);
+                                let similarity =
+                                    strsim::jaro_winkler(normalized_client, &normalized_value);
 
                                 if similarity >= MIN_HISTORICAL_CONFIDENCE {
                                     tracing::info!(
@@ -364,7 +417,10 @@ impl SmartFolderFinder {
             }
         }
 
-        tracing::warn!("⚠️ Nenhuma tarefa histórica encontrada para '{}'", normalized_client);
+        tracing::warn!(
+            "⚠️ Nenhuma tarefa histórica encontrada para '{}'",
+            normalized_client
+        );
         Ok(None)
     }
 
@@ -405,8 +461,20 @@ impl SmartFolderFinder {
         let folder: serde_json::Value = self.client.get_json(&endpoint).await?;
 
         // Meses em português para busca (aceita variações)
-        let months_pt = ["janeiro", "fevereiro", "março", "abril", "maio", "junho",
-                         "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+        let months_pt = [
+            "janeiro",
+            "fevereiro",
+            "março",
+            "abril",
+            "maio",
+            "junho",
+            "julho",
+            "agosto",
+            "setembro",
+            "outubro",
+            "novembro",
+            "dezembro",
+        ];
         let current_month_pt = months_pt[(month_number - 1) as usize];
         let year_str = now.year().to_string();
 
@@ -417,11 +485,13 @@ impl SmartFolderFinder {
                     let name_lower = name.to_lowercase();
 
                     // Aceita: "OUTUBRO 2025", "outubro 2025", "October 2025", etc.
-                    if (name_lower.contains(current_month_pt) || name_lower.contains(&now.format("%B").to_string().to_lowercase()))
+                    if (name_lower.contains(current_month_pt)
+                        || name_lower.contains(&now.format("%B").to_string().to_lowercase()))
                         && name_lower.contains(&year_str)
                     {
-                        let list_id = list["id"].as_str()
-                            .ok_or_else(|| ClickUpError::ValidationError("Lista sem ID".to_string()))?;
+                        let list_id = list["id"].as_str().ok_or_else(|| {
+                            ClickUpError::ValidationError("Lista sem ID".to_string())
+                        })?;
 
                         tracing::info!("✅ Lista do mês encontrada: {} (id: {})", name, list_id);
                         return Ok((list_id.to_string(), name.to_string()));
@@ -445,10 +515,15 @@ impl SmartFolderFinder {
 
         let list: serde_json::Value = self.client.post_json(&endpoint, &payload).await?;
 
-        let list_id = list["id"].as_str()
+        let list_id = list["id"]
+            .as_str()
             .ok_or_else(|| ClickUpError::ValidationError("Lista criada sem ID".to_string()))?;
 
-        tracing::info!("✅ Lista criada com sucesso: {} (id: {})", list_name, list_id);
+        tracing::info!(
+            "✅ Lista criada com sucesso: {} (id: {})",
+            list_name,
+            list_id
+        );
 
         // Aguardar 2 segundos para ClickUp configurar custom fields da lista
         tracing::debug!("⏳ Aguardando 2s para custom fields serem configurados...");
@@ -462,11 +537,7 @@ impl SmartFolderFinder {
         use deunicode::deunicode;
 
         // Substituir "/" e outros separadores por espaço antes de processar
-        let normalized = name
-            .replace('/', " ")
-            .replace('\\', " ")
-            .replace('|', " ")
-            .replace('-', " ");
+        let normalized = name.replace(['/', '\\', '|', '-'], " ");
 
         // Remover acentos, converter para lowercase, remover caracteres especiais
         deunicode(&normalized)
@@ -496,14 +567,32 @@ mod tests {
 
     #[test]
     fn test_normalize_name() {
-        assert_eq!(SmartFolderFinder::normalize_name("Raphaela Spielberg"), "raphaela spielberg");
-        assert_eq!(SmartFolderFinder::normalize_name("José Muritiba (123)"), "jose muritiba 123");
-        assert_eq!(SmartFolderFinder::normalize_name("Gabriel Benarros!!!"), "gabriel benarros");
+        assert_eq!(
+            SmartFolderFinder::normalize_name("Raphaela Spielberg"),
+            "raphaela spielberg"
+        );
+        assert_eq!(
+            SmartFolderFinder::normalize_name("José Muritiba (123)"),
+            "jose muritiba 123"
+        );
+        assert_eq!(
+            SmartFolderFinder::normalize_name("Gabriel Benarros!!!"),
+            "gabriel benarros"
+        );
 
         // Novos testes para "/" e separadores
-        assert_eq!(SmartFolderFinder::normalize_name("Breno / Leticia"), "breno leticia");
-        assert_eq!(SmartFolderFinder::normalize_name("Leticia e Breno"), "leticia e breno");
-        assert_eq!(SmartFolderFinder::normalize_name("Carlos | Pedro"), "carlos pedro");
+        assert_eq!(
+            SmartFolderFinder::normalize_name("Breno / Leticia"),
+            "breno leticia"
+        );
+        assert_eq!(
+            SmartFolderFinder::normalize_name("Leticia e Breno"),
+            "leticia e breno"
+        );
+        assert_eq!(
+            SmartFolderFinder::normalize_name("Carlos | Pedro"),
+            "carlos pedro"
+        );
         assert_eq!(SmartFolderFinder::normalize_name("Ana-Paula"), "ana paula");
     }
 

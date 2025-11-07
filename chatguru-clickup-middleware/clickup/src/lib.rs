@@ -48,24 +48,23 @@
 //! ```
 
 // Módulos públicos
+pub mod assignees;
 pub mod client;
 pub mod error;
-pub mod matching;
-pub mod folders;
-pub mod assignees;
 pub mod fields;
+pub mod folders;
+pub mod matching;
 pub mod tasks;
-pub mod types;     // ✅ Type-safe structures (Task, Priority, Status, CustomField, etc.)
-pub mod webhooks;  // ✅ Webhook management (create, list, update, delete)
+pub mod types; // ✅ Type-safe structures (Task, Priority, Status, CustomField, etc.)
+pub mod webhooks; // ✅ Webhook management (create, list, update, delete)
 
 // Re-exports principais
-pub use client::{ClickUpClient, ListInfo, CreateListRequest};
+pub use client::{ClickUpClient, CreateListRequest, ListInfo};
 pub use error::{ClickUpError, Result};
 
 // Re-exports de types para conveniência
 pub use types::{
-    Task, TaskBuilder, Priority, Status, User, Assignee,
-    CustomField, CustomFieldValue,
+    Assignee, CustomField, CustomFieldValue, Priority, Status, Task, TaskBuilder, User,
 };
 
 // Módulos a serem implementados

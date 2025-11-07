@@ -16,20 +16,17 @@
 //! - **Priority**: Valores limitados a 1-4
 //! - **Status**: Não são globais, cada lista tem seus próprios status
 
+pub mod custom_field;
 pub mod priority;
 pub mod status;
-pub mod user;
-pub mod custom_field;
 pub mod task;
+pub mod user;
 
 // Re-exports principais para facilitar uso
+pub use custom_field::{
+    CustomField, CustomFieldValue, DropdownOption, FileValue, LocationValue, TypeConfig,
+};
 pub use priority::Priority;
 pub use status::Status;
-pub use user::{User, Assignee, AssigneeList};
-pub use custom_field::{
-    CustomField, CustomFieldValue, TypeConfig, DropdownOption,
-    LocationValue, FileValue,
-};
-pub use task::{
-    Task, TaskBuilder, TaskDependency, LinkedTask, Attachment,
-};
+pub use task::{Attachment, LinkedTask, Task, TaskBuilder, TaskDependency};
+pub use user::{Assignee, AssigneeList, User};

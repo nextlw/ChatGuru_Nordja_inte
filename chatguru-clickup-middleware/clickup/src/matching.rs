@@ -23,24 +23,16 @@ use strsim::jaro_winkler;
 /// ```
 pub fn normalize(text: &str) -> String {
     let mut normalized = deunicode(text).to_lowercase();
-    
+
     // Remove separadores especiais: /, -, |, \, _, +, =, etc.
-    normalized = normalized
-        .replace('/', " ")
-        .replace('-', " ")
-        .replace('|', " ")
-        .replace('\\', " ")
-        .replace('_', " ")
-        .replace('+', " ")
-        .replace('=', " ")
-        .replace('&', " ");
-    
+    normalized = normalized.replace(['/', '-', '|', '\\', '_', '+', '=', '&'], " ");
+
     // Remove números e símbolos especiais
     normalized = normalized
         .chars()
         .filter(|c| c.is_alphabetic() || c.is_whitespace())
         .collect();
-    
+
     // Normaliza espaços múltiplos para um único espaço
     normalized
         .split_whitespace()
@@ -162,28 +154,28 @@ pub fn tokenize(text: &str) -> Vec<String> {
 pub fn token_similarity(a: &str, b: &str, threshold: f64) -> f64 {
     let tokens_a = tokenize(a);
     let tokens_b = tokenize(b);
-    
+
     if tokens_a.is_empty() || tokens_b.is_empty() {
         return 0.0;
     }
-    
+
     let mut matched_tokens = 0;
-    
+
     for token_a in &tokens_a {
         let mut max_similarity = 0.0;
-        
+
         for token_b in &tokens_b {
             let sim = jaro_winkler(token_a, token_b);
             if sim > max_similarity {
                 max_similarity = sim;
             }
         }
-        
+
         if max_similarity >= threshold {
             matched_tokens += 1;
         }
     }
-    
+
     matched_tokens as f64 / tokens_a.len() as f64
 }
 
@@ -219,19 +211,19 @@ pub struct MatchingDetails {
 pub fn advanced_fuzzy_match(input: &str, target: &str, threshold: f64) -> MatchingDetails {
     let normalized_input = normalize(input);
     let normalized_target = normalize(target);
-    
+
     // 1. Jaro-Winkler tradicional
     let jaro_winkler_score = jaro_winkler(&normalized_input, &normalized_target);
-    
+
     // 2. Token matching com threshold reduzido (0.6 para tokens individuais)
     let token_score = token_similarity(input, target, 0.6);
-    
+
     // 3. Score final: maior entre Jaro-Winkler e token matching
     let final_score = jaro_winkler_score.max(token_score);
-    
+
     // 4. Determinar se é match
     let is_match = final_score >= threshold;
-    
+
     // 5. Explicar o motivo do resultado
     let match_reason = if is_match {
         if jaro_winkler_score >= threshold {
@@ -240,10 +232,14 @@ pub fn advanced_fuzzy_match(input: &str, target: &str, threshold: f64) -> Matchi
             format!("Token match: {:.1}%", token_score * 100.0)
         }
     } else {
-        format!("No match: Jaro-Winkler {:.1}%, Token {:.1}% (threshold: {:.1}%)",
-               jaro_winkler_score * 100.0, token_score * 100.0, threshold * 100.0)
+        format!(
+            "No match: Jaro-Winkler {:.1}%, Token {:.1}% (threshold: {:.1}%)",
+            jaro_winkler_score * 100.0,
+            token_score * 100.0,
+            threshold * 100.0
+        )
     };
-    
+
     MatchingDetails {
         input: input.to_string(),
         target: target.to_string(),
@@ -325,18 +321,26 @@ mod tests {
     fn test_advanced_fuzzy_matching() {
         // Caso específico do incidente: Hugo Tisaka vs Hugo / NSA Global
         let details = advanced_fuzzy_match("Hugo Tisaka", "Hugo / NSA Global", 0.70);
-        
+
         // Deve fazer match com threshold 0.70
-        assert!(details.is_match, "Hugo Tisaka vs Hugo / NSA Global deve fazer match com threshold 0.70");
-        
+        assert!(
+            details.is_match,
+            "Hugo Tisaka vs Hugo / NSA Global deve fazer match com threshold 0.70"
+        );
+
         // Verifica se o score é >= 0.70
-        assert!(details.final_score >= 0.70,
-                "Score final deve ser >= 0.70, mas foi {:.3}", details.final_score);
-        
+        assert!(
+            details.final_score >= 0.70,
+            "Score final deve ser >= 0.70, mas foi {:.3}",
+            details.final_score
+        );
+
         // Verifica se pelo menos um método (Jaro-Winkler ou token) funcionou
-        assert!(details.jaro_winkler_score > 0.0 || details.token_score > 0.0,
-                "Pelo menos um score deve ser > 0");
-        
+        assert!(
+            details.jaro_winkler_score > 0.0 || details.token_score > 0.0,
+            "Pelo menos um score deve ser > 0"
+        );
+
         println!("Detalhes do matching:");
         println!("Input: '{}'", details.input);
         println!("Target: '{}'", details.target);
@@ -351,14 +355,22 @@ mod tests {
         // Token "Hugo" deve fazer match
         let score1 = token_similarity("Hugo Tisaka", "Hugo / NSA Global", 0.6);
         assert!(score1 > 0.0, "Deve ter match parcial por 'Hugo'");
-        
+
         // NSA Global vs Hugo NSA Global - deve ter score alto
         let score2 = token_similarity("NSA Global", "Hugo / NSA Global", 0.6);
-        assert!(score2 >= 0.66, "NSA Global deve ter score alto: {:.3}", score2);
-        
+        assert!(
+            score2 >= 0.66,
+            "NSA Global deve ter score alto: {:.3}",
+            score2
+        );
+
         // Caso com todos os tokens
         let score3 = token_similarity("Hugo NSA Global", "Hugo / NSA Global", 0.6);
-        assert!(score3 >= 0.90, "Todos os tokens devem fazer match: {:.3}", score3);
+        assert!(
+            score3 >= 0.90,
+            "Todos os tokens devem fazer match: {:.3}",
+            score3
+        );
     }
 
     #[test]
@@ -368,6 +380,9 @@ mod tests {
         assert_eq!(normalize("Company-Name"), "company name");
         assert_eq!(normalize("Data\\Processing"), "data processing");
         assert_eq!(normalize("Name_With_Underscores"), "name with underscores");
-        assert_eq!(normalize("Test+Plus=Equals&Ampersand"), "test plus equals ampersand");
+        assert_eq!(
+            normalize("Test+Plus=Equals&Ampersand"),
+            "test plus equals ampersand"
+        );
     }
 }

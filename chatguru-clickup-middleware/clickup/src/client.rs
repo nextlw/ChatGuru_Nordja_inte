@@ -10,8 +10,7 @@ use std::time::Duration;
 ///
 /// Usa apenas a API v2 que é estável e suporta todos os recursos necessários:
 /// - tasks, lists, custom fields, folders, attachments, webhooks, spaces
-#[derive(Clone)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ClickUpClient {
     http_client: HttpClient,
     api_token: String,
@@ -34,7 +33,9 @@ impl ClickUpClient {
             .timeout(Duration::from_secs(30))
             .connect_timeout(Duration::from_secs(5))
             .build()
-            .map_err(|e| ClickUpError::ConfigError(format!("Failed to create HTTP client: {}", e)))?;
+            .map_err(|e| {
+                ClickUpError::ConfigError(format!("Failed to create HTTP client: {}", e))
+            })?;
 
         Ok(Self {
             http_client,
@@ -53,7 +54,9 @@ impl ClickUpClient {
             .timeout(Duration::from_secs(total_timeout_secs))
             .connect_timeout(Duration::from_secs(connect_timeout_secs))
             .build()
-            .map_err(|e| ClickUpError::ConfigError(format!("Failed to create HTTP client: {}", e)))?;
+            .map_err(|e| {
+                ClickUpError::ConfigError(format!("Failed to create HTTP client: {}", e))
+            })?;
 
         Ok(Self {
             http_client,
@@ -90,7 +93,11 @@ impl ClickUpClient {
     pub(crate) async fn post(&self, endpoint: &str, body: &Value) -> Result<Response> {
         let url = format!("{}{}", self.base_url, endpoint);
 
-        tracing::debug!("POST {} with body: {}", url, serde_json::to_string(body).unwrap_or_default());
+        tracing::debug!(
+            "POST {} with body: {}",
+            url,
+            serde_json::to_string(body).unwrap_or_default()
+        );
 
         let response = self
             .http_client
@@ -105,7 +112,11 @@ impl ClickUpClient {
     }
 
     /// Executa uma requisição POST e parseia JSON
-    pub(crate) async fn post_json<T: DeserializeOwned>(&self, endpoint: &str, body: &Value) -> Result<T> {
+    pub(crate) async fn post_json<T: DeserializeOwned>(
+        &self,
+        endpoint: &str,
+        body: &Value,
+    ) -> Result<T> {
         let response = self.post(endpoint, body).await?;
         let json = response.json().await?;
         Ok(json)
@@ -130,7 +141,11 @@ impl ClickUpClient {
     }
 
     /// Executa uma requisição PUT e parseia JSON
-    pub(crate) async fn put_json<T: DeserializeOwned>(&self, endpoint: &str, body: &Value) -> Result<T> {
+    pub(crate) async fn put_json<T: DeserializeOwned>(
+        &self,
+        endpoint: &str,
+        body: &Value,
+    ) -> Result<T> {
         let response = self.put(endpoint, body).await?;
         let json = response.json().await?;
         Ok(json)
@@ -171,7 +186,10 @@ impl ClickUpClient {
             Ok(response)
         } else {
             let status_code = status.as_u16();
-            let error_body = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error_body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
 
             tracing::error!("ClickUp API error ({}): {}", status_code, error_body);
 
@@ -216,7 +234,11 @@ impl ClickUpClient {
     /// `Ok(Some(list))` se a lista for encontrada
     /// `Ok(None)` se a lista não for encontrada
     /// `Err(...)` em caso de erro na API
-    pub async fn find_list_by_name(&self, folder_id: &str, list_name: &str) -> Result<Option<ListInfo>> {
+    pub async fn find_list_by_name(
+        &self,
+        folder_id: &str,
+        list_name: &str,
+    ) -> Result<Option<ListInfo>> {
         let endpoint = format!("/folder/{}", folder_id);
         let folder_data: Value = self.get_json(&endpoint).await?;
 
@@ -224,11 +246,12 @@ impl ClickUpClient {
             for list in lists {
                 if let Some(name) = list["name"].as_str() {
                     if name.eq_ignore_ascii_case(list_name) {
-                        let id = list["id"].as_str()
+                        let id = list["id"]
+                            .as_str()
                             .map(|s| s.to_string())
                             .or_else(|| list["id"].as_u64().map(|n| n.to_string()))
-                            .unwrap_or_else(|| String::new());
-                        
+                            .unwrap_or_else(String::new);
+
                         return Ok(Some(ListInfo {
                             id,
                             name: name.to_string(),
@@ -237,7 +260,7 @@ impl ClickUpClient {
                 }
             }
         }
-        
+
         Ok(None)
     }
 
@@ -251,9 +274,13 @@ impl ClickUpClient {
     /// # Retorna
     ///
     /// A lista criada com o ID atribuído pela API
-    pub async fn create_list(&self, folder_id: &str, list_data: &CreateListRequest) -> Result<ListInfo> {
+    pub async fn create_list(
+        &self,
+        folder_id: &str,
+        list_data: &CreateListRequest,
+    ) -> Result<ListInfo> {
         let endpoint = format!("/folder/{}/list", folder_id);
-        
+
         let body = json!({
             "name": list_data.name,
             "content": list_data.content,
@@ -264,13 +291,15 @@ impl ClickUpClient {
         });
 
         let response: Value = self.post_json(&endpoint, &body).await?;
-        
-        let id = response["id"].as_str()
+
+        let id = response["id"]
+            .as_str()
             .map(|s| s.to_string())
             .or_else(|| response["id"].as_u64().map(|n| n.to_string()))
-            .unwrap_or_else(|| String::new());
-            
-        let name = response["name"].as_str()
+            .unwrap_or_default();
+
+        let name = response["name"]
+            .as_str()
             .unwrap_or(&list_data.name)
             .to_string();
 
@@ -295,7 +324,6 @@ pub struct CreateListRequest {
     pub assignee: Option<String>,
     pub status: Option<String>,
 }
-
 
 #[cfg(test)]
 mod tests {

@@ -85,7 +85,6 @@ impl TaskManager {
         Ok(Self::new(client, list_id))
     }
 
-
     /// Cria uma tarefa no ClickUp (API tipada)
     ///
     /// # Descrição
@@ -139,7 +138,8 @@ impl TaskManager {
             id.clone()
         } else {
             return Err(ClickUpError::ValidationError(
-                "list_id não encontrado na task e TaskManager não tem list_id configurado".to_string()
+                "list_id não encontrado na task e TaskManager não tem list_id configurado"
+                    .to_string(),
             ));
         };
 
@@ -174,7 +174,10 @@ impl TaskManager {
         let endpoint = format!("/list/{}/task", list_id);
         let created_task: Task = self.client.post_json(&endpoint, &task_json).await?;
 
-        tracing::info!("✅ Task criada: {}", created_task.id.as_ref().unwrap_or(&"?".to_string()));
+        tracing::info!(
+            "✅ Task criada: {}",
+            created_task.id.as_ref().unwrap_or(&"?".to_string())
+        );
         Ok(created_task)
     }
 
@@ -266,7 +269,7 @@ impl TaskManager {
             id
         } else {
             return Err(ClickUpError::ValidationError(
-                "list_id não fornecido e TaskManager não tem list_id configurado".to_string()
+                "list_id não fornecido e TaskManager não tem list_id configurado".to_string(),
             ));
         };
 
@@ -274,8 +277,6 @@ impl TaskManager {
         let list_info: Value = self.client.get_json(&endpoint).await?;
         Ok(list_info)
     }
-
-
 
     /// Lista todas as tarefas de uma lista (não arquivadas)
     ///
@@ -314,7 +315,7 @@ impl TaskManager {
             id
         } else {
             return Err(ClickUpError::ValidationError(
-                "list_id não fornecido e TaskManager não tem list_id configurado".to_string()
+                "list_id não fornecido e TaskManager não tem list_id configurado".to_string(),
             ));
         };
 
@@ -391,7 +392,7 @@ impl TaskManager {
             id
         } else {
             return Err(ClickUpError::ValidationError(
-                "list_id não fornecido e TaskManager não tem list_id configurado".to_string()
+                "list_id não fornecido e TaskManager não tem list_id configurado".to_string(),
             ));
         };
 
@@ -412,7 +413,12 @@ impl TaskManager {
                 }
 
                 // Outros erros de API: propagar
-                tracing::error!("Erro ao listar tasks na lista {}: {} - {}", id, status, message);
+                tracing::error!(
+                    "Erro ao listar tasks na lista {}: {} - {}",
+                    id,
+                    status,
+                    message
+                );
                 return Err(ClickUpError::ApiError { status, message });
             }
             Err(e) => {
@@ -746,7 +752,11 @@ impl TaskManager {
         let endpoint = format!("/list/{}/task", list_id);
         let subtask: Task = self.client.post_json(&endpoint, &subtask_data).await?;
 
-        tracing::debug!("✅ Subtask criada: {} (pai: {})", subtask.id.as_ref().unwrap_or(&"?".to_string()), parent_id);
+        tracing::debug!(
+            "✅ Subtask criada: {} (pai: {})",
+            subtask.id.as_ref().unwrap_or(&"?".to_string()),
+            parent_id
+        );
         Ok(subtask)
     }
 
@@ -899,7 +909,11 @@ impl TaskManager {
         let endpoint = format!("/task/{}/dependency/{}", task_id, depends_on);
         let response: Value = self.client.delete_json(&endpoint).await?;
 
-        tracing::debug!("✅ Dependência removida: task {} não depende mais de {}", task_id, depends_on);
+        tracing::debug!(
+            "✅ Dependência removida: task {} não depende mais de {}",
+            task_id,
+            depends_on
+        );
         Ok(response)
     }
 
@@ -930,11 +944,14 @@ impl TaskManager {
         let dependencies = task
             .get("dependencies")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.clone())
+            .cloned()
             .unwrap_or_default();
 
-        tracing::debug!("✅ Recuperadas {} dependências da task {}", dependencies.len(), task_id);
+        tracing::debug!(
+            "✅ Recuperadas {} dependências da task {}",
+            dependencies.len(),
+            task_id
+        );
         Ok(dependencies)
     }
-
 }

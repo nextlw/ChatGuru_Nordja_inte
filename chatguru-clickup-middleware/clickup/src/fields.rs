@@ -1,14 +1,13 @@
+use crate::client::ClickUpClient;
+use crate::error::Result;
 /// Custom Field Manager: Gerencia campos personalizados do ClickUp
 ///
 /// Responsabilidades:
 /// 1. Garantir que "Cliente Solicitante" sempre corresponda ao nome do folder
 /// 2. Criar opções no dropdown automaticamente se não existirem
 /// 3. Sincronizar folder_name → Cliente Solicitante field value
-
 use serde::Deserialize;
 use serde_json::Value;
-use crate::error::Result;
-use crate::client::ClickUpClient;
 
 const CLIENT_SOLICITANTE_FIELD_ID: &str = "0ed63eec-1c50-4190-91c1-59b4b17557f6";
 
@@ -109,10 +108,7 @@ impl CustomFieldManager {
 
         let option_value = match option_match {
             Some(option) => {
-                tracing::info!(
-                    "✅ Opção já existe: '{}' (usando existente)",
-                    option.name
-                );
+                tracing::info!("✅ Opção já existe: '{}' (usando existente)", option.name);
                 option.name.clone()
             }
             None => {
@@ -172,10 +168,7 @@ impl CustomFieldManager {
         let mut best_match: Option<(&CustomFieldOption, f64)> = None;
 
         for option in options {
-            let similarity = strsim::jaro_winkler(
-                &target_lower,
-                &option.name.to_lowercase(),
-            );
+            let similarity = strsim::jaro_winkler(&target_lower, &option.name.to_lowercase());
 
             if similarity >= 0.90 {
                 if let Some((_, best_score)) = best_match {
@@ -205,9 +198,9 @@ impl CustomFieldManager {
         let list_data: Value = self.client.get_json(&endpoint).await?;
 
         // Extrair custom_fields
-        let custom_fields = list_data["custom_fields"]
-            .as_array()
-            .ok_or_else(|| crate::error::ClickUpError::ValidationError("Lista sem custom_fields".to_string()))?;
+        let custom_fields = list_data["custom_fields"].as_array().ok_or_else(|| {
+            crate::error::ClickUpError::ValidationError("Lista sem custom_fields".to_string())
+        })?;
 
         let fields: Vec<ClickUpCustomField> = custom_fields
             .iter()
