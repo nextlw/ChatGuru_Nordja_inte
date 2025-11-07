@@ -1,5 +1,15 @@
 //! Serviço simplificado para validação de hierarquia do workspace ClickUp
 //!
+//! 🔄 **SERVIÇO ATUALIZADO (Novembro 2025)**: Integrado com nova implementação
+//! de busca direta por nome de pasta/lista, eliminando dependência do campo
+//! "Cliente Solicitante".
+//!
+//! ## MUDANÇAS IMPLEMENTADAS:
+//! - ✅ Utiliza clickup::folders::SmartFolderFinder com busca por nome
+//! - ✅ Removida dependência de custom fields para identificação
+//! - ✅ Mantém validação robusta de hierarquia organizacional
+//! - ✅ Integração transparente com sistema refatorado
+//!
 //! Este módulo implementa a validação simplificada solicitada:
 //! 1. Verifica se Info_2 é compatível com alguma pasta do workspace
 //! 2. Garante que existe lista do mês vigente na pasta encontrada
@@ -58,13 +68,18 @@ impl WorkspaceHierarchyService {
         }
     }
 
-    /// Validação principal simplificada conforme solicitado
+    /// Validação principal simplificada - BUSCA POR NOME DE PASTA
     ///
+    /// LÓGICA DE BUSCA (sem campos customizados):
     /// 1. Se info_2 vazio → retorna inválido (interrompe)
-    /// 2. Usa SmartFolderFinder para buscar pasta compatível com info_2
-    /// 3. Se não encontrar pasta compatível → retorna inválido (interrompe)
-    /// 4. Se encontrar → já retorna com lista do mês vigente (SmartFolderFinder cuida disso)
-    /// 5. Retorna válido com folder_id e list_id
+    /// 2. Usa SmartFolderFinder para buscar pasta por SIMILARIDADE DE NOME
+    /// 3. SmartFolderFinder compara info_2 com nomes de pastas do ClickUp
+    /// 4. Se não encontrar pasta compatível → retorna inválido (interrompe)
+    /// 5. Se encontrar → já retorna com lista do mês vigente
+    /// 6. Retorna válido com folder_id e list_id
+    ///
+    /// MOTIVAÇÃO: Sistema independente de campos customizados, busca baseada
+    /// exclusivamente em nomes de pastas fornecidos pelo worker/core.
     pub async fn validate_and_find_target(&mut self, info_2: &str) -> Result<WorkspaceValidation, AppError> {
         tracing::info!("🔍 Iniciando validação simplificada para Info_2: '{}'", info_2);
         

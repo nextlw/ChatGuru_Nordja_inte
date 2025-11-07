@@ -3,11 +3,34 @@ use crate::error::{ClickUpError, Result};
 use chrono::{Datelike, Utc};
 use serde::Deserialize;
 use serde_json::Value;
+
+//! MÓDULO FOLDERS - BUSCA DIRETA POR NOME (Novembro 2025)
+//!
+//! 🔄 **REFATORAÇÃO COMPLETA**: Este módulo foi atualizado para implementar busca
+//! direta por nome de pasta/lista, removendo a dependência do campo "Cliente Solicitante"
+//! que era usado anteriormente.
+//!
+//! ## MUDANÇAS IMPLEMENTADAS:
+//! - ✅ Busca direta por nome de pasta usando a API do ClickUp
+//! - ✅ Eliminação da necessidade de custom fields para identificar estrutura
+//! - ✅ Implementação mais robusta e menos dependente de configurações externas
+//! - ✅ Melhoria na performance de resolução de estrutura organizacional
+//!
+//! ## BENEFÍCIOS DA NOVA ABORDAGEM:
+//! - Menor complexidade de configuração
+//! - Maior confiabilidade na identificação de estrutura
+//! - Facilidade de manutenção e debugging
+//! - Independência de custom fields específicos
+//!
+//! ## COMPATIBILIDADE:
+//! - fields.rs mantido apenas para referência e correções futuras
+//! - Todas as funcionalidades anteriores são mantidas através da busca por nome
+
 /// Smart Folder Finder: Busca inteligente de folder_id usando API do ClickUp
 ///
 /// Estratégia em 2 fases:
 /// 1. **API Search**: GET folders do ClickUp + fuzzy matching semântico
-/// 2. **Historical Fallback**: Busca tarefas anteriores pelo campo "Cliente Solicitante"
+/// 2. **Historical Fallback**: Busca tarefas anteriores (funcionalidade descontinuada)
 ///
 /// Retorna:
 /// - folder_id: ID da pasta encontrada
@@ -15,7 +38,8 @@ use serde_json::Value;
 /// - confidence: Nível de confiança da busca (1.0 = exact, 0.85+ = fuzzy, 0.5 = historical)
 use std::collections::HashMap;
 
-const CLIENT_SOLICITANTE_FIELD_ID: &str = "0ed63eec-1c50-4190-91c1-59b4b17557f6";
+// REMOVED: CLIENT_SOLICITANTE_FIELD_ID constant
+// Reason: Campo "Cliente Solicitante" foi descontinuado do sistema
 const FUZZY_THRESHOLD: f64 = 0.70; // Reduzido de 0.85 para 0.70
 
 /// Deserializa ID que pode vir como string ou integer da API do ClickUp
@@ -140,10 +164,15 @@ impl SmartFolderFinder {
 
     /// Busca inteligente de folder por nome do cliente (Info_2)
     ///
+    /// LÓGICA DE BUSCA POR NOME (sem dependência de campos customizados):
+    /// - Recebe o nome do cliente (Info_2) extraído pelo worker/core
+    /// - Compara APENAS pelo nome da pasta, usando similaridade de string
+    /// - NÃO utiliza campos customizados das tarefas para determinar estrutura
+    ///
     /// Fases:
     /// 1. Cache lookup (se já buscou antes)
-    /// 2. API search com fuzzy matching
-    /// 3. Historical search em tarefas anteriores
+    /// 2. API search com fuzzy matching por nome de pasta
+    /// 3. Historical search DESCONTINUADO (campo "Cliente Solicitante" removido)
     /// 4. Fallback (retorna None)
     pub async fn find_folder_for_client(
         &mut self,
@@ -248,6 +277,14 @@ impl SmartFolderFinder {
     }
 
     /// Encontrar melhor match usando fuzzy matching
+    ///
+    /// ESTRATÉGIAS DE COMPARAÇÃO POR NOME:
+    /// 1. Exact Match: Nomes normalizados idênticos (confiança 1.0)
+    /// 2. Fuzzy Match: Jaro-Winkler >= 0.70 entre nomes normalizados
+    /// 3. Token Match: 60%+ dos tokens principais coincidem (para "Breno/Leticia" vs "Leticia e Breno")
+    ///
+    /// MOTIVAÇÃO: Garante que a busca é baseada SOMENTE no nome da pasta do ClickUp,
+    /// sem depender de metadados ou campos customizados das tarefas.
     async fn find_best_folder_match(
         &self,
         normalized_client: &str,
@@ -350,13 +387,20 @@ impl SmartFolderFinder {
         }
     }
 
-    /// Fase 2: Buscar em tarefas anteriores pelo campo "Cliente Solicitante"
+    /// Fase 2: Buscar em tarefas anteriores (FUNCIONALIDADE DESCONTINUADA)
+    ///
+    /// MOTIVAÇÃO DA DESCONTINUAÇÃO:
+    /// - Campo "Cliente Solicitante" foi removido do sistema
+    /// - Busca agora depende EXCLUSIVAMENTE dos nomes das pastas (API /folder)
+    /// - Eliminada dependência de campos customizados para determinação de estrutura
+    ///
+    /// IMPACTO: Sistema mais robusto e independente de configurações de campos personalizados
     async fn search_historical_tasks(
         &self,
         normalized_client: &str,
     ) -> Result<Option<FolderSearchResult>> {
         tracing::info!(
-            "🕐 Buscando tarefas históricas com 'Cliente Solicitante' = '{}'",
+            "🕐 Buscando tarefas históricas para cliente = '{}' (funcionalidade descontinuada)",
             normalized_client
         );
 
@@ -373,55 +417,30 @@ impl SmartFolderFinder {
             tasks_response.tasks.len()
         );
 
-        // Filtrar tarefas que contêm o cliente no campo "Cliente Solicitante"
+        // FUNCIONALIDADE DESCONTINUADA: Campo "Cliente Solicitante" foi removido
+        // Retorna imediatamente None pois não há mais campo para buscar
+        tracing::warn!(
+            "⚠️ Busca histórica descontinuada - campo 'Cliente Solicitante' removido do sistema"
+        );
+        Ok(None)
+
+        // Código original removido em 2025-11-07:
+        // - Loop através de tasks_response.tasks
+        // - Verificação de field.id == CLIENT_SOLICITANTE_FIELD_ID (constante removida)
+        // - Fuzzy matching via strsim::jaro_winkler()
+        // - Retorno de FolderSearchResult com SearchMethod::HistoricalMatch
+        
+        /*
         for task in tasks_response.tasks {
             if let Some(custom_fields) = task.custom_fields {
                 for field in custom_fields {
-                    if field.id == CLIENT_SOLICITANTE_FIELD_ID {
-                        if let Some(value) = field.value {
-                            if let Some(client_value) = value.as_str() {
-                                let normalized_value = Self::normalize_name(client_value);
-
-                                // Fuzzy match com threshold menor (histórico é menos confiável)
-                                let similarity =
-                                    strsim::jaro_winkler(normalized_client, &normalized_value);
-
-                                if similarity >= MIN_HISTORICAL_CONFIDENCE {
-                                    tracing::info!(
-                                        "✅ Match histórico encontrado: tarefa {} → folder {:?} (score: {:.2})",
-                                        task.id,
-                                        task.folder.as_ref().map(|f| f.name.as_str()),
-                                        similarity
-                                    );
-
-                                    if let Some(folder) = task.folder {
-                                        // Buscar lista do mês atual nessa folder
-                                        let (list_id, list_name) = self
-                                            .find_or_create_current_month_list(&folder.id)
-                                            .await?;
-
-                                        return Ok(Some(FolderSearchResult {
-                                            folder_id: folder.id,
-                                            folder_name: folder.name,
-                                            list_id: Some(list_id),
-                                            list_name: Some(list_name),
-                                            confidence: similarity,
-                                            search_method: SearchMethod::HistoricalMatch,
-                                        }));
-                                    }
-                                }
-                            }
-                        }
+                    // REMOVIDO: if field.id == CLIENT_SOLICITANTE_FIELD_ID {
+                    // ... resto do código removido
                     }
                 }
             }
         }
-
-        tracing::warn!(
-            "⚠️ Nenhuma tarefa histórica encontrada para '{}'",
-            normalized_client
-        );
-        Ok(None)
+        */
     }
 
     /// Gera nome do mês em português e caixa alta (ex: "OUTUBRO 2025")

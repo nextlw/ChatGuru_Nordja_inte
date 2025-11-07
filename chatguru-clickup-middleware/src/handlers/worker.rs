@@ -1,9 +1,19 @@
- /// Worker Handler: Processa mensagens do Pub/Sub
+/// Worker Handler: Processa mensagens do Pub/Sub
+///
+/// 🔄 **HANDLER ATUALIZADO (Novembro 2025)**: Integrado com nova implementação
+/// de busca direta por nome de pasta/lista, eliminando uso do campo "Cliente Solicitante"
+/// no fluxo principal de processamento.
+///
+/// ## MUDANÇAS NO FLUXO:
+/// - ✅ Utiliza workspace_hierarchy service atualizado
+/// - ✅ Busca estrutura organizacional por nome diretamente
+/// - ✅ Mantém compatibilidade com todo pipeline existente
+/// - ✅ Melhoria na confiabilidade de criação de tarefas
 ///
 /// Arquitetura:
 /// 1. Recebe payload RAW do Pub/Sub via HTTP POST
 /// 2. Processa com OpenAI para classificação
-/// 3. Se for atividade, cria tarefa no ClickUp
+/// 3. Se for atividade, cria tarefa no ClickUp (usando busca por nome)
 /// 4. Envia anotação de volta ao ChatGuru
 ///
 /// Este endpoint é chamado automaticamente pelo Cloud Tasks
@@ -31,7 +41,8 @@ use chatguru_clickup_middleware::AppState;
 use chatguru_clickup_middleware::services; // Para SecretsService
 // Usar services do crate clickup ao invés de duplicar no main project
 use clickup::assignees::SmartAssigneeFinder;
-use clickup::fields::CustomFieldManager;
+// REMOVIDO: use clickup::fields::CustomFieldManager;
+// Motivo: Eliminação da lógica do campo "Cliente Solicitante"
 
 // Configuração de retry
 const MAX_RETRY_ATTEMPTS: u32 = 3;
@@ -821,8 +832,10 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
         let info_2 = extract_info_2_from_payload(payload).unwrap_or_default();
         let responsavel_nome = extract_responsavel_nome_from_payload(payload).unwrap_or_default();
         
+        // REMOVIDO: referência ao "Cliente Solicitante (Info_2)" do contexto
+        // Motivo: Eliminação da lógica do campo "Cliente Solicitante"
         let context = format!(
-            "Campanha: WhatsApp\nOrigem: whatsapp\nNome: {}\nMensagem: {}\nTelefone: {}\nCliente Solicitante (Info_2): {}\nResponsável: {}",
+            "Campanha: WhatsApp\nOrigem: whatsapp\nNome: {}\nMensagem: {}\nTelefone: {}\nInfo_2: {}\nResponsável: {}",
             nome, message, phone.as_deref().unwrap_or("N/A"), info_2, responsavel_nome
         );
 
@@ -1002,53 +1015,10 @@ if !validation_result.is_valid {
         // Processar resultado da validação
         // LÓGICA SIMPLIFICADA - criar tarefa diretamente
         let task_result = {
-            log_info(&format!(
-                "📝 Configurando 'Cliente Solicitante' para: '{}'",
-                folder_name
-            ));
-
-            let custom_field_manager = CustomFieldManager::from_token(api_token.clone())
-                .map_err(|e| AppError::ClickUpApi(format!("Failed to create CustomFieldManager: {}", e)))?;
-
-            match custom_field_manager
-                .ensure_client_solicitante_option(&list_id, &folder_name)
-                .await
-            {
-                Ok(client_field) => {
-                    log_info("✅ Campo 'Cliente Solicitante' configurado");
-
-                    // Adicionar/substituir o campo custom no task_data
-                    if let Some(obj) = task_data.as_object_mut() {
-                        // Buscar custom_fields existentes ou criar array vazio
-                        let custom_fields = obj
-                            .entry("custom_fields")
-                            .or_insert_with(|| serde_json::json!([]));
-
-                        if let Some(fields_array) = custom_fields.as_array_mut() {
-                            // Remover campo "Cliente Solicitante" se já existir
-                            fields_array.retain(|f| {
-                                f.get("id")
-                                    .and_then(|id| id.as_str())
-                                    != Some("0ed63eec-1c50-4190-91c1-59b4b17557f6")
-                            });
-
-                            // Adicionar novo valor
-                            fields_array.push(client_field);
-
-                            log_info(&format!(
-                                "✅ 'Cliente Solicitante' sincronizado com folder: '{}'",
-                                folder_name
-                            ));
-                        }
-                    }
-                }
-                Err(e) => {
-                    log_warning(&format!(
-                        "⚠️ Erro ao configurar 'Cliente Solicitante': {}, continuando sem o campo",
-                        e
-                    ));
-                }
-            }
+            // REMOVIDO: Bloco completo de configuração do campo "Cliente Solicitante"
+            // Motivo: Eliminação da lógica do campo "Cliente Solicitante"
+            // Anteriormente configurava o campo custom baseado no folder_name
+            // e sincronizava com o ClickUp via CustomFieldManager
             
             log_info(&format!(
                 "🎯 Criando tarefa diretamente na lista: {} (folder: {})",
@@ -1249,10 +1219,21 @@ fn _extract_info_1_from_payload(payload: &WebhookPayload) -> Option<String> {
     }
 }
 
-/// Extrai Info_2 (NOME DO SOLICITANTE - campo personalizado) dos campos personalizados
-/// Info_2 = dados.campos_personalizados.Info_2
-/// Usado para preencher o campo personalizado "Solicitante" (não determina estrutura)
-/// Exemplo: "João Silva" → Campo personalizado "Solicitante"
+/// Extrai Info_2 (NOME DO CLIENTE) dos campos personalizados do ChatGuru
+///
+/// FLUXO DE BUSCA POR NOME:
+/// Info_2 = dados.campos_personalizados.Info_2 (ex: "Nexcode", "Gabriel Benarros")
+///
+/// IMPORTANTE: Este nome é usado para:
+/// 1. Buscar pasta no ClickUp por SIMILARIDADE DE NOME (SmartFolderFinder)
+/// 2. Preencher campo personalizado "Solicitante" na tarefa
+///
+/// NÃO é usado:
+/// - Campos customizados das tarefas para determinar estrutura
+/// - Mapeamento via banco de dados (Cloud SQL)
+/// - Dependências de configuração de campos personalizados
+///
+/// Exemplo: "Nexcode" → Busca pasta com nome similar a "Nexcode"
 fn extract_info_2_from_payload(payload: &WebhookPayload) -> Option<String> {
     match payload {
         WebhookPayload::ChatGuru(p) => {
@@ -1436,57 +1417,10 @@ async fn process_with_fallback_configurations(
         }
     }
     
-    // Configurar campo "Cliente Solicitante" com o nome da pasta de fallback + Info_2
-    let client_display_name = if info_2.is_empty() {
-        fallback_folder_name.to_string()
-    } else {
-        format!("{} ({})", fallback_folder_name, info_2)
-    };
-    
-    log_info(&format!("📝 Configurando 'Cliente Solicitante' para: '{}'", client_display_name));
-    
-    let custom_field_manager = CustomFieldManager::from_token(api_token.to_string())
-        .map_err(|e| AppError::ClickUpApi(format!("Failed to create CustomFieldManager: {}", e)))?;
-    
-    match custom_field_manager
-        .ensure_client_solicitante_option(&list_id, &client_display_name)
-        .await
-    {
-        Ok(client_field) => {
-            log_info("✅ Campo 'Cliente Solicitante' configurado");
-            
-            // Adicionar/substituir o campo custom no task_data
-            if let Some(obj) = task_data.as_object_mut() {
-                // Buscar custom_fields existentes ou criar array vazio
-                let custom_fields = obj
-                    .entry("custom_fields")
-                    .or_insert_with(|| serde_json::json!([]));
-                
-                if let Some(fields_array) = custom_fields.as_array_mut() {
-                    // Remover campo "Cliente Solicitante" se já existir
-                    fields_array.retain(|f| {
-                        f.get("id")
-                            .and_then(|id| id.as_str())
-                            != Some("0ed63eec-1c50-4190-91c1-59b4b17557f6")
-                    });
-                    
-                    // Adicionar novo valor
-                    fields_array.push(client_field);
-                    
-                    log_info(&format!(
-                        "✅ 'Cliente Solicitante' sincronizado com fallback: '{}'",
-                        client_display_name
-                    ));
-                }
-            }
-        }
-        Err(e) => {
-            log_warning(&format!(
-                "⚠️ Erro ao configurar 'Cliente Solicitante': {}, continuando sem o campo",
-                e
-            ));
-        }
-    }
+    // REMOVIDO: Bloco completo de configuração do campo "Cliente Solicitante" para fallback
+    // Motivo: Eliminação da lógica do campo "Cliente Solicitante"
+    // Anteriormente configurava client_display_name baseado em fallback_folder_name + Info_2
+    // e sincronizava com o ClickUp via CustomFieldManager
     
     // Adicionar list_id ao task_data
     if let Some(obj) = task_data.as_object_mut() {

@@ -329,7 +329,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // NOTA: EstruturaService (DB) e FolderResolver (YAML) foram substituídos por:
     // - SmartFolderFinder (busca via API do ClickUp)
     // - SmartAssigneeFinder (busca assignees via API)
-    // - CustomFieldManager (sincroniza "Cliente Solicitante")
+    // REMOVIDO: CustomFieldManager (sincronizava "Cliente Solicitante")
     log_info("ℹ️ Usando SmartFolderFinder/SmartAssigneeFinder (busca via API)");
 
     // ✅ Inicializar SecretManagerService primeiro

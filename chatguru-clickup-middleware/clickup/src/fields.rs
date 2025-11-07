@@ -1,11 +1,38 @@
 use crate::client::ClickUpClient;
 use crate::error::Result;
-/// Custom Field Manager: Gerencia campos personalizados do ClickUp
+
+//! Custom Field Manager: Gerencia campos personalizados do ClickUp
+//!
+//! ⚠️ **MÓDULO DEPRECADO (Novembro 2025)** ⚠️
+//!
+//! IMPORTANTE: Este módulo está sendo mantido apenas para referência e correções futuras.
+//! A partir de novembro de 2025, o campo "Cliente Solicitante" foi removido do fluxo principal
+//! da aplicação. A busca de estrutura agora é feita por nome de pasta/lista diretamente.
+//!
+//! ## HISTÓRICO DE MUDANÇAS:
+//! - **Remoção da dependência do campo "Cliente Solicitante"** (novembro 2025)
+//! - Implementação de busca por nome de pasta/lista no lugar da busca por custom fields
+//! - Mantido apenas para referência e futuras correções que possam necessitar de custom fields
+//!
+//! ## MOTIVO DA MANUTENÇÃO:
+//! - Preservar funcionalidade existente para possíveis correções futuras
+//! - Manter compatibilidade com código legado que possa usar custom fields
+//! - Servir como referência para implementações futuras que necessitem de custom fields
+//!
+//! ## RESPONSABILIDADES ANTERIORES (AGORA DEPRECADAS):
+//! 1. ~~Garantir que "Cliente Solicitante" sempre corresponda ao nome do folder~~
+//! 2. ~~Criar opções no dropdown automaticamente se não existirem~~
+//! 3. ~~Sincronizar folder_name → Cliente Solicitante field value~~
+//!
+//! ## NOVA ARQUITETURA:
+//! A identificação de estrutura organizacional agora é feita diretamente pelos módulos:
+//! - `folders.rs`: Busca direta por nome de pasta
+//! - `workspace_hierarchy.rs`: Resolução dinâmica de estrutura
+//!
+/// **[DEPRECADO]** Custom Field Manager: Gerencia campos personalizados do ClickUp
 ///
-/// Responsabilidades:
-/// 1. Garantir que "Cliente Solicitante" sempre corresponda ao nome do folder
-/// 2. Criar opções no dropdown automaticamente se não existirem
-/// 3. Sincronizar folder_name → Cliente Solicitante field value
+/// **NOTA**: Este manager não é mais utilizado no fluxo principal da aplicação.
+/// Mantido apenas para compatibilidade e referência.
 use serde::Deserialize;
 use serde_json::Value;
 

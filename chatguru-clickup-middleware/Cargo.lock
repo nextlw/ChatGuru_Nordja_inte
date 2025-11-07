@@ -647,7 +647,9 @@ dependencies = [
 
 [[package]]
 name = "clickup"
-version = "0.1.0"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f447b5ccb6e8350ed53a164e2b15440f05dcfedb36dc5026d6732b9c7817c675"
 dependencies = [
  "chrono",
  "deunicode",

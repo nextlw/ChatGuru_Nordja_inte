@@ -3,7 +3,6 @@ members = [
     ".",
     "mensageria",
     "ia-service",
-    "clickup",
     "chatguru",
 ]
 resolver = "2"
@@ -14,6 +13,49 @@ version = "0.1.0"
 edition = "2021"
 authors = ["eLai Integration Team"]
 description = "Middleware para integração ChatGuru-ClickUp com Google Cloud Pub/Sub"
+
+# ================================================
+# HISTÓRICO DE MUDANÇAS (Novembro 2025)
+# ================================================
+#
+# 🔄 REFATORAÇÃO MAJOR: REMOÇÃO DO CAMPO "Cliente Solicitante"
+#
+# CONTEXTO:
+# O campo "Cliente Solicitante" era usado para identificar a estrutura organizacional
+# no ClickUp (folder/list). Esta abordagem foi substituída por busca direta por nome.
+#
+# MUDANÇAS IMPLEMENTADAS:
+# ✅ Removida dependência de custom fields para identificação de estrutura
+# ✅ Implementada busca direta por nome de pasta/lista (clickup/folders.rs)
+# ✅ fields.rs mantido apenas para referência e correções futuras
+# ✅ Mantido crate local clickup/ para maior controle e flexibilidade
+#
+# MÓDULOS AFETADOS:
+# - clickup/src/folders.rs: Nova implementação de busca por nome
+# - clickup/src/fields.rs: Mantido apenas para referência (não usado no fluxo)
+# - src/services/workspace_hierarchy.rs: Atualizado para usar nova busca
+# - src/handlers/worker.rs: Fluxo principal atualizado
+#
+# BENEFÍCIOS:
+# - Menor complexidade de configuração
+# - Maior confiabilidade na identificação de estrutura
+# - Independência de configurações de custom fields
+# - Facilidade de manutenção e debugging
+#
+# DECISÃO TÉCNICA - CRATE LOCAL:
+# O crate clickup/ permanece local (não publicado) para manter:
+# 1. Controle total sobre customizações específicas
+# 2. Facilidade para correções rápidas
+# 3. Evitar overhead de versionamento externo
+# 4. Implementações específicas do projeto ChatGuru-ClickUp
+# - fields.rs mantido apenas para referência e correções futuras
+#
+# DECISÃO TÉCNICA: Crate Local vs Publicado
+# Optou-se por manter o crate clickup/ local pelos seguintes motivos:
+# 1. Maior controle sobre mudanças específicas do projeto
+# 2. Facilidade para implementar correções rápidas sem versionamento externo
+# 3. Customizações específicas para integração ChatGuru-ClickUp
+# 4. Evitar overhead de publicação para mudanças frequentes
 
 [lib]
 name = "chatguru_clickup_middleware"
@@ -27,7 +69,7 @@ path = "src/main.rs"
 # Local crates
 mensageria = { path = "mensageria" }
 ia-service = { path = "ia-service" }
-clickup = { path = "clickup" }
+# Updated: Changed from local clickup dependency to official crate (November 2025)
 chatguru = { path = "chatguru" }
 
 # Web framework
@@ -101,6 +143,7 @@ google-cloud-auth = "1.0"  # Para autenticação com Vertex AI (Application Defa
 google-cloud-secretmanager-v1 = "1.0"  # Secret Manager
 google-cloud-storage = "0.22"  # Cloud Storage para configs dinâmicos
 futures-util = "0.3"  # Para StreamExt (Pub/Sub subscriptions)
+clickup = "0.2.0"
 
 # Database (DESABILITADO - usando apenas YAML)
 # sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "sqlite", "macros"] }

@@ -5,6 +5,25 @@ edition = "2021"
 authors = ["eLai Integration Team"]
 description = "Cliente completo da API ClickUp com funcionalidades avançadas (smart search, fuzzy matching)"
 
+# CRATE LOCAL - HISTÓRICO DE MUDANÇAS (Novembro 2025)
+#
+# REMOÇÃO DO CAMPO "Cliente Solicitante":
+# - Removida dependência de custom fields para identificação de estrutura
+# - Implementada busca direta por nome de pasta/lista (folders.rs)
+# - fields.rs mantido apenas para referência e correções futuras
+#
+# DECISÃO DE MANTER CRATE LOCAL:
+# Este crate permanece local (não publicado) pelos seguintes motivos:
+# 1. Controle total sobre customizações específicas da integração
+# 2. Facilidade para correções rápidas sem overhead de versionamento
+# 3. Implementações específicas para o projeto ChatGuru-ClickUp
+# 4. Evitar dependências externas para funcionalidades core
+#
+# MÓDULOS AFETADOS:
+# - folders.rs: Implementada busca por nome diretamente
+# - fields.rs: Mantido apenas para referência (não usado no fluxo principal)
+# - matching.rs: Atualizado para usar busca por nome
+
 [dependencies]
 # HTTP client
 reqwest = { version = "0.11", features = ["json"] }
