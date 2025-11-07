@@ -786,15 +786,17 @@ rules:
   - "CRÍTICO - CONFIRMAÇÕES GENÉRICAS: Se a mensagem diz que alguém 'está confirmando algo' MAS NÃO especifica O QUE está sendo confirmado, classifique como is_activity: false"
   - "CRÍTICO - PERGUNTAS SEM AÇÃO: Perguntas ou dúvidas sem uma solicitação clara de ação NÃO são atividades válidas"
   - "CRÍTICO - INFORMAÇÕES INCOMPLETAS: Se faltam detalhes essenciais sobre O QUE fazer ou QUAL o objetivo, classifique como is_activity: false"
-  - "CRÍTICO - AÇÃO ESPECÍFICA OBRIGATÓRIA: A mensagem DEVE conter um verbo de ação específico (agendar, comprar, enviar, solicitar, renovar, etc.) e um objeto claro"
+  - "CRÍTICO - AÇÃO ESPECÍFICA OBRIGATÓRIA: A mensagem DEVE conter um verbo de ação específico (agendar, comprar, enviar, solicitar, renovar, gerar, etc.) e um objeto claro"
+  - "CRÍTICO - CONTEXTO DE TRABALHO: Quando há referência clara a documentos, arquivos ou processos anteriores (ex: 'gerar todas', 'processar esses', 'enviar os pendentes'), considere como atividade SE houver um verbo de ação claro (gerar, processar, enviar, etc.)"
 
   # REGRAS PARA CONVERSAS CASUAIS/INFORMAIS
   - "CRÍTICO - CONVERSA CASUAL: NUNCA classifique mensagens de conversa casual/informal como atividade. Exemplos: 'vou te mandar depois', 'te falo mais tarde', 'já resolvi', 'ok', 'obrigado', 'beleza'"
-  - "CRÍTICO - RESPOSTAS CONTEXTUAIS: Respostas que dependem de contexto anterior NÃO são atividades (ex: 'foi depois da feira', 'não, foi antes', 'aquele mesmo', 'isso aí')"
-  - "CRÍTICO - PROMESSAS FUTURAS SEM DETALHES: Frases como 'vou te mandar', 'depois eu envio', 'vou verificar' SEM especificar O QUE será enviado/verificado NÃO são atividades"
+  - "CRÍTICO - RESPOSTAS CONTEXTUAIS SEM AÇÃO: Respostas que dependem de contexto anterior MAS não contêm verbo de ação específico NÃO são atividades (ex: 'foi depois da feira', 'não, foi antes', 'aquele mesmo', 'isso aí')"
+  - "CRÍTICO - PROMESSAS FUTURAS VAGAS: Frases como 'vou te mandar', 'depois eu envio', 'vou verificar' SEM especificar O QUE será enviado/verificado NÃO são atividades"
   - "CRÍTICO - COMENTÁRIOS E OBSERVAÇÕES: Comentários gerais sem solicitação de ação NÃO são atividades (ex: 'que legal', 'interessante', 'vou pensar nisso')"
   - "CRÍTICO - CONFIRMAÇÕES SIMPLES: 'Ok', 'Certo', 'Entendi', 'Tá bom' NÃO são atividades, são apenas confirmações de recebimento"
   - "CRÍTICO - DISCUSSÕES INFORMAIS: Trocas de mensagens sobre eventos passados ou opiniões sem pedido de ação NÃO são atividades"
+  - "EXCEÇÃO - CONTEXTO COM AÇÃO: Se há referência contextual MAS com verbo de ação claro e específico (ex: 'gerar todas para pagamento', 'processar os pendentes', 'enviar essas'), classifique como atividade válida"
 
   # REGRAS DE CATEGORIA/SUBCATEGORIA
   - "CRÍTICO: Use SOMENTE as categorias listadas em 'CATEGORIAS DISPONÍVEIS NO CLICKUP'. NUNCA crie categorias novas ou diferentes"
@@ -1045,6 +1047,23 @@ valid_activity_examples:
     razao: "Ação específica (solicitar reembolso) + contexto completo (consulta identificada)"
     classificacao: "is_activity: true, category: Plano de Saúde, sub_categoria: Reembolso Médico"
 
+  # EXEMPLOS IMPORTANTES DE RESPOSTAS CONTEXTUAIS COM AÇÃO CLARA
+  - texto: "Pode gerar todas para pagamento amanhã"
+    razao: "Apesar de ter referência contextual ('todas'), contém VERBO DE AÇÃO ESPECÍFICO (gerar) + objetivo claro (para pagamento) + prazo (amanhã)"
+    classificacao: "is_activity: true, category: Financeiro, sub_categoria: Emissão de boletos"
+
+  - texto: "Processar os pendentes hoje mesmo"
+    razao: "Referência contextual ('os pendentes') MAS com AÇÃO ESPECÍFICA (processar) + prazo (hoje mesmo)"
+    classificacao: "is_activity: true, category: apropriada conforme contexto"
+
+  - texto: "Enviar essas para aprovação até sexta"
+    razao: "Referência contextual ('essas') MAS com VERBO CLARO (enviar) + objetivo (aprovação) + prazo (sexta)"
+    classificacao: "is_activity: true, category: apropriada conforme contexto"
+
+  - texto: "Agendar elas para próxima semana"
+    razao: "Referência contextual ('elas') MAS com AÇÃO ESPECÍFICA (agendar) + prazo (próxima semana)"
+    classificacao: "is_activity: true, category: Agendamentos, sub_categoria: apropriada conforme contexto"
+
 # Formato esperado da resposta
 response_format: |
   Responda APENAS com JSON válido:
@@ -1082,206 +1101,6 @@ response_format: |
   - SEMPRE escolha uma subcategoria apropriada baseada no contexto da mensagem
   - space_name, folder_name, list_name seguem o mapeamento: responsavel_nome → space_name, info_2 → folder_name, mês atual → list_name
   - Se não encontrar uma categoria apropriada na lista, use a mais próxima ou classifique is_activity como false
-
-
-# Mapeamento de nomes para IDs do campo 'Cliente Solicitante'
-# Gerado automaticamente por get_cliente_solicitante_ids.py
-# Field ID: 0ed63eec-1c50-4190-91c1-59b4b17557f6
-# Template para opções de Cliente Solicitante (folder_name)
-cliente_solicitante: |
-  CLIENTES SOLICITANTES VÁLIDOS (0ed63eec-1c50-4190-91c1-59b4b17557f6):
-  O campo "Cliente Solicitante" (0ed63eec-1c50-4190-91c1-59b4b17557f6) deve ser preenchido com UM dos nomes exatos da lista abaixo. NÃO invente, NÃO corrija, NÃO altere. Copie exatamente como está.
-
-  - Adriana Correia
-  - Adriana Tavares
-  - Agencia Fluida
-  - AL Digital (Aline Bak)
-  - Alejandra Aguilera (10)
-  - Alessandra Caiado (20)
-  - Alex e Yoanna
-  - Aline Hochman
-  - Amadeu e Rebeka (10)
-  - Amure Pinho (10) Nova Fase
-  - Amure Pinho (15)
-  - Ana Flávia Carrilo (10)
-  - Ana Flávia Tavares
-  - Ana Paula Toledo
-  - Ana Paula Toledo
-  - Anabela Cunha (5)
-  - Anarella (Avulso)
-  - Andrew Reider (10)
-  - Antonio Vieira (Gostei)
-  - Arcélia e Jorel Guilloty (14)
-  - Arnaldo/Claudia
-  - Atendimento ao Cliente
-  - Atividades
-  - Backline
-  - Bianca Orsini (10)
-  - Bruno Assis (10)
-  - Bruno Sapienza (5)
-  - Camila Mansano (5)
-  - Carlos Secron (5)
-  - Carolina Rosa (10)
-  - Carolina Tavares (10)
-  - Cassio Kienen (3 desejos)
-  - Claudia Leicand (8)
-  - Claudio e Gabriela
-  - Cleivson Arruda (10)
-  - Comece por aqui
-  - Comunicados & Informações
-  - Consuelo Maia (avulso)
-  - Célio Assistência Arbel
-  - Dadá Ribeiro (5)
-  - Dani Hayoshi (10)
-  - Daniel Rodrigues
-  - Daniela Sitzer (8)
-  - Danilo Buzar (3 desejos)
-  - Darlann Costa (10)
-  - David Politanski
-  - Eduardo Latache (10)
-  - Edwilson / Thaina (10)
-  - Elad Revi (3 desejos)
-  - Elena Mariscal (3)
-  - Emylia Chamorro (10)
-  - Fabiana Salatiel (10)
-  - Fabiana Tallo
-  - Fabio Tiepolo (8)
-  - Fabricio Ramos (10)
-  - Fernanda Cruz (5)
-  - Fernanda Floret (8)
-  - Fernanda Munhoz
-  - Fernando (passaporte e visto)
-  - Fernando Ferreira (3 desejos)
-  - Fernando Henrique Pereiro (3 desejos) (cópia)
-  - Fernando Piton (5)
-  - Ferramentas de Trabalho
-  - Festa Facio
-  - Gabriel Benarros
-  - Gabriela Avian (avulso)
-  - Giovanna Rosa (3 desejos)
-  - Gisella Brasil (5)
-  - Guilherme Junqueira (10)
-  - Guilherme Lopes (5)
-  - Gurgel D'Alfonso (Caio)
-  - Hadi Fahs (3 desejos)
-  - Henrique Caldeira (10)
-  - Henrique Costa (3 desejos)
-  - Hernandes Benevides (8)
-  - Humberto Siuves (10)
-  - Huna
-  - Hurá Bittencourt (10)
-  - Ian Gallina (10)
-  - Ian Ruschel (5)
-  - Iara Biderman (8)
-  - Igor Marchesini
-  - Ille Cosmetics
-  - Interno
-  - Intl Affairs
-  - Isabella Benarros (5)
-  - Isabella Vasconcellos (14)
-  - Isadora Kimura (Nilo)
-  - Izabela Baptista (Avulso)
-  - Jack Sarvary (10)
-  - Jessica Joana Coral (10)
-  - Josué Silva (8)
-  - José Muritiba (10)
-  - João Henrique Bayer Medeiros (10)
-  - João Paulo Artuzzi (3 desejos)
-  - Julia Cambiaghi e Guilherme Lopes (10)
-  - Karen Schafer (3 desejos)
-  - Karla Roberta
-  - Kiko Augusto (Rei do Pitaco)
-  - Laynara Coelho (10)
-  - Leandro Costa (Lobby Tech)
-  - Leandro Piazza (10)
-  - Leo de Sá
-  - Leo Laranjeira (10)
-  - Leonardo Paraíso (7)
-  - Leticia e Breno
-  - Lilian Palacios (10)
-  - Luan Teixeira (10)
-  - Lucas Riani (10)
-  - Luci Hidal
-  - Luci Hidal (10)
-  - Luciana Silveira (10)
-  - Luciana Stracieri (10)
-  - Luft Shoes
-  - Luis Paulo Teixeira Scassa de Souza (3 desejos)
-  - Luiz Guilherme Almeida (3 desejos)
-  - Luiza Yassin
-  - Marcelo Caldas (5)
-  - Marcelo Tupan (10)
-  - Marco Bissi (10)
-  - Margareth Darezzo
-  - Maria Amalia Gonçalves (1)
-  - Maria Beatriz Alli
-  - Maria e Eduardo Libano (3)
-  - Mariana Assunção (5)
-  - Mariana e David (10)
-  - Mariana Langoni (5)
-  - Mariana Paixão (5)
-  - Mariana Sartor (3 desejos)
-  - Marina Agostini (10)
-  - Mauricio Carvalho (10)
-  - Modelo de Pasta Cliente (x)
-  - Mário Neto (3 desejos)
-  - Nalvio Cunha (10)
-  - Namari Capital
-  - Natassia Miller
-  - Nathalia Trindade (8)
-  - Nicholas Vasconcellos (8)
-  - Nino Vashakidze
-  - NSA Global (10)
-  - Otávio Dias
-  - Padaria dos Bebes (PJ)
-  - Parcerias
-  - Patrícia Nahas (8)
-  - Paty Nishimura (3 desejos)
-  - Paula Mejia (5)
-  - Pedro Vidigal (3 desejos)
-  - Peter Fernandez (10)
-  - Plínio Freitas (10)
-  - Rafael (3)
-  - Rafael Marcondes (Rei do Pitaco)
-  - Raphaela Spielberg (10)
-  - Renata Andrade (8)
-  - Renata Michaelis (20)
-  - Renata Reis (10)
-  - Repense (Diretores)
-  - Ricardo Glass (Avulso)
-  - Ricardo Sitzer (8)
-  - Richard Andrew Young (8)
-  - Roberto Cerdeira (14)
-  - Rodolfo e Claudia
-  - Salvator Haim (3)
-  - Samir Kerbage (10)
-  - Sandra Sinicco
-  - Sem Identificação
-  - Silvia Villas Boas (10)
-  - Stephanie Zalcman (7)
-  - Taissa Cruz
-  - Tammy Daher
-  - Tarefas
-  - Team Meetings
-  - Telma Baptista
-  - TEST_OAUTH2_VERIFICACAO
-  - Teste Leo de Sa - DEBUG
-  - Teste OAuth Token
-  - Thiago Martins (Rei do Pitaco)
-  - Thiago Vieira
-  - Thiago Zanetti (3 desejos)
-  - TI Nordja
-  - Tivita (20)
-  - Treinamentos
-  - Tyler Eldridge (8)
-  - Veronica Stasiak
-  - Vicente Carrari (5)
-  - Victor Carbone (10)
-  - Victor Carbone (3 desejos)
-  - Vinícius Santos (3 desejos)
-  - Vistos  / Passaportes e Cidadanias
-  - William Camara (5)
-  - William Duarte
 
 
 

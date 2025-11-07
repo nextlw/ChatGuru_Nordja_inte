@@ -816,10 +816,13 @@ async fn process_message(state: &Arc<AppState>, payload: &WebhookPayload, force_
         let prompt_config = AiPromptConfig::load_default().await
             .map_err(|e| AppError::InternalError(format!("Failed to load prompt config: {}", e)))?;
 
-        // Montar contexto
+        // Montar contexto enriquecido com informações dos campos personalizados
+        let info_2 = extract_info_2_from_payload(payload).unwrap_or_default();
+        let responsavel_nome = extract_responsavel_nome_from_payload(payload).unwrap_or_default();
+        
         let context = format!(
-            "Campanha: WhatsApp\nOrigem: whatsapp\nNome: {}\nMensagem: {}\nTelefone: {}",
-            nome, message, phone.as_deref().unwrap_or("N/A")
+            "Campanha: WhatsApp\nOrigem: whatsapp\nNome: {}\nMensagem: {}\nTelefone: {}\nCliente Solicitante (Info_2): {}\nResponsável: {}",
+            nome, message, phone.as_deref().unwrap_or("N/A"), info_2, responsavel_nome
         );
 
         // Gerar prompt usando a configuração
