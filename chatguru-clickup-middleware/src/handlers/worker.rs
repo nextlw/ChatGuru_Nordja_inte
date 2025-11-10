@@ -15,6 +15,7 @@ use axum::{
 };
 use serde_json::{json, Value};
 use chrono::{Utc, Datelike};
+use base64::{Engine as _, engine::general_purpose};
 
 use chatguru_clickup_middleware::{AppState, services::AiPromptConfig};
 use chatguru_clickup_middleware::utils::{AppError, logging::*};
@@ -29,13 +30,21 @@ pub async fn worker_process_message(
     let start_time = tokio::time::Instant::now();
     log_request_received("/worker/process", "POST");
 
-    // Extrair raw_payload do envelope Pub/Sub
-    let raw_payload_str = body.get("raw_payload")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| AppError::ValidationError("Missing raw_payload".to_string()))?;
+    // Extrair data do envelope Pub/Sub (formato: message.data em base64)
+    let data_base64 = body.get("message")
+        .and_then(|m| m.get("data"))
+        .and_then(|d| d.as_str())
+        .ok_or_else(|| AppError::ValidationError("Missing message.data in Pub/Sub payload".to_string()))?;
+
+    // Decodificar base64
+    let data_bytes = general_purpose::STANDARD.decode(data_base64)
+        .map_err(|e| AppError::ValidationError(format!("Failed to decode base64: {}", e)))?;
+
+    let raw_payload_str = String::from_utf8(data_bytes)
+        .map_err(|e| AppError::ValidationError(format!("Invalid UTF-8 in payload: {}", e)))?;
 
     // Parsear o payload do ChatGuru
-    let payload: WebhookPayload = serde_json::from_str(raw_payload_str)
+    let payload: WebhookPayload = serde_json::from_str(&raw_payload_str)
         .map_err(|e| AppError::ValidationError(format!("Invalid payload JSON: {}", e)))?;
 
     // Processar mensagem
