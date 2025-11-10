@@ -3,6 +3,14 @@ use serde_json::Value;
 use std::collections::HashMap;
 use crate::services::prompts::AiPromptConfig;
 
+// ClickUp v2 API types
+use clickup_v2::client::api::{
+    CreateTaskRequest,
+    CustomField,
+    CustomFieldValue,
+    TaskPriority,
+};
+
 /// Estrutura flexível que aceita múltiplos formatos de webhook
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(untagged)]
@@ -195,8 +203,38 @@ fn extract_professional_title(reason: &str) -> String {
 }
 
 impl WebhookPayload {
+    /// Extrai o texto da mensagem do payload
+    pub fn texto_mensagem(&self) -> String {
+        match self {
+            WebhookPayload::ChatGuru(p) => p.texto_mensagem.clone(),
+            WebhookPayload::EventType(p) => {
+                p.data.task_title.clone()
+                    .or(p.data.annotation.clone())
+                    .unwrap_or_default()
+            },
+            WebhookPayload::Generic(p) => p.mensagem.clone().unwrap_or_default(),
+        }
+    }
+
+    /// Extrai Info_2 do payload (nome do atendente)
+    pub fn get_info_2(&self) -> String {
+        match self {
+            WebhookPayload::ChatGuru(p) => {
+                p.campos_personalizados.get("Info_2")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string()
+            },
+            WebhookPayload::EventType(p) => {
+                p.data.lead_name.clone().unwrap_or_default()
+            },
+            WebhookPayload::Generic(p) => {
+                p.nome.clone().unwrap_or_default()
+            }
+        }
+    }
     /// Converte qualquer formato para dados do ClickUp
-    pub fn to_clickup_task_data(&self) -> serde_json::Value {
+    pub fn to_clickup_task_data(&self) -> CreateTaskRequest {
         match self {
             WebhookPayload::ChatGuru(payload) => {
                 self.chatguru_to_clickup(payload)
@@ -215,7 +253,7 @@ impl WebhookPayload {
         &self,
         ai_classification: Option<&crate::services::OpenAIClassification>,
         prompt_config: &AiPromptConfig,
-    ) -> serde_json::Value {
+    ) -> CreateTaskRequest {
         match self {
             WebhookPayload::ChatGuru(payload) => {
                 self.chatguru_to_clickup_with_ai(payload, ai_classification, prompt_config).await
@@ -235,7 +273,7 @@ impl WebhookPayload {
         payload: &ChatGuruPayload,
         ai_classification: Option<&crate::services::OpenAIClassification>,
         prompt_config: &AiPromptConfig,
-    ) -> serde_json::Value {
+    ) -> CreateTaskRequest {
         // NOVO FORMATO: descrição focada na mensagem
         let mut description = String::new();
 
@@ -299,7 +337,7 @@ impl WebhookPayload {
         }
         
         // Preparar campos personalizados do ClickUp
-        let mut custom_fields = Vec::new();
+        let mut custom_fields = Vec::<CustomField>::new();
 
         // ===== CATEGORIZAÇÃO AUTOMÁTICA BASEADA EM PALAVRAS-CHAVE =====
         // Tentar categorizar automaticamente baseado no nome da tarefa e mensagem
@@ -376,10 +414,10 @@ impl WebhookPayload {
                         .map(|ids| ids.activity_type_field_id.clone())
                         .unwrap_or_else(|| "f1259ffb-7be8-49ff-92f8-5ff9882888d0".to_string());
 
-                    custom_fields.push(serde_json::json!({
-                        "id": field_id,
-                        "value": activity_type.id
-                    }));
+                    custom_fields.push(CustomField {
+                        id: field_id,
+                        value: CustomFieldValue::DropdownOption(activity_type.id.clone()),
+                    });
                 } else {
                     tracing::warn!("Tipo de atividade '{}' não encontrado no YAML config", tipo);
                 }
@@ -394,10 +432,10 @@ impl WebhookPayload {
                         .map(|ids| ids.category_field_id.clone())
                         .unwrap_or_else(|| "c19b4f95-1ff7-4966-b201-02905d33cec6".to_string());
 
-                    custom_fields.push(serde_json::json!({
-                        "id": field_id,
-                        "value": cat_id
-                    }));
+                    custom_fields.push(CustomField {
+                        id: field_id,
+                        value: CustomFieldValue::DropdownOption(cat_id.clone()),
+                    });
                 } else {
                     tracing::warn!("Categoria '{}' não encontrada no YAML config", category);
                 }
@@ -411,10 +449,10 @@ impl WebhookPayload {
                             .map(|ids| ids.subcategory_field_id.clone())
                             .unwrap_or_else(|| "5333c095-eb40-4a5a-b0c2-76bfba4b1094".to_string());
 
-                        custom_fields.push(serde_json::json!({
-                            "id": field_id,
-                            "value": subcat_id
-                        }));
+                        custom_fields.push(CustomField {
+                            id: field_id,
+                            value: CustomFieldValue::DropdownOption(subcat_id.clone()),
+                        });
 
                         // Adicionar campo de Estrelas (emoji rating)
                         if let Some(stars) = prompt_config.get_subcategory_stars(category, sub_categoria) {
@@ -422,10 +460,10 @@ impl WebhookPayload {
                                 .map(|ids| ids.stars_field_id.clone())
                                 .unwrap_or_else(|| "83afcb8c-2866-498f-9c62-8ea9666b104b".to_string());
 
-                            custom_fields.push(serde_json::json!({
-                                "id": stars_field_id,
-                                "value": stars  // Número inteiro de 1 a 4
-                            }));
+                            custom_fields.push(CustomField {
+                                id: stars_field_id,
+                                value: CustomFieldValue::Rating(stars as i32),  // Número inteiro de 1 a 4
+                            });
 
                             tracing::info!(
                                 "✨ Tarefa classificada: '{}' > '{}' ({} estrela{})",
@@ -447,15 +485,15 @@ impl WebhookPayload {
                 let config = prompt_config; // Usar config passado como parâmetro
                 if let Some(field_ids) = config.get_field_ids() {
                     // Verificar se Categoria_nova já foi adicionada
-                    if !custom_fields.iter().any(|f| f["id"] == field_ids.category_field_id) {
+                    if !custom_fields.iter().any(|f| f.id == field_ids.category_field_id) {
                         // Se AI retornou categoria, buscar o ID da opção
                         if let Some(ref category) = ai.category {
                             if let Some(cat_id) = config.get_category_id(category) {
-                                custom_fields.push(serde_json::json!({
-                                    "id": field_ids.category_field_id,
-                                    "value": cat_id
-                                }));
-                                tracing::debug!("Campo Categoria_nova adicionado: {} -> {}", category, cat_id);
+                                custom_fields.push(CustomField {
+                                    id: field_ids.category_field_id.clone(),
+                                    value: CustomFieldValue::DropdownOption(cat_id.clone()),
+                                });
+                                tracing::debug!("Campo Categoria_nova adicionado: {} -> {}", category, &cat_id);
                             } else {
                                 tracing::warn!("Categoria '{}' não tem ID mapeado no YAML", category);
                             }
@@ -463,16 +501,16 @@ impl WebhookPayload {
                     }
 
                     // Verificar se SubCategoria_nova já foi adicionada
-                    if !custom_fields.iter().any(|f| f["id"] == field_ids.subcategory_field_id) {
+                    if !custom_fields.iter().any(|f| f.id == field_ids.subcategory_field_id) {
                         // Se AI retornou subcategoria, buscar o ID da opção
                         if let Some(ref sub_categoria) = ai.sub_categoria {
                             if let Some(ref category) = ai.category {
                                 if let Some(subcat_id) = config.get_subcategory_id(category, sub_categoria) {
-                                    custom_fields.push(serde_json::json!({
-                                        "id": field_ids.subcategory_field_id,
-                                        "value": subcat_id
-                                    }));
-                                    tracing::debug!("Campo SubCategoria_nova adicionado: {} -> {}", sub_categoria, subcat_id);
+                                    custom_fields.push(CustomField {
+                                        id: field_ids.subcategory_field_id.clone(),
+                                        value: CustomFieldValue::DropdownOption(subcat_id.clone()),
+                                    });
+                                    tracing::debug!("Campo SubCategoria_nova adicionado: {} -> {}", sub_categoria, &subcat_id);
                                 } else {
                                     tracing::warn!("Subcategoria '{}/{}' não tem ID mapeado no YAML", category, sub_categoria);
                                 }
@@ -489,10 +527,10 @@ impl WebhookPayload {
                         .map(|ids| ids.status_field_id.clone())
                         .unwrap_or_else(|| "6abbfe79-f80b-4b55-9b4b-9bd7f65b6458".to_string());
 
-                    custom_fields.push(serde_json::json!({
-                        "id": field_id,
-                        "value": status_id
-                    }));
+                    custom_fields.push(CustomField {
+                        id: field_id,
+                        value: CustomFieldValue::DropdownOption(status_id),
+                    });
                 } else {
                     tracing::warn!("Status '{}' não encontrado no YAML config", status);
                 }
@@ -514,10 +552,10 @@ impl WebhookPayload {
         // Adicionar campo "Conta cliente" (Info_1) - campo de texto livre
         if let Some(info_1) = payload.campos_personalizados.get("Info_1") {
             if let Some(info_1_str) = info_1.as_str() {
-                custom_fields.push(serde_json::json!({
-                    "id": "0cd1d510-1906-4484-ba66-06ccdd659768",  // Campo "Conta cliente"
-                    "value": info_1_str
-                }));
+                custom_fields.push(CustomField {
+                    id: "0cd1d510-1906-4484-ba66-06ccdd659768".to_string(),  // Campo "Conta cliente"
+                    value: CustomFieldValue::Text(info_1_str.to_string()),
+                });
                 tracing::debug!("Campo Conta cliente (Info_1) adicionado: {}", info_1_str);
             }
         }
@@ -541,17 +579,16 @@ impl WebhookPayload {
 
         let final_description = format!("{}{}", description.trim(), extra_info);
 
-        serde_json::json!({
-            "name": task_name,
-            "description": final_description,
-            "tags": Vec::<String>::new(),
-            "priority": 3,
-            "custom_fields": custom_fields
-        })
+        CreateTaskRequest::builder(task_name)
+            .description(final_description)
+            .tags(Vec::<String>::new())
+            .priority(TaskPriority::Normal)
+            .custom_fields(custom_fields)
+            .build()
     }
     
     /// Converte payload ChatGuru para ClickUp (FORMATO IDÊNTICO AO LEGADO)
-    fn chatguru_to_clickup(&self, payload: &ChatGuruPayload) -> serde_json::Value {
+    fn chatguru_to_clickup(&self, payload: &ChatGuruPayload) -> CreateTaskRequest {
         // FORMATO EXATO DO SISTEMA LEGADO
         let mut description = String::new();
         
@@ -597,40 +634,39 @@ impl WebhookPayload {
         let task_name = payload.nome.clone();
         
         // Preparar campos personalizados do ClickUp
-        let mut custom_fields = Vec::new();
+        let mut custom_fields = Vec::<CustomField>::new();
         
         // Mapeamento correto: Info_2 → Solicitante, Info_1 → Conta cliente
         if let Some(info_2) = payload.campos_personalizados.get("Info_2") {
             if let Some(info_2_str) = info_2.as_str() {
                 // Info_2 vai para o campo "Solicitante (Info_1)"
-                custom_fields.push(serde_json::json!({
-                    "id": "bf24f5b1-e909-473e-b864-75bf22edf67e",  // Campo Solicitante
-                    "value": info_2_str
-                }));
+                custom_fields.push(CustomField {
+                    id: "bf24f5b1-e909-473e-b864-75bf22edf67e".to_string(),  // Campo Solicitante
+                    value: CustomFieldValue::Text(info_2_str.to_string()),
+                });
             }
         }
-        
+
         if let Some(info_1) = payload.campos_personalizados.get("Info_1") {
             if let Some(info_1_str) = info_1.as_str() {
                 // Info_1 vai para o campo "Conta cliente"
-                custom_fields.push(serde_json::json!({
-                    "id": "0cd1d510-1906-4484-ba66-06ccdd659768",  // Campo Conta cliente
-                    "value": info_1_str
-                }));
+                custom_fields.push(CustomField {
+                    id: "0cd1d510-1906-4484-ba66-06ccdd659768".to_string(),  // Campo Conta cliente
+                    value: CustomFieldValue::Text(info_1_str.to_string()),
+                });
             }
         }
-        
-        serde_json::json!({
-            "name": task_name,
-            "description": description.trim(),
-            "tags": Vec::<String>::new(),  // Legado não usa tags
-            "priority": 3,  // Prioridade normal (3) como no legado
-            "custom_fields": custom_fields  // Adicionar campos personalizados
-        })
+
+        CreateTaskRequest::builder(task_name)
+            .description(description.trim().to_string())
+            .tags(Vec::<String>::new())  // Legado não usa tags
+            .priority(TaskPriority::Normal)  // Prioridade normal (3) como no legado
+            .custom_fields(custom_fields)  // Adicionar campos personalizados
+            .build()
     }
     
     /// Converte payload EventType para ClickUp
-    fn eventtype_to_clickup(&self, payload: &EventTypePayload) -> serde_json::Value {
+    fn eventtype_to_clickup(&self, payload: &EventTypePayload) -> CreateTaskRequest {
         let data = &payload.data;
         
         // Determina o título da tarefa
@@ -685,17 +721,16 @@ impl WebhookPayload {
             "payment_completed" => vec!["pagamento".to_string(), "concluído".to_string()],
             _ => vec![payload.event_type.clone()],
         };
-        
-        serde_json::json!({
-            "name": title,
-            "description": description,
-            "tags": tags,
-            "priority": 3
-        })
+
+        CreateTaskRequest::builder(title)
+            .description(description)
+            .tags(tags)
+            .priority(TaskPriority::Normal)
+            .build()
     }
     
     /// Converte payload genérico para ClickUp
-    fn generic_to_clickup(&self, payload: &GenericPayload) -> serde_json::Value {
+    fn generic_to_clickup(&self, payload: &GenericPayload) -> CreateTaskRequest {
         let nome = payload.nome.as_ref().map(|s| s.as_str()).unwrap_or("Contato");
         let celular = payload.celular.as_ref().map(|s| s.as_str()).unwrap_or("Não informado");
         let email = payload.email.as_ref().map(|s| s.as_str()).unwrap_or("Não informado");
@@ -718,13 +753,12 @@ impl WebhookPayload {
                 description.push_str(&format!("- {}: {}\n", key, value));
             }
         }
-        
-        serde_json::json!({
-            "name": format!("[Webhook] {}", nome),
-            "description": description,
-            "tags": vec!["webhook", "genérico"],
-            "priority": 3
-        })
+
+        CreateTaskRequest::builder(format!("[Webhook] {}", nome))
+            .description(description)
+            .tags(vec!["webhook".to_string(), "genérico".to_string()])
+            .priority(TaskPriority::Normal)
+            .build()
     }
     
     /// Extrai um identificador único para busca de duplicatas

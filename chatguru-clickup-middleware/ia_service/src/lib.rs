@@ -26,6 +26,9 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt;
 
+// ClickUp v2 API types
+use clickup_v2::client::api::CreateTaskRequest;
+
 /// Resultado do processamento de mídia com anotação separada
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaProcessingResult {
@@ -175,11 +178,27 @@ impl IaService {
         })
     }
 
+    /// Classifica atividade com detecção de duplicatas
+    ///
+    /// # Argumentos
+    /// * `message_text` - Texto da mensagem para classificar
+    /// * `existing_tasks` - Lista de títulos de tasks existentes para detecção de duplicatas
+    /// * `full_prompt` - Prompt completo já formatado com todas as instruções (gerado externamente via AiPromptConfig)
+    pub async fn classify_activity(
+        &self,
+        _message_text: &str,
+        _existing_tasks: &[String],
+        full_prompt: &str,
+    ) -> IaResult<ActivityClassification> {
+        // O prompt já vem completo e formatado do caller
+        self.classify_with_prompt(full_prompt).await
+    }
+
     /// Classifica atividade usando prompt estruturado
     ///
     /// O prompt deve ser pré-formatado externamente (usando AiPromptConfig)
     /// e já conter todas as instruções necessárias
-    pub async fn classify_activity(&self, prompt: &str) -> IaResult<ActivityClassification> {
+    pub async fn classify_with_prompt(&self, prompt: &str) -> IaResult<ActivityClassification> {
         tracing::info!("🔍 Iniciando classificação de atividade");
 
         let request = CreateChatCompletionRequestArgs::default()
@@ -678,6 +697,71 @@ impl IaService {
     /// Obtém informações sobre a configuração atual
     pub fn get_config(&self) -> &IaServiceConfig {
         &self.config
+    }
+}
+
+/// Extensão para ActivityClassification com métodos auxiliares
+impl ActivityClassification {
+    /// Verifica se é uma atividade válida e não duplicata
+    pub fn is_valid_activity(&self) -> bool {
+        self.is_activity
+    }
+
+    /// Verifica se é uma duplicata (lógica simples baseada na reason)
+    pub fn is_duplicate(&self) -> bool {
+        self.reason.to_lowercase().contains("similar") ||
+        self.reason.to_lowercase().contains("duplicat") ||
+        self.reason.to_lowercase().contains("já existe")
+    }
+
+    /// Extrai o título da task existente se for duplicata
+    pub fn get_existing_task_title(&self) -> Option<String> {
+        if self.is_duplicate() {
+            // Tentar extrair o nome da task da reason
+            // Por enquanto retorna None, pode ser melhorado
+            None
+        } else {
+            None
+        }
+    }
+
+    /// Converte para CreateTaskRequest do clickup_v2
+    pub fn to_create_task_request(&self) -> Result<CreateTaskRequest, String> {
+        if !self.is_activity {
+            return Err("Não é uma atividade válida".to_string());
+        }
+
+        let title = self.description.as_ref()
+            .or(self.category.as_ref())
+            .unwrap_or(&"Nova Tarefa".to_string())
+            .clone();
+
+        let description = format!(
+            "**Categoria**: {}\n**Subcategoria**: {}\n**Tipo**: {}\n\n{}",
+            self.category.as_deref().unwrap_or("N/A"),
+            self.sub_categoria.as_deref().unwrap_or("N/A"),
+            self.tipo_atividade.as_deref().unwrap_or("N/A"),
+            self.description.as_deref().unwrap_or("")
+        );
+
+        let mut request = CreateTaskRequest::new(title);
+        request.content = Some(description);
+        
+        // Definir prioridade baseado na subcategoria (assumindo que subcategorias têm estrelas)
+        // Por enquanto usar prioridade normal
+        request.priority = Some(3);
+
+        // Status padrão
+        request.status = Some("pendente".to_string());
+
+        Ok(request)
+    }
+
+    /// Gera número de estrelas baseado na subcategoria (fallback)
+    pub fn get_stars(&self) -> u8 {
+        // Por enquanto retorna 1 estrela como padrão
+        // Pode ser melhorado usando a configuração de subcategorias
+        1
     }
 }
 

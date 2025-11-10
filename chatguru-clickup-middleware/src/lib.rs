@@ -15,11 +15,12 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct AppState {
     pub settings: config::Settings,
-    pub clickup_client: reqwest::Client,
-    pub clickup: clickup::tasks::TaskManager,  // ✅ Migrado para crate clickup
+    pub clickup_client: Arc<clickup_v2::client::ClickUpClient>,  // ✅ Cliente oficial clickup_v2
     pub ia_service: Option<Arc<services::IaService>>,  // Serviço de IA usando OpenAI (async-openai)
     pub message_queue: Arc<services::MessageQueueService>,  // Fila de mensagens por chat
     pub chatguru_client: chatguru::ChatGuruClient,  // ✅ Cliente ChatGuru configurado uma vez
+    pub clickup_api_token: String,  // Token para chamadas diretas à API
+    pub clickup_workspace_id: String,  // Workspace/Team ID
 }
 
 impl AppState {

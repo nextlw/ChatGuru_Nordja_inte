@@ -6,10 +6,10 @@
 //! # Regras Implementadas
 //!
 //! 1. **Closing Message Detection**: Detecta mensagens de fechamento (obrigado, tchau, etc)
-//! 2. **Silence Detection**: Detecta silêncio prolongado (>30s sem mensagens)
+//! 2. **Silence Detection**: Detecta silêncio prolongado (>180s / 3min sem mensagens)
 //! 3. **Topic Change Detection**: Detecta mudança de tópico via embeddings semânticos (<60% similaridade)
 //! 4. **Action Completion Pattern**: Detecta padrão pergunta→resposta→confirmação
-//! 5. **Safety Timeout**: Timeout de segurança (8 mensagens ou 120s)
+//! 5. **Safety Timeout**: Timeout de segurança (8 mensagens ou 180s / 3min)
 //!
 //! # Performance
 //!
@@ -306,10 +306,10 @@ impl SmartContextManager {
             }
         }
 
-        // REGRA 2: Silence Detection (>30s sem mensagens)
-        if last_message_elapsed > 30 {
+        // REGRA 2: Silence Detection (>180s / 3min sem mensagens)
+        if last_message_elapsed > 180 {
             tracing::info!(
-                "✅ REGRA 2 ATIVADA: Silêncio de {}s detectado (limite: 30s)",
+                "✅ REGRA 2 ATIVADA: Silêncio de {}s detectado (limite: 180s / 3min)",
                 last_message_elapsed
             );
             return ContextDecision::ProcessNow {
@@ -369,7 +369,7 @@ impl SmartContextManager {
             }
         }
 
-        // REGRA 5: Safety Timeout (8 mensagens OU 120s)
+        // REGRA 5: Safety Timeout (8 mensagens OU 180s / 3min)
         if message_count >= 8 {
             tracing::info!(
                 "✅ REGRA 5 ATIVADA: Limite de mensagens atingido ({} mensagens >= 8)",
@@ -380,9 +380,9 @@ impl SmartContextManager {
             };
         }
 
-        if first_message_elapsed >= 120 {
+        if first_message_elapsed >= 180 {
             tracing::info!(
-                "✅ REGRA 5 ATIVADA: Timeout de segurança atingido ({}s >= 120s)",
+                "✅ REGRA 5 ATIVADA: Timeout de segurança atingido ({}s >= 180s / 3min)",
                 first_message_elapsed
             );
             return ContextDecision::ProcessNow {

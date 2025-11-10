@@ -9,7 +9,7 @@ pub mod worker;
 
 pub use health::*;
 pub use webhook::*;
-pub use worker::*;
+pub use worker::worker_process_message;
 
 // pub use db_check::*; // DESABILITADO
 // pub use migrate::*; // DESABILITADO

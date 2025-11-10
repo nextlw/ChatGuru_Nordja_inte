@@ -4,10 +4,10 @@
 //! - Cada chat tem sua própria fila
 //! - Processa AUTOMATICAMENTE via callback quando uma das 5 regras é ativada:
 //!   1. Closing Message Detection (obrigado, tchau, fechado)
-//!   2. Silence Detection (>30s sem mensagens)
+//!   2. Silence Detection (>180s / 3min sem mensagens)
 //!   3. Topic Change Detection (keyword overlap <30%)
 //!   4. Action Completion Pattern (pergunta→resposta→confirmação)
-//!   5. Safety Timeout (8 mensagens OU 120s)
+//!   5. Safety Timeout (8 mensagens OU 180s / 3min)
 //! - Scheduler roda a cada 10 segundos verificando condições
 //! - Callback centraliza todo envio para Pub/Sub
 //!

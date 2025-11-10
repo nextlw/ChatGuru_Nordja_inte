@@ -17,7 +17,7 @@ serde_json = "1.0"
 tracing = "0.1"
 
 # AI services (embeddings para análise semântica)
-ia-service = { path = "../ia-service" }
+ia-service = { path = "../ia_service" }
 
 [dev-dependencies]
 tokio = { version = "1.0", features = ["full", "test-util"] }

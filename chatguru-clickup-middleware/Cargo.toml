@@ -2,8 +2,9 @@
 members = [
     ".",
     "mensageria",
-    "ia-service",
+    "ia_service",
     "chatguru",
+    "clickup_v2",
 ]
 resolver = "2"
 
@@ -68,9 +69,10 @@ path = "src/main.rs"
 [dependencies]
 # Local crates
 mensageria = { path = "mensageria" }
-ia-service = { path = "ia-service" }
-# Updated: Changed from local clickup dependency to official crate (November 2025)
+ia-service = { path = "ia_service" }
 chatguru = { path = "chatguru" }
+# Updated: Using local clickup_v2 crate (November 2025) - inside workspace
+clickup_v2 = { path = "clickup_v2" }
 
 # Web framework
 axum = { version = "0.7", features = ["json", "macros", "tokio"] }
@@ -143,7 +145,6 @@ google-cloud-auth = "1.0"  # Para autenticação com Vertex AI (Application Defa
 google-cloud-secretmanager-v1 = "1.0"  # Secret Manager
 google-cloud-storage = "0.22"  # Cloud Storage para configs dinâmicos
 futures-util = "0.3"  # Para StreamExt (Pub/Sub subscriptions)
-clickup = "0.2.0"
 
 # Database (DESABILITADO - usando apenas YAML)
 # sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "sqlite", "macros"] }

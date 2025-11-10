@@ -15,6 +15,7 @@ pub enum AppError {
     InternalError(String),
     Timeout(String),
     StructureNotFound(String),
+    ServiceUnavailable(String),
 }
 
 #[derive(Debug)]
@@ -49,6 +50,7 @@ impl fmt::Display for AppError {
             AppError::InternalError(msg) => write!(f, "Internal error: {}", msg),
             AppError::Timeout(msg) => write!(f, "Timeout error: {}", msg),
             AppError::StructureNotFound(msg) => write!(f, "Structure not found: {}", msg),
+            AppError::ServiceUnavailable(msg) => write!(f, "Service unavailable: {}", msg),
         }
     }
 }
@@ -73,6 +75,18 @@ impl From<chatguru::ChatGuruError> for AppError {
     }
 }
 
+impl From<ia_service::IaServiceError> for AppError {
+    fn from(err: ia_service::IaServiceError) -> Self {
+        AppError::InternalError(err.to_string())
+    }
+}
+
+impl From<String> for AppError {
+    fn from(err: String) -> Self {
+        AppError::InternalError(err)
+    }
+}
+
 // Database error conversion desabilitado (sem banco)
 // impl From<sqlx::Error> for AppError {
 //     fn from(err: sqlx::Error) -> Self {
@@ -93,6 +107,7 @@ impl IntoResponse for AppError {
             AppError::InternalError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
             AppError::Timeout(msg) => (StatusCode::GATEWAY_TIMEOUT, msg),
             AppError::StructureNotFound(msg) => (StatusCode::NOT_FOUND, msg),
+            AppError::ServiceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg),
         };
 
         let body = json!({
