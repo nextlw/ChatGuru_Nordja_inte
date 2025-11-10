@@ -157,7 +157,16 @@ async fn process_message(state: Arc<AppState>, payload: WebhookPayload) -> Resul
     };
 
     let context = format!(
-        "{}\n\nMENSAGEM DO USUÁRIO:\n{}\n\nIMPORTANTE: Se esta mensagem for muito similar a alguma das tasks existentes listadas acima, marque is_activity=false e explique na reason.",
+        "{}\n\nMENSAGEM DO USUÁRIO:\n{}\n\n\
+         🚨 VERIFICAÇÃO DE DUPLICATAS OBRIGATÓRIA:\n\
+         1. Compare esta mensagem com TODAS as tasks existentes listadas acima\n\
+         2. Se encontrar uma task MUITO SIMILAR (mesmo objetivo/contexto):\n\
+            - Marque is_duplicate=true\n\
+            - Preencha existing_task_title com o título exato da task similar\n\
+            - Explique na reason por que é duplicata\n\
+         3. Se NÃO encontrar similar:\n\
+            - Marque is_duplicate=false\n\
+            - Prossiga com a classificação normal da atividade",
         existing_tasks_context,
         mensagem_texto
     );
@@ -170,7 +179,15 @@ async fn process_message(state: Arc<AppState>, payload: WebhookPayload) -> Resul
         .ok_or(AppError::ServiceUnavailable("IA Service não disponível".to_string()))?
         .classify_activity(&mensagem_texto, &task_titles, &full_prompt)
         .await?;
-    
+
+    // Log de debug para verificação de duplicatas
+    log_info(&format!(
+        "🔍 Resultado da classificação: is_activity={}, is_duplicate={}, existing_task_title={:?}",
+        ia_result.is_activity,
+        ia_result.is_duplicate,
+        ia_result.existing_task_title
+    ));
+
     // Se NÃO é uma task
     if !ia_result.is_valid_activity() {
         log_info(&format!("ℹ️ Mensagem NÃO é uma tarefa: {}", ia_result.reason));

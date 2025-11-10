@@ -81,6 +81,12 @@ pub struct ConversationCompleteness {
 pub struct ActivityClassification {
     pub is_activity: bool,
     pub reason: String,
+    /// Flag explícito para indicar se é duplicata de uma task existente
+    #[serde(default)]
+    pub is_duplicate: bool,
+    /// Título da task existente similar (se is_duplicate=true)
+    #[serde(default)]
+    pub existing_task_title: Option<String>,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]
@@ -824,8 +830,16 @@ impl ActivityClassification {
         self.is_activity
     }
 
-    /// Verifica se é uma duplicata (lógica simples baseada na reason)
+    /// Verifica se é uma duplicata
+    /// Agora usa o campo explícito is_duplicate definido pela IA
+    /// Mantém fallback para detecção por palavras-chave na reason (compatibilidade)
     pub fn is_duplicate(&self) -> bool {
+        // Prioriza o campo explícito
+        if self.is_duplicate {
+            return true;
+        }
+
+        // Fallback: detecção por palavras-chave (compatibilidade com versões antigas)
         self.reason.to_lowercase().contains("similar") ||
         self.reason.to_lowercase().contains("duplicat") ||
         self.reason.to_lowercase().contains("já existe")
@@ -834,7 +848,12 @@ impl ActivityClassification {
     /// Extrai o título da task existente se for duplicata
     pub fn get_existing_task_title(&self) -> Option<String> {
         if self.is_duplicate() {
-            // Tentar extrair o nome da task da reason
+            // Prioriza o campo explícito existing_task_title
+            if let Some(ref title) = self.existing_task_title {
+                return Some(title.clone());
+            }
+
+            // Fallback: tentar extrair o nome da task da reason
             // Por enquanto retorna None, pode ser melhorado
             None
         } else {
