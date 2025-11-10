@@ -125,6 +125,11 @@ async fn process_message(state: Arc<AppState>, payload: WebhookPayload) -> Resul
         // Criar nova lista mensal
         log_info(&format!("📝 Criando nova lista: '{}'", list_name));
         let new_list = create_list(&state.clickup_client, &folder_id, &list_name).await?;
+
+        // Aguardar 2s para API do ClickUp processar a criação da lista
+        log_info("⏳ Aguardando 2s para API do ClickUp processar a nova lista...");
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
         new_list.id
     };
 
@@ -199,8 +204,25 @@ async fn process_message(state: Arc<AppState>, payload: WebhookPayload) -> Resul
         }));
     }
 
-    // 6. Gerar CreateTaskRequest usando IA Service
-    let task_request = ia_result.to_create_task_request()?;
+    // 6. Gerar CreateTaskRequest usando IA Service com mapeamentos de custom fields
+    let mappings = &state.custom_fields_mappings;
+
+    // Preparar mapeamentos no formato esperado
+    let category_mappings = Some(&mappings.categories);
+
+    let subcategory_mappings: std::collections::HashMap<String, (String, u8)> = mappings.subcategories
+        .iter()
+        .map(|(name, info)| (name.clone(), (info.id.clone(), info.stars)))
+        .collect();
+    let subcategory_mappings_ref = Some(&subcategory_mappings);
+
+    let task_request = ia_result.to_create_task_request(
+        category_mappings,
+        subcategory_mappings_ref,
+        &mappings.category_field_id,
+        &mappings.subcategory_field_id,
+        mappings.stars_field_id.as_deref(),
+    )?;
     
     log_info(&format!("✅ Criando task: '{}'", task_request.name));
     

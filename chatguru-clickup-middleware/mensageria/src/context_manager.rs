@@ -259,7 +259,7 @@ impl SmartContextManager {
     pub fn should_process_now(
         messages: &[Value],
         received_at_list: &[Instant],
-        semantic_similarity: Option<f32>,
+        _semantic_similarity: Option<f32>,
     ) -> ContextDecision {
         if messages.is_empty() {
             return ContextDecision::Wait;
@@ -317,7 +317,10 @@ impl SmartContextManager {
             };
         }
 
-        // REGRA 3: Topic Change Detection (similaridade semântica < 60%)
+        // REGRA 3: Topic Change Detection (TEMPORARIAMENTE DESABILITADA)
+        // MOTIVO: Keyword overlap estava muito agressivo, dividindo batches prematuramente
+        // TODO: Re-abilitar quando IaService com embeddings estiver disponível
+        /*
         if message_count >= 3 {
             // Preferir similaridade semântica (embeddings) se disponível
             if let Some(similarity) = semantic_similarity {
@@ -351,6 +354,8 @@ impl SmartContextManager {
                 }
             }
         }
+        */
+        tracing::debug!("Regra 3 (Topic Change) desabilitada - aguardando Safety Timeout");
 
         // REGRA 4: Action Completion Pattern (pergunta → resposta → confirmação)
         if message_count >= 3 {
@@ -403,6 +408,7 @@ impl SmartContextManager {
     /// Calcula keyword overlap entre primeira e última mensagem
     ///
     /// Retorna percentual de palavras-chave em comum (0.0 a 1.0)
+    #[allow(dead_code)]
     fn calculate_keyword_overlap(contexts: &[MessageContext]) -> Option<f32> {
         if contexts.len() < 2 {
             return None;

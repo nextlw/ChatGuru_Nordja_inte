@@ -22,7 +22,7 @@ task_description: |
     - Se NÃO atender TODOS os critérios acima, classifique como is_activity: false
     - Se for atividade, determine os campos apropriados baseado no contexto
     - Se aplicável, identifique possíveis subtarefas para a atividade
-    - Se for atividade, crie um título adequado para a atividade com até 5 palavras de fácil compreensão do objetivo
+    - Se for atividade, crie um título adequado para a atividade com até 6 palavras de fácil compreensão do objetivo
     - Se for atividade, crie um descrição adequado para a atividade com o mínimo de tres linhas de explicação
 
 # Tipos de atividade padrão
@@ -1069,14 +1069,15 @@ response_format: |
   Responda APENAS com JSON válido:
   {
     "is_activity": true/false,
-    "reason": "título curto e profissional para a tarefa (máximo 5 palavras)",
+    "reason": "breve justificativa da classificação (1 frase curta)",
+    "title": "título curto e profissional para a tarefa com NO MÁXIMO 6 palavras",
     "tipo_atividade": "{{activity_types_exact}}",
     "category": "{{categories_exact}}",
     "sub_categoria": "{{subcategories_exact}}",
     "subtasks": ["subtarefa 1", "subtarefa 2"] ou [],
     "status_back_office": "{{status_exact}}",
-    "campanha": "título profissional da atividade",
-    "description": "descrição detalhada da atividade com mínimo de três linhas explicando contexto, ações necessárias e próximos passos",
+    "campanha": null,
+    "description": "incluir TODAS as mensagens do usuário formatadas como [Mensagem N - há Xs] seguido do texto, depois adicionar contexto detalhado, ações necessárias e próximos passos (mínimo três linhas no total)",
     "space_name": "nome do space conforme mapeamento responsavel_nome",
     "folder_name": "nome da pasta conforme campo info_2 do payload",
     "list_name": "nome da lista conforme mês/ano atual (formato: OUTUBRO 2025)"

@@ -435,6 +435,12 @@ fn aggregate_messages(
     // Usar PRIMEIRA mensagem como base
     let mut aggregated_payload = messages[0].payload.clone();
 
+    // DEBUG: Verificar payload da primeira mensagem
+    tracing::info!(
+        "🔍 DEBUG AGREGAÇÃO - Primeira mensagem (base):\n{}",
+        serde_json::to_string_pretty(&messages[0].payload).unwrap_or_default()
+    );
+
     // Agregar todos os texto_mensagem
     let mut aggregated_text = String::new();
 
@@ -489,11 +495,9 @@ fn aggregate_messages(
         aggregated_text.len()
     );
 
-    // Log detalhado do payload final (debug)
-    tracing::debug!(
-        "📋 Payload final agregado para chat '{}' (batch_size={}):\n{}",
-        chat_id,
-        messages.len(),
+    // DEBUG: Verificar payload final agregado
+    tracing::info!(
+        "🔍 DEBUG AGREGAÇÃO - Payload final:\n{}",
         serde_json::to_string_pretty(&aggregated_payload).unwrap_or_default()
     );
 

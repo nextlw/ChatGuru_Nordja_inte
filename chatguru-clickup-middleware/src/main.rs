@@ -452,6 +452,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     log_info("✅ ChatGuru client inicializado no AppState (configuração centralizada)");
 
+    // Carregar mapeamentos de custom fields
+    log_info("📂 Carregando mapeamentos de custom fields...");
+    let custom_fields_mappings = Arc::new(
+        config::CustomFieldsMappings::load().await
+            .map_err(|e| format!("Falha ao carregar custom fields mappings: {}", e))?
+    );
+    log_info("✅ Custom fields mappings carregados");
+
     // Inicializar estado da aplicação
     let app_state = Arc::new(AppState {
         settings: settings.clone(),
@@ -461,6 +469,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         chatguru_client,  // ✅ Cliente configurado uma única vez
         clickup_api_token: clickup_token,
         clickup_workspace_id: workspace_id,
+        custom_fields_mappings,
     });
 
     log_info("Event-driven architecture com Message Queue");
@@ -575,6 +584,116 @@ async fn publish_batch_to_pubsub(
         "📦 Payload agregado para chat '{}' criado com sucesso",
         chat_id
     );
+
+    // Verificar se deve forçar uso do Pub/Sub (para testar emulador em dev)
+    let force_pubsub = std::env::var("FORCE_PUBSUB").unwrap_or_default() == "true"
+        || std::env::var("PUBSUB_EMULATOR_HOST").is_ok();
+
+    // DESENVOLVIMENTO: Chamar worker diretamente (sem Pub/Sub) OU usar emulador
+    if (cfg!(debug_assertions) || std::env::var("RUST_ENV").unwrap_or_default() == "development") && !force_pubsub {
+        tracing::info!("🔧 MODO DESENVOLVIMENTO: Chamando worker diretamente (sem Pub/Sub)");
+
+        // Importar o handler do worker
+        use crate::handlers::worker::worker_process_message;
+        use axum::extract::State;
+        use base64::Engine;
+
+        // Criar envelope Pub/Sub simulado
+        let envelope = json!({
+            "message": {
+                "data": base64::engine::general_purpose::STANDARD.encode(
+                    serde_json::to_string(&aggregated_payload)?
+                )
+            }
+        });
+
+        // Criar AppState simplificado para desenvolvimento
+        tracing::info!("Criando AppState para desenvolvimento...");
+
+        // Reutilizar os mesmos services do settings
+        let secret_manager = services::SecretManagerService::new().await?;
+        let clickup_token = secret_manager.get_clickup_api_token().await?;
+
+        // Criar cliente ClickUp v2 (sem Arc porque não é clonável dentro do dev mode)
+        let clickup_v2_client = clickup_v2::ClickUpClient::new(
+            clickup_token.clone(),
+            "https://api.clickup.com/api/v2".to_string()
+        );
+
+        // Buscar workspace_id dinamicamente do ClickUp API
+        tracing::info!("Buscando workspace_id do ClickUp API...");
+        let workspaces_response = clickup_v2_client.get_workspaces().await
+            .map_err(|e| format!("Failed to get workspaces: {}", e))?;
+
+        let workspace_id = workspaces_response["teams"][0]["id"]
+            .as_str()
+            .ok_or("Failed to extract workspace ID from ClickUp API")?
+            .to_string();
+
+        tracing::info!("✅ Workspace ID obtido: {}", workspace_id);
+
+        // Criar IaService com OpenAI API key (fallback para env var em desenvolvimento)
+        let openai_api_key = secret_manager.get_secret_value("openai-api-key").await
+            .or_else(|_| std::env::var("OPENAI_API_KEY"))
+            .map_err(|e| format!("Failed to get OpenAI API key from Secret Manager or OPENAI_API_KEY env var: {}", e))?;
+
+        tracing::info!("✅ OpenAI API key obtida (Secret Manager ou env var)");
+
+        let ia_config = services::IaServiceConfig::new(openai_api_key)
+            .with_chat_model("gpt-4o-mini")
+            .with_temperature(0.1)
+            .with_max_tokens(500);
+
+        let ia_service = services::IaService::new(ia_config)
+            .map_err(|e| format!("Failed to create IaService: {}", e))?;
+
+        let message_queue = Arc::new(services::MessageQueueService::new());
+
+        // Obter credenciais do ChatGuru (com fallbacks para settings)
+        let api_token = secret_manager.get_secret_value("chatguru-api-token").await
+            .unwrap_or_else(|_| settings.chatguru.api_token.clone().unwrap_or_default());
+        let api_endpoint = settings.chatguru.api_endpoint.clone()
+            .unwrap_or_else(|| "https://api.chatguru.app/api/v1".to_string());
+        let account_id = settings.chatguru.account_id.clone()
+            .unwrap_or_else(|| "default_account".to_string());
+
+        let chatguru_client = chatguru::ChatGuruClient::new(
+            api_token,
+            api_endpoint,
+            account_id
+        );
+
+        // Carregar mapeamentos de custom fields (mesmo em dev)
+        let custom_fields_mappings = Arc::new(
+            config::CustomFieldsMappings::load().await?
+        );
+
+        let app_state = Arc::new(AppState {
+            settings: settings.clone(),
+            clickup_client: Arc::new(clickup_v2_client),
+            ia_service: Some(Arc::new(ia_service)),
+            message_queue,
+            chatguru_client,
+            clickup_api_token: clickup_token,
+            clickup_workspace_id: workspace_id,
+            custom_fields_mappings,
+        });
+
+        // Chamar worker diretamente
+        match worker_process_message(
+            State(app_state),
+            axum::Json(envelope)
+        ).await {
+            Ok(result) => {
+                tracing::info!("✅ Worker processou batch localmente: {:?}", result);
+                return Ok(());
+            }
+            Err(e) => {
+                tracing::error!("❌ Erro ao processar batch localmente: {}", e);
+                return Err(e.into());
+            }
+        }
+    }
 
     // 2. Configurar cliente Pub/Sub
     let config = ClientConfig::default().with_auth().await?;

@@ -1,22 +1,18 @@
 #!/bin/bash
-# Script para testar produção e monitorar logs em tempo real
-#
-# Uso: ./test-production-live.sh
-
+# Script para testar localhost
 set -e
 
 # Cores
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-PRODUCTION_URL="https://chatguru-clickup-middleware-707444002434.southamerica-east1.run.app"
-SERVICE_NAME="chatguru-clickup-middleware"
-REGION="southamerica-east1"
+LOCAL_URL="http://localhost:8080"
 
 echo -e "${GREEN}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║       TESTE EM PRODUÇÃO - ENVIO + MONITORAMENTO LOGS          ║${NC}"
+echo -e "${GREEN}║           TESTE LOCAL - ENVIO DE 8 MENSAGENS                  ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -27,7 +23,7 @@ CHAT_ID="${TEST_ID}@c.us"
 echo -e "${BLUE}📋 Informações do Teste:${NC}"
 echo -e "   Test ID: ${YELLOW}${TEST_ID}${NC}"
 echo -e "   Chat ID: ${YELLOW}${CHAT_ID}${NC}"
-echo -e "   Produção: ${YELLOW}${PRODUCTION_URL}${NC}"
+echo -e "   Local: ${YELLOW}${LOCAL_URL}${NC}"
 echo -e "   Timestamp: $(date '+%Y-%m-%d %H:%M:%S')"
 echo ""
 
@@ -44,11 +40,11 @@ declare -a TASK_MESSAGES=(
 )
 
 echo -e "${GREEN}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║          ENVIANDO 8 MENSAGENS (INTERVALO DE 3s)               ║${NC}"
+echo -e "${GREEN}║          ENVIANDO 8 MENSAGENS (INTERVALO DE 2s)               ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
-# Enviar 8 mensagens com intervalo de 3s
+# Enviar 8 mensagens com intervalo de 2s
 for i in {1..8}; do
   MESSAGE_NUM=$i
   MESSAGE_TEXT="${TASK_MESSAGES[$((i-1))]}"
@@ -59,12 +55,12 @@ for i in {1..8}; do
 {
   "chat_id": "${CHAT_ID}",
   "celular": "5511999999999",
-  "sender_name": "William Duarte - Teste",
+  "sender_name": "William Duarte - Teste Local",
   "texto_mensagem": "[MSG ${MESSAGE_NUM}/8] ${MESSAGE_TEXT}",
   "message_type": "text",
   "campos_personalizados": {
     "Info_1": "Nexcode",
-    "Info_2": "William Duarte"
+    "Info_2": "Tarefas"
   },
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
@@ -72,9 +68,9 @@ EOF
 )
 
   RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
-    "${PRODUCTION_URL}/webhooks/chatguru" \
+    "${LOCAL_URL}/webhooks/chatguru" \
     -H "Content-Type: application/json" \
-    -d "$PAYLOAD")
+    -d "$PAYLOAD" 2>&1)
 
   HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
 
@@ -82,39 +78,20 @@ EOF
     echo -e "   ${GREEN}✅ Mensagem ${MESSAGE_NUM}/8 enviada (HTTP 200)${NC}"
   else
     echo -e "   ${RED}❌ Mensagem ${MESSAGE_NUM}/8 falhou (HTTP ${HTTP_CODE})${NC}"
+    echo -e "   Response: $RESPONSE"
   fi
 
-  # Aguardar 3 segundos antes da próxima mensagem (exceto na última)
+  # Aguardar 2 segundos antes da próxima mensagem (exceto na última)
   if [ $i -lt 8 ]; then
-    echo -e "   ${BLUE}⏳ Aguardando 3 segundos...${NC}"
-    sleep 3
+    echo -e "   ${BLUE}⏳ Aguardando 2 segundos...${NC}"
+    sleep 2
   fi
 done
 
 echo ""
 echo -e "${GREEN}✅ Todas as 8 mensagens foram enviadas!${NC}"
 echo ""
-
-# Aguardar um pouco antes de começar a monitorar logs
-echo -e "${BLUE}⏳ Aguardando 3 segundos antes de iniciar monitoramento de logs...${NC}"
-sleep 3
+echo -e "${BLUE}📋 Aguarde o processamento no terminal do cargo run...${NC}"
+echo -e "${BLUE}   Chat ID: ${CHAT_ID}${NC}"
+echo -e "${BLUE}   Busque por logs com '${TEST_ID}' ou 'William Duarte'${NC}"
 echo ""
-
-# Monitorar logs em tempo real
-echo -e "${GREEN}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║              📋 LOGS EM TEMPO REAL (Cloud Run)                 ║${NC}"
-echo -e "${GREEN}╠════════════════════════════════════════════════════════════════╣${NC}"
-echo -e "${GREEN}║  Filtrando por: ${TEST_ID}                                      ║${NC}"
-echo -e "${GREEN}║  Pressione Ctrl+C para parar                                   ║${NC}"
-echo -e "${GREEN}╚════════════════════════════════════════════════════════════════╝${NC}"
-echo ""
-
-# Tail dos logs (filtrando por eventos relevantes)
-gcloud beta run services logs tail ${SERVICE_NAME} \
-  --region=${REGION} \
-  --format="value(textPayload)" \
-  | grep --line-buffered -E "${TEST_ID}|agrupada recebida|mensagens na fila|Executando verificar|Aguardando mais mensagens|SmartContextManager ativado|Batch.*publicado|Worker|Mensagem recebida|Atendente:|Cliente encontrado|Task criada|OpenAI" \
-  || echo -e "${YELLOW}ℹ️  Nenhum log relevante ainda (aguardando processamento)...${NC}"
-
-echo ""
-echo -e "${GREEN}✅ Monitoramento finalizado${NC}"

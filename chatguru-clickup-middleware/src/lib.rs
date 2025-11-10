@@ -21,6 +21,7 @@ pub struct AppState {
     pub chatguru_client: chatguru::ChatGuruClient,  // ✅ Cliente ChatGuru configurado uma vez
     pub clickup_api_token: String,  // Token para chamadas diretas à API
     pub clickup_workspace_id: String,  // Workspace/Team ID
+    pub custom_fields_mappings: Arc<config::CustomFieldsMappings>,  // ✅ Mapeamentos de custom fields
 }
 
 impl AppState {

@@ -71,6 +71,8 @@ pub struct ActivityClassification {
     pub is_activity: bool,
     pub reason: String,
     #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
     pub tipo_atividade: Option<String>,
     #[serde(default)]
     pub category: Option<String>,
@@ -726,18 +728,29 @@ impl ActivityClassification {
     }
 
     /// Converte para CreateTaskRequest do clickup_v2
-    pub fn to_create_task_request(&self) -> Result<CreateTaskRequest, String> {
+    ///
+    /// # Parâmetros
+    /// * `category_mappings` - HashMap de categoria → ID (opcional)
+    /// * `subcategory_mappings` - HashMap de subcategoria → (ID, stars) (opcional)
+    pub fn to_create_task_request(
+        &self,
+        category_mappings: Option<&std::collections::HashMap<String, String>>,
+        subcategory_mappings: Option<&std::collections::HashMap<String, (String, u8)>>,
+        category_field_id: &str,
+        subcategory_field_id: &str,
+        stars_field_id: Option<&str>,
+    ) -> Result<CreateTaskRequest, String> {
         if !self.is_activity {
             return Err("Não é uma atividade válida".to_string());
         }
 
-        let title = self.description.as_ref()
+        let title = self.title.as_ref()
             .or(self.category.as_ref())
             .unwrap_or(&"Nova Tarefa".to_string())
             .clone();
 
         let description = format!(
-            "**Categoria**: {}\n**Subcategoria**: {}\n**Tipo**: {}\n\n{}",
+            "Categoria: {}\nSubcategoria: {}\nTipo: {}\n\n{}",
             self.category.as_deref().unwrap_or("N/A"),
             self.sub_categoria.as_deref().unwrap_or("N/A"),
             self.tipo_atividade.as_deref().unwrap_or("N/A"),
@@ -746,13 +759,58 @@ impl ActivityClassification {
 
         let mut request = CreateTaskRequest::new(title);
         request.content = Some(description);
-        
+
         // Definir prioridade baseado na subcategoria (assumindo que subcategorias têm estrelas)
         // Por enquanto usar prioridade normal
         request.priority = Some(3);
 
-        // Status padrão
-        request.status = Some("pendente".to_string());
+        // Não definir status - deixar o ClickUp usar o status padrão da lista
+        // (geralmente "to do" ou "Open" dependendo da configuração da lista)
+        request.status = None;
+
+        // Adicionar custom fields: Categoria_nova e SubCategoria_nova
+        use clickup_v2::client::api::{CustomField, CustomFieldValue};
+
+        let mut custom_fields = Vec::new();
+
+        // Custom field: Categoria_nova (dropdown)
+        if let Some(ref category) = self.category {
+            let category_id_opt = category_mappings
+                .and_then(|mappings| mappings.get(category.as_str()));
+
+            if let Some(cat_id) = category_id_opt {
+                custom_fields.push(CustomField {
+                    id: category_field_id.to_string(),
+                    value: CustomFieldValue::DropdownOption(cat_id.clone()),
+                });
+            }
+        }
+
+        // Custom field: SubCategoria_nova (dropdown) + Estrelas (rating)
+        if let Some(ref subcategoria) = self.sub_categoria {
+            let subcategory_info = subcategory_mappings
+                .and_then(|mappings| mappings.get(subcategoria.as_str()));
+
+            if let Some((subcategory_id, stars)) = subcategory_info {
+                // Adicionar subcategoria
+                custom_fields.push(CustomField {
+                    id: subcategory_field_id.to_string(),
+                    value: CustomFieldValue::DropdownOption(subcategory_id.clone()),
+                });
+
+                // Adicionar estrelas (rating) se o campo existir
+                if let Some(stars_field) = stars_field_id {
+                    custom_fields.push(CustomField {
+                        id: stars_field.to_string(),
+                        value: CustomFieldValue::Rating(*stars as i32),
+                    });
+                }
+            }
+        }
+
+        if !custom_fields.is_empty() {
+            request.custom_fields = Some(custom_fields);
+        }
 
         Ok(request)
     }
