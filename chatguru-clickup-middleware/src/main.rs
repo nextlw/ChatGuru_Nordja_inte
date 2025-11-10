@@ -422,7 +422,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Iniciar scheduler da fila (verifica a cada 10s)
     message_queue.clone().start_scheduler();
-    log_info("✅ Message Queue Scheduler iniciado - COM CALLBACK para Pub/Sub (5 msgs ou 100s por chat)");
+    log_info("✅ Message Queue Scheduler iniciado - COM CALLBACK para Pub/Sub (8 msgs ou 180s por chat)");
 
     // ✅ Inicializar cliente ChatGuru uma única vez no AppState
     let chatguru_client = {

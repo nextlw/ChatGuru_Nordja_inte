@@ -59,9 +59,15 @@ impl SecretManagerService {
     }
 
     pub async fn get_clickup_api_token(&self) -> Result<String> {
-        // Tenta buscar do Secret Manager primeiro (se disponível)
+        // PRIORIDADE 1: Variável de ambiente CLICKUP_ACCESS_TOKEN (produção simplificada)
+        if let Ok(token) = env::var("CLICKUP_ACCESS_TOKEN") {
+            tracing::info!("✅ ClickUp token obtido da variável de ambiente CLICKUP_ACCESS_TOKEN");
+            return Ok(token);
+        }
+
+        // PRIORIDADE 2: Fallback para Secret Manager (desenvolvimento/legacy)
         if let Some(client) = &self.client {
-            // PRIORIDADE 1: OAuth2 token (mais permissões, pode criar folders/spaces)
+            // Tenta OAuth2 token primeiro
             let oauth_secret_name = format!(
                 "projects/{}/secrets/clickup-oauth-token/versions/latest",
                 self.project_id
@@ -75,23 +81,18 @@ impl SecretManagerService {
             {
                 Ok(response) => {
                     if let Some(payload) = response.payload {
-                        match String::from_utf8(payload.data.to_vec()) {
-                            Ok(token) => {
-                                tracing::info!("✅ ClickUp OAuth2 token recuperado do Secret Manager");
-                                return Ok(token);
-                            }
-                            Err(e) => {
-                                tracing::error!("Erro ao decodificar OAuth2 token: {}", e);
-                            }
+                        if let Ok(token) = String::from_utf8(payload.data.to_vec()) {
+                            tracing::info!("✅ ClickUp OAuth2 token recuperado do Secret Manager");
+                            return Ok(token);
                         }
                     }
                 }
-                Err(e) => {
-                    tracing::warn!("OAuth2 token não encontrado ({}), tentando Personal Token...", e);
+                Err(_) => {
+                    tracing::debug!("OAuth2 token não encontrado no Secret Manager");
                 }
             }
 
-            // PRIORIDADE 2: Personal Token (fallback)
+            // Tenta Personal Token
             let api_secret_name = format!(
                 "projects/{}/secrets/clickup-api-token/versions/latest",
                 self.project_id
@@ -105,31 +106,20 @@ impl SecretManagerService {
             {
                 Ok(response) => {
                     if let Some(payload) = response.payload {
-                        match String::from_utf8(payload.data.to_vec()) {
-                            Ok(token) => {
-                                tracing::info!("ClickUp Personal Token recuperado do Secret Manager");
-                                return Ok(token);
-                            }
-                            Err(e) => {
-                                tracing::error!("Erro ao decodificar Personal Token: {}", e);
-                            }
+                        if let Ok(token) = String::from_utf8(payload.data.to_vec()) {
+                            tracing::info!("✅ ClickUp Personal Token recuperado do Secret Manager");
+                            return Ok(token);
                         }
                     }
                 }
-                Err(e) => {
-                    tracing::warn!("Personal Token não encontrado no Secret Manager: {}", e);
+                Err(_) => {
+                    tracing::debug!("Personal Token não encontrado no Secret Manager");
                 }
             }
         }
 
-        // PRIORIDADE 3: variável de ambiente
-        if let Ok(token) = env::var("clickup_api_token") {
-            tracing::debug!("Usando clickup_api_token da variável de ambiente");
-            return Ok(token);
-        }
-
         Err(anyhow::anyhow!(
-            "clickup_api_token não encontrado no Secret Manager (OAuth2 ou Personal) nem no ambiente"
+            "CLICKUP_ACCESS_TOKEN não configurado no ambiente e não encontrado no Secret Manager"
         ))
     }
 

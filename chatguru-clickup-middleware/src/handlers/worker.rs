@@ -381,6 +381,7 @@ async fn create_list(
 
 /// Struct simples para tasks existentes (quando obtidas por GET, não por create)
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 struct TaskInfo {
     pub id: String,
     pub name: String,

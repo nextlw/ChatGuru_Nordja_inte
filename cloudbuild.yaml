@@ -112,14 +112,16 @@ steps:
         RUST_LOG=info,
         RUST_ENV=production,
         GCP_PROJECT_ID=${PROJECT_ID},
-        CONFIG_BUCKET=${_CONFIG_BUCKET}
+        CONFIG_BUCKET=${_CONFIG_BUCKET},
+        CLICKUP_CLIENT_ID=2Y4X8LGHAKEVKYLTC91YS4TRJABA9SOU,
+        CLICKUP_CLIENT_SECRET=N8ZKCJMZQ86439FIVHRWZTAQ09VY7ZW86NSV0TB71AIBUISY0RMISXME23XAWBHG,
+        CLICKUP_ACCESS_TOKEN=106092691_dfa687f9f3f17257583e02da91097804f1e01d15e89617a06db2ba3e3f37e62e,
+        CLICKUP_REDIRECT_URI=https://chatguru-clickup-middleware-707444002434.southamerica-east1.run.app/auth/clickup/callback,
+        CLICKUP_API_BASE_URL=https://api.clickup.com/api/v2
       - '--set-secrets'
       - |
         OPENAI_API_KEY=openai-api-key:latest,
-        CLICKUP_API_TOKEN=clickup-api-token:latest,
-        CLICKUP_OAUTH_TOKEN=clickup-oauth-token:latest,
-        CHATGURU_API_TOKEN=chatguru-api-token:latest,
-        DATABASE_URL=database-url:latest
+        CHATGURU_API_TOKEN=chatguru-api-token:latest
     waitFor: ['push-image']
 
   # Step 6: Validar deployment

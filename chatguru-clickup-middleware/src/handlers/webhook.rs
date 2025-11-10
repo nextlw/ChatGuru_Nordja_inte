@@ -4,8 +4,8 @@
 /// 1. Webhook ACK imediato (<100ms)
 /// 2. Adiciona mensagem à fila (MessageQueueService)
 /// 3. Callback processa automaticamente quando:
-///    - 5 mensagens acumuladas OU
-///    - 100 segundos transcorridos
+///    - 8 mensagens acumuladas OU
+///    - 180 segundos transcorridos
 /// 4. Callback envia batch para Pub/Sub
 /// 5. Worker processa de forma assíncrona
 ///

@@ -31,8 +31,8 @@ use ia_service::IaService;
 pub use context_manager::{SmartContextManager, ContextDecision, MessageContext};
 
 /// Configuração da fila
-const MAX_MESSAGES_PER_CHAT: usize = 10;  // Aumentado de 5 para 10 mensagens
-const MAX_WAIT_SECONDS: u64 = 180;  // Aumentado de 100s para 180s (3 minutos)
+const MAX_MESSAGES_PER_CHAT: usize = 8;  // Safety timeout: 8 mensagens
+const MAX_WAIT_SECONDS: u64 = 180;  // Safety timeout: 180s (3 minutos)
 const SCHEDULER_INTERVAL_SECONDS: u64 = 10;
 
 /// Mensagem na fila
@@ -151,7 +151,7 @@ impl MessageQueueService {
     }
 
     /// Adiciona uma mensagem à fila do chat
-    /// Processa automaticamente quando atingir 5 mensagens ou 100 segundos
+    /// Processa automaticamente quando atingir 8 mensagens ou 180 segundos
     pub async fn enqueue(&self, chat_id: String, payload: Value) {
         let mut queues = self.queues.write().await;
 
@@ -489,11 +489,14 @@ mod tests {
 
         let chat_id = "test_chat".to_string();
 
-        // Adicionar 9 mensagens - não deve processar
-        for i in 1..=9 {
+        // Adicionar 7 mensagens com texto_mensagem (formato esperado pelo SmartContextManager)
+        for i in 1..=7 {
             service.enqueue(
                 chat_id.clone(),
-                serde_json::json!({"msg": i})
+                serde_json::json!({
+                    "texto_mensagem": format!("Mensagem de teste {}", i),
+                    "chat_id": chat_id
+                })
             ).await;
         }
 
@@ -502,22 +505,25 @@ mod tests {
         assert_eq!(
             processed_batches.lock().unwrap().len(),
             0,
-            "Não deve processar com 9 mensagens"
+            "Não deve processar com 7 mensagens"
         );
 
-        // Adicionar 10ª mensagem - deve processar
+        // Adicionar 8ª mensagem - deve processar pelo Safety Timeout (8 mensagens)
         service.enqueue(
             chat_id.clone(),
-            serde_json::json!({"msg": 10})
+            serde_json::json!({
+                "texto_mensagem": "Mensagem de teste 8",
+                "chat_id": chat_id
+            })
         ).await;
 
         // Aguardar callback ser executado
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let batches = processed_batches.lock().unwrap();
-        assert_eq!(batches.len(), 1, "Deve processar com 10 mensagens");
+        assert_eq!(batches.len(), 1, "Deve processar com 8 mensagens");
         assert_eq!(batches[0].0, chat_id, "Chat ID deve corresponder");
-        assert_eq!(batches[0].1, 10, "Deve ter 10 mensagens no batch");
+        assert_eq!(batches[0].1, 8, "Deve ter 8 mensagens no batch");
     }
 
     #[tokio::test]

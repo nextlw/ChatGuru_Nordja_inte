@@ -3,17 +3,12 @@ host = "0.0.0.0"
 port = 8080
 
 [clickup]
-base_url = "https://api.clickup.com/api/v2"
-token = "106092691_5a823a64061246a2fb9498f37fecb77540478eb28423d778f37aabcafbd602b9"
-# FALLBACK: Lista "Sem Identificação" → OUTUBRO 2025
-# Usada APENAS quando SmartFolderFinder não consegue encontrar o cliente
-# EM PRODUÇÃO: SmartFolderFinder encontra a lista correta e sobrescreve este valor
-list_id = "901321080769"
-
-CLICKUP_AUTH_TOKEN = "106092691_5a823a64061246a2fb9498f37fecb77540478eb28423d778f37aabcafbd602b9"
-CLICKUP_CLIENT_SECRET = "BSRK67G72NT3A0MF5492QVU2WRVL149FQTVM5JNRPAJI7OQ1RWJSTD19S7KF68P2"
-CLICKUP_CLIENT_ID = "9XDEGHVIVGL55DTWH5OB4NAKILDLD1GK"
+# ClickUp OAuth2 Credentials
+CLICKUP_CLIENT_ID="2Y4X8LGHAKEVKYLTC91YS4TRJABA9SOU"
+CLICKUP_CLIENT_SECRET="N8ZKCJMZQ86439FIVHRWZTAQ09VY7ZW86NSV0TB71AIBUISY0RMISXME23XAWBHG"
+CLICKUP_ACCESS_TOKEN="106092691_dfa687f9f3f17257583e02da91097804f1e01d15e89617a06db2ba3e3f37e62e"
 CLICKUP_REDIRECT_URI = "https://chatguru-clickup-middleware-707444002434.southamerica-east1.run.app/auth/clickup/callback"
+CLICKUP_API_BASE_URL="https://api.clickup.com/api/v2"
 
 
 [gcp]
