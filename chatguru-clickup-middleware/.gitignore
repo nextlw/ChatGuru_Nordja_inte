@@ -54,3 +54,8 @@ api_webclinic.html
 
 # Auto-generated ML patterns (learned dynamically)
 config/learned_patterns.json
+
+# Ignore GitHub workflows from vendored crates
+clickup_v2/.github/
+clickup_v2/.git/
+clickup_v2/target/
