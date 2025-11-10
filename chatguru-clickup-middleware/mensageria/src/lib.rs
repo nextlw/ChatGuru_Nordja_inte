@@ -165,29 +165,93 @@ impl MessageQueueService {
         // Criar fila se não existir
         let queue = queues.entry(chat_id.clone()).or_insert_with(ChatQueue::new);
 
-        // Extrair texto da mensagem ANTES de mover o payload
+        // Extrair texto da mensagem ANTES de mover o payload (clonar para ownership)
         let texto = payload.get("texto_mensagem")
             .and_then(|v| v.as_str())
-            .unwrap_or("");
+            .unwrap_or("")
+            .to_string(); // Clone para evitar borrow após move
         let texto_preview = if texto.len() > 80 {
             format!("{}...", &texto[..80])
         } else {
-            texto.to_string()
+            texto.clone()
         };
 
         // Adicionar mensagem
         queue.push(payload);
 
         tracing::info!(
-            "📬 Chat '{}': {} mensagens na fila (aguardando análise SmartContextManager)",
+            "📬 Chat '{}': {} mensagens na fila (aguardando análise incremental/SmartContextManager)",
             chat_id,
             queue.messages.len()
         );
 
-        // Verificar se está pronto para processar usando SmartContextManager
-        // Passar IaService se disponível para análise semântica com embeddings
-        let ia_service_ref = self.ia_service.as_ref().map(|arc| arc.as_ref());
-        let (is_ready, reason_opt) = queue.is_ready_to_process(ia_service_ref).await;
+        // 🆕 ANÁLISE INCREMENTAL: Verifica se conversa parece completa (gpt-4o-mini)
+        // Controlado pela variável de ambiente ENABLE_INCREMENTAL_ANALYSIS (default: false)
+        let mut is_ready = false;
+        let mut reason_opt: Option<String> = None;
+
+        let incremental_enabled = std::env::var("ENABLE_INCREMENTAL_ANALYSIS")
+            .unwrap_or_else(|_| "false".to_string())
+            .to_lowercase() == "true";
+
+        if incremental_enabled {
+            if let Some(ia_service) = self.ia_service.as_ref() {
+            // Extrair últimas 3 mensagens para contexto
+            let last_messages: Vec<String> = queue.messages.iter()
+                .rev()
+                .take(3)
+                .filter_map(|m| {
+                    m.payload.get("texto_mensagem")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                })
+                .collect();
+
+            // Chamar análise incremental (gpt-4o-mini, ~300ms, ~$0.0003/msg)
+            match ia_service.check_conversation_complete(
+                &texto,
+                queue.messages.len(),
+                if last_messages.is_empty() { None } else { Some(&last_messages) }
+            ).await {
+                Ok(result) => {
+                    tracing::info!(
+                        "⚡ Análise incremental chat '{}': complete={}, confidence={:.1}%, reason={}",
+                        chat_id,
+                        result.complete,
+                        result.confidence * 100.0,
+                        result.reason
+                    );
+
+                    // Processar se completo e confiança alta (>80%)
+                    if result.complete && result.confidence > 0.8 {
+                        is_ready = true;
+                        reason_opt = Some(format!(
+                            "Análise incremental: {} (confiança {:.0}%)",
+                            result.reason,
+                            result.confidence * 100.0
+                        ));
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "⚠️ Erro na análise incremental do chat '{}': {} (fallback para SmartContextManager)",
+                        chat_id,
+                        e
+                    );
+                }
+            }
+            }
+        }
+
+        // Fallback: Verificar com SmartContextManager se análise incremental não decidiu processar
+        if !is_ready {
+            let ia_service_ref = self.ia_service.as_ref().map(|arc| arc.as_ref());
+            let (smart_ready, smart_reason) = queue.is_ready_to_process(ia_service_ref).await;
+            is_ready = smart_ready;
+            if smart_ready {
+                reason_opt = smart_reason;
+            }
+        }
 
         if is_ready {
             let reason = reason_opt.unwrap_or_else(|| "Condição desconhecida".to_string());

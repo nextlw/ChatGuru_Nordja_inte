@@ -64,7 +64,7 @@ for i in {1..8}; do
   "message_type": "text",
   "campos_personalizados": {
     "Info_1": "Nexcode",
-    "Info_2": "William Duarte"
+    "Info_2": "Tarefas"
   },
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }

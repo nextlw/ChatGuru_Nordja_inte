@@ -64,6 +64,17 @@ impl Error for IaServiceError {}
 
 pub type IaResult<T> = Result<T, IaServiceError>;
 
+/// Resposta rápida de análise incremental
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConversationCompleteness {
+    /// Se a conversa parece completa e pronta para processar
+    pub complete: bool,
+    /// Nível de confiança (0.0 a 1.0)
+    pub confidence: f32,
+    /// Breve razão
+    pub reason: String,
+}
+
 /// Classificação de atividades retornada pela IA
 /// Mantém compatibilidade com OpenAIClassification do código legado
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -194,6 +205,110 @@ impl IaService {
     ) -> IaResult<ActivityClassification> {
         // O prompt já vem completo e formatado do caller
         self.classify_with_prompt(full_prompt).await
+    }
+
+    /// Análise incremental rápida: verifica se conversa parece completa
+    ///
+    /// Usa gpt-4o-mini para análise ultra-rápida e barata (~$0.0003/msg)
+    ///
+    /// # Argumentos
+    /// * `new_message` - Nova mensagem recebida
+    /// * `message_count` - Número de mensagens no contexto atual
+    /// * `last_messages` - Últimas 2-3 mensagens para contexto (opcional)
+    ///
+    /// # Retorna
+    /// `ConversationCompleteness` com `complete=true` se confiança > 80%
+    pub async fn check_conversation_complete(
+        &self,
+        new_message: &str,
+        message_count: usize,
+        last_messages: Option<&[String]>,
+    ) -> IaResult<ConversationCompleteness> {
+        tracing::debug!(
+            "🔍 Análise incremental: nova mensagem ({} msgs total)",
+            message_count
+        );
+
+        // Construir contexto mínimo
+        let context = if let Some(msgs) = last_messages {
+            format!(
+                "Contexto (últimas {} mensagens):\n{}\n\nNova mensagem: \"{}\"",
+                msgs.len(),
+                msgs.iter()
+                    .enumerate()
+                    .map(|(i, m)| format!("{}. {}", i + 1, m))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                new_message
+            )
+        } else {
+            format!("Nova mensagem: \"{}\"", new_message)
+        };
+
+        // Prompt ultra-compacto
+        let prompt = format!(
+            "{}\n\n\
+            Esta nova mensagem indica que a conversa está COMPLETA e pronta para virar task?\n\
+            \n\
+            CRITÉRIOS para complete=true:\n\
+            1. Mensagem de conclusão (\"ok\", \"obrigado\", \"pode fazer\", \"perfeito\")\n\
+            2. Todas as informações necessárias foram fornecidas\n\
+            3. Não há perguntas pendentes\n\
+            4. Objetivo da conversa ficou claro\n\
+            \n\
+            Se NÃO atender TODOS os critérios, marque complete=false.\n\
+            \n\
+            Responda APENAS com JSON:\n\
+            {{\n\
+              \"complete\": true/false,\n\
+              \"confidence\": 0.0-1.0,\n\
+              \"reason\": \"breve explicação (máx 10 palavras)\"\n\
+            }}",
+            context
+        );
+
+        // Chamada rápida com gpt-4o-mini
+        let request = CreateChatCompletionRequestArgs::default()
+            .model("gpt-4o-mini")
+            .messages(vec![ChatCompletionRequestMessage::User(
+                ChatCompletionRequestUserMessageArgs::default()
+                    .content(prompt)
+                    .build()
+                    .map_err(|e| IaServiceError::OpenAIError(format!("Failed to build message: {}", e)))?,
+            )])
+            .temperature(0.3) // Baixa variação
+            .max_tokens(50u16) // Resposta super curta
+            .response_format(ResponseFormat::JsonObject)
+            .build()
+            .map_err(|e| IaServiceError::OpenAIError(format!("Failed to build request: {}", e)))?;
+
+        let response = self
+            .client
+            .chat()
+            .create(request)
+            .await
+            .map_err(|e| IaServiceError::OpenAIError(format!("API call failed: {}", e)))?;
+
+        let content = response
+            .choices
+            .first()
+            .and_then(|choice| choice.message.content.as_ref())
+            .ok_or_else(|| IaServiceError::ParseError("No content in response".to_string()))?;
+
+        tracing::debug!("📋 Incremental analysis response: {}", content);
+
+        let result: ConversationCompleteness = serde_json::from_str(content).map_err(|e| {
+            IaServiceError::ParseError(format!("Failed to parse JSON: {}. Content: {}", e, content))
+        })?;
+
+        tracing::info!(
+            "✅ Análise incremental: complete={}, confidence={:.1}%, reason={}",
+            result.complete,
+            result.confidence * 100.0,
+            result.reason
+        );
+
+        Ok(result)
     }
 
     /// Classifica atividade usando prompt estruturado

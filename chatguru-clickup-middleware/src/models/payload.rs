@@ -71,6 +71,12 @@ pub struct ChatGuruPayload {
     pub chat_id: Option<String>,
     #[serde(default)]
     pub chat_created: Option<String>,
+
+    // Campos adicionados pela agregação de mensagens (batch processing)
+    #[serde(default)]
+    pub _batch_chat_id: Option<String>,
+    #[serde(default)]
+    pub _batch_size: Option<u32>,
 }
 
 impl ChatGuruPayload {
