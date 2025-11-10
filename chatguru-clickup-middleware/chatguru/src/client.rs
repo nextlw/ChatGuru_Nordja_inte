@@ -116,10 +116,16 @@ impl ChatGuruClient {
         // Construir URL com parâmetros
         let phone_id_value = "62558780e2923cc4705beee1"; // Phone ID padrão do sistema
 
-        // Limpar número de telefone (remover caracteres especiais)
-        let clean_phone = phone_number.chars()
-            .filter(|c| c.is_numeric())
+        // Formato E.164: +<country_code><number>
+        // Remove caracteres especiais mas mantém o "+" se existir
+        let mut clean_phone = phone_number.chars()
+            .filter(|c| c.is_numeric() || *c == '+')
             .collect::<String>();
+
+        // Adiciona "+" no início se não tiver
+        if !clean_phone.starts_with('+') && !clean_phone.is_empty() {
+            clean_phone = format!("+{}", clean_phone);
+        }
 
         // Construir URL com query params para adicionar anotação
         let base_url = if self.api_endpoint.ends_with("/api/v1") {
@@ -219,10 +225,16 @@ impl ChatGuruClient {
         // Construir URL com parâmetros
         let phone_id_value = phone_id.unwrap_or("62558780e2923cc4705beee1");
 
-        // Limpar número de telefone (remover caracteres especiais)
-        let clean_phone = phone_number.chars()
-            .filter(|c| c.is_numeric())
+        // Formato E.164: +<country_code><number>
+        // Remove caracteres especiais mas mantém o "+" se existir
+        let mut clean_phone = phone_number.chars()
+            .filter(|c| c.is_numeric() || *c == '+')
             .collect::<String>();
+
+        // Adiciona "+" no início se não tiver
+        if !clean_phone.starts_with('+') && !clean_phone.is_empty() {
+            clean_phone = format!("+{}", clean_phone);
+        }
 
         // Construir URL com query params
         // Se api_endpoint já contém /api/v1, não adicionar novamente
