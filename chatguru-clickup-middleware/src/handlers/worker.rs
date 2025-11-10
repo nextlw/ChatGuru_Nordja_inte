@@ -66,7 +66,16 @@ async fn process_message(state: Arc<AppState>, payload: WebhookPayload) -> Resul
     // 1. Extrair dados essenciais do payload ChatGuru
     let mensagem_texto = payload.texto_mensagem();
     let info_2 = payload.get_info_2(); // Nome do atendente
-    
+
+    // Se Info_2 está vazio, não é cliente - retornar imediatamente
+    if info_2.trim().is_empty() {
+        log_info("❌ Info_2 não informado - NÃO é cliente (campos_personalizados vazio)");
+        return Ok(json!({
+            "status": "not_client",
+            "message": "Info_2 não informado - não é cliente"
+        }));
+    }
+
     log_info(&format!("📩 Mensagem recebida - Atendente: {}", info_2));
 
     // 2. Buscar pasta do cliente usando Info_2 nos spaces do workspace

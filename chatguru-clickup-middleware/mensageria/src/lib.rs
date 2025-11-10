@@ -165,6 +165,16 @@ impl MessageQueueService {
         // Criar fila se não existir
         let queue = queues.entry(chat_id.clone()).or_insert_with(ChatQueue::new);
 
+        // Extrair texto da mensagem ANTES de mover o payload
+        let texto = payload.get("texto_mensagem")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let texto_preview = if texto.len() > 80 {
+            format!("{}...", &texto[..80])
+        } else {
+            texto.to_string()
+        };
+
         // Adicionar mensagem
         queue.push(payload);
 
@@ -241,9 +251,11 @@ impl MessageQueueService {
                 }
             }
         } else {
-            tracing::debug!(
-                "⏳ Chat '{}': Mensagem adicionada, aguardando mais ({}/{})",
+            // Log quando mensagem é adicionada à fila (como "Mensagem agrupada recebida" do legado)
+            tracing::info!(
+                "📥 Mensagem de chat '{}' agrupada recebida: {} ({}/{} msgs na fila)",
                 chat_id,
+                texto_preview,
                 queue.messages.len(),
                 MAX_MESSAGES_PER_CHAT
             );
@@ -274,7 +286,14 @@ impl MessageQueueService {
     async fn check_timeouts(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let queues = self.queues.read().await;
 
-        tracing::trace!("🔍 Verificando timeouts em {} filas ativas", queues.len());
+        if !queues.is_empty() {
+            let chat_list: Vec<String> = queues.keys().cloned().collect();
+            tracing::info!(
+                "🔍 Executando verificar_e_enviar_mensagens para {} chats: {:?}",
+                queues.len(),
+                chat_list
+            );
+        }
 
         // Coletar chat_ids para verificar (não podemos iterar e await ao mesmo tempo)
         let chat_ids: Vec<String> = queues.keys().cloned().collect();
@@ -303,6 +322,16 @@ impl MessageQueueService {
                     );
 
                     ready_chats.push((chat_id.clone(), message_count, elapsed));
+                } else {
+                    // Log quando aguardando mais mensagens (como o legado faz)
+                    let message_count = queue.messages.len();
+                    let elapsed = queue.first_message_at.elapsed().as_secs();
+                    tracing::info!(
+                        "⏳ Aguardando mais mensagens ou intervalo para chat '{}' ({} msgs, {}s)",
+                        chat_id,
+                        message_count,
+                        elapsed
+                    );
                 }
             }
         }
