@@ -40,11 +40,26 @@ pub async fn worker_process_message(
     let data_bytes = general_purpose::STANDARD.decode(data_base64)
         .map_err(|e| AppError::ValidationError(format!("Failed to decode base64: {}", e)))?;
 
-    let raw_payload_str = String::from_utf8(data_bytes)
+    let envelope_str = String::from_utf8(data_bytes)
         .map_err(|e| AppError::ValidationError(format!("Invalid UTF-8 in payload: {}", e)))?;
 
-    // Parsear o payload do ChatGuru
-    let payload: WebhookPayload = serde_json::from_str(&raw_payload_str)
+    log_info(&format!("🔍 DEBUG - Envelope recebido do Pub/Sub:\n{}",
+        &envelope_str[..envelope_str.len().min(500)]));
+
+    // Parsear o envelope primeiro
+    let envelope: Value = serde_json::from_str(&envelope_str)
+        .map_err(|e| AppError::ValidationError(format!("Invalid envelope JSON: {}", e)))?;
+
+    // Extrair raw_payload do envelope (que é uma STRING serializada)
+    let raw_payload_str = envelope.get("raw_payload")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AppError::ValidationError("Missing raw_payload in envelope".to_string()))?;
+
+    log_info(&format!("🔍 DEBUG - raw_payload extraído:\n{}",
+        &raw_payload_str[..raw_payload_str.len().min(500)]));
+
+    // Parsear o payload do ChatGuru a partir do raw_payload
+    let payload: WebhookPayload = serde_json::from_str(raw_payload_str)
         .map_err(|e| AppError::ValidationError(format!("Invalid payload JSON: {}", e)))?;
 
     // Processar mensagem
