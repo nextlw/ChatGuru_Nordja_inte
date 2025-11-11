@@ -76,11 +76,101 @@ pub async fn worker_process_message(
     }
 }
 
+/// Detecta e processa áudio se presente no payload
+async fn detect_and_process_audio(
+    state: &AppState,
+    payload: &WebhookPayload,
+) -> Result<Option<String>, AppError> {
+    // Verificar se há áudio no payload
+    let (media_url, media_type, phone_number) = match payload {
+        WebhookPayload::ChatGuru(p) => {
+            // Normalizar campos de mídia (tipo_mensagem + url_arquivo → media_type + media_url)
+            let mut payload_clone = p.clone();
+            payload_clone.normalize_media_fields();
+
+            (payload_clone.media_url, payload_clone.media_type, p.celular.clone())
+        },
+        _ => (None, None, String::new()), // Outros tipos de payload não suportam áudio por enquanto
+    };
+
+    // Se não há mídia, retornar None
+    let media_url = match media_url {
+        Some(url) => url,
+        None => return Ok(None),
+    };
+
+    let media_type = match media_type {
+        Some(t) => t,
+        None => return Ok(None),
+    };
+
+    // Verificar se é áudio
+    if !media_type.contains("audio") && !media_type.contains("ptt") && !media_type.contains("voice") {
+        log_info(&format!("📎 Mídia detectada mas não é áudio: {}", media_type));
+        return Ok(None);
+    }
+
+    log_info(&format!("🎤 Áudio detectado: {} ({})", media_url, media_type));
+
+    // Verificar se IA Service está disponível
+    let ia_service = state.ia_service.as_ref()
+        .ok_or_else(|| AppError::ServiceUnavailable("IA Service não disponível".to_string()))?;
+
+    // Baixar áudio
+    log_info("⬇️ Baixando áudio...");
+    let audio_bytes = ia_service.download_audio(&media_url)
+        .await
+        .map_err(|e| AppError::InternalError(format!("Erro ao baixar áudio: {}", e)))?;
+
+    // Detectar extensão do arquivo
+    let extension = media_url
+        .split('.')
+        .last()
+        .and_then(|ext| ext.split('?').next())
+        .unwrap_or("ogg");
+    let filename = format!("audio.{}", extension);
+
+    // Transcrever áudio
+    log_info(&format!("🎤 Transcrevendo áudio: {} bytes", audio_bytes.len()));
+    let transcription = ia_service.transcribe_audio(&audio_bytes, &filename)
+        .await
+        .map_err(|e| AppError::InternalError(format!("Erro ao transcrever áudio: {}", e)))?;
+
+    log_info(&format!("✅ Áudio transcrito: {} caracteres", transcription.len()));
+
+    // Enviar mensagem com a transcrição ao ChatGuru
+    let message = format!(
+        "Estamos transcrevendo sua mensagem...\n\n📝 Transcrição:\n\"{}\"",
+        transcription
+    );
+
+    log_info(&format!("📤 Enviando transcrição ao ChatGuru para {}", phone_number));
+    state.chatguru()
+        .send_confirmation_message(&phone_number, None, &message)
+        .await
+        .map_err(|e| AppError::InternalError(format!("Erro ao enviar mensagem: {}", e)))?;
+
+    log_info("✅ Transcrição enviada com sucesso ao ChatGuru");
+
+    Ok(Some(transcription))
+}
+
 /// Função principal que implementa o fluxo especificado no prompt original
 async fn process_message(state: Arc<AppState>, payload: WebhookPayload) -> Result<Value, AppError> {
     // 1. Extrair dados essenciais do payload ChatGuru
-    let mensagem_texto = payload.texto_mensagem();
+    let mut mensagem_texto = payload.texto_mensagem();
     let info_2 = payload.get_info_2(); // Nome do atendente
+
+    // 1.1. Processar áudio se presente no payload
+    if let Some(transcription) = detect_and_process_audio(&state, &payload).await? {
+        // Adicionar transcrição ao texto da mensagem para classificação
+        if mensagem_texto.is_empty() {
+            mensagem_texto = transcription;
+        } else {
+            mensagem_texto = format!("{}\n\n[Áudio transcrito]: {}", mensagem_texto, transcription);
+        }
+        log_info(&format!("📝 Mensagem atualizada com transcrição de áudio"));
+    }
 
     // Se Info_2 está vazio, não é cliente - retornar imediatamente
     if info_2.trim().is_empty() {

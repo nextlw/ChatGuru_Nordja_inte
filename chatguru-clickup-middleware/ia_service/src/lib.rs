@@ -991,6 +991,9 @@ mod tests {
             list_name: None,
             info_1: None,
             info_2: None,
+            is_duplicate: false,
+            existing_task_title: None,
+            title: Some("Nova atividade de teste".to_string()),
         };
 
         let json = serde_json::to_string(&classification).unwrap();
