@@ -1070,6 +1070,8 @@ response_format: |
   {
     "is_activity": true/false,
     "reason": "breve justificativa da classificação (1 frase curta)",
+    "is_duplicate": true/false,
+    "existing_task_title": "título exato da task similar encontrada (ou null se is_duplicate=false)",
     "title": "título curto e profissional para a tarefa com NO MÁXIMO 6 palavras",
     "tipo_atividade": "{{activity_types_exact}}",
     "category": "{{categories_exact}}",
