@@ -77,6 +77,14 @@ pub struct ChatGuruPayload {
     pub _batch_chat_id: Option<String>,
     #[serde(default)]
     pub _batch_size: Option<u32>,
+
+    // Campos para mensagens sintéticas (processamento imediato de mídia)
+    /// Indica se esta mensagem é sintética (gerada pelo processamento de mídia no webhook)
+    #[serde(default)]
+    pub _is_synthetic: Option<bool>,
+    /// Tipo original da mídia processada (ex: "audio/ogg", "image/jpeg")
+    #[serde(default)]
+    pub _original_media_type: Option<String>,
 }
 
 impl ChatGuruPayload {

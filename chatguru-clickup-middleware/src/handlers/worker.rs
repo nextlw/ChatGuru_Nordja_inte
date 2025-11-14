@@ -30,6 +30,35 @@ pub async fn worker_process_message(
     let start_time = tokio::time::Instant::now();
     log_request_received("/worker/process", "POST");
 
+    // 🔒 DEDUPLICAÇÃO: Extrair message_id do Pub/Sub para evitar reprocessamento
+    let message_id = body.get("message")
+        .and_then(|m| m.get("messageId"))
+        .and_then(|id| id.as_str())
+        .unwrap_or("unknown");
+
+    // Verificar se já processamos esta mensagem
+    {
+        let mut cache = state.processed_messages.lock().unwrap();
+
+        // Limpar mensagens antigas (mais de 1 hora)
+        let now = std::time::Instant::now();
+        cache.retain(|_, timestamp| now.duration_since(*timestamp).as_secs() < 3600);
+
+        // Se já foi processada, retornar sucesso imediatamente (ACK sem reprocessar)
+        if cache.contains_key(message_id) {
+            log_info(&format!("⚠️ Mensagem duplicada detectada (message_id: {}). Pulando processamento.", message_id));
+            return Ok(Json(json!({
+                "status": "duplicate_message",
+                "message_id": message_id,
+                "message": "Mensagem já foi processada anteriormente"
+            })));
+        }
+
+        // Marcar mensagem como processada
+        cache.insert(message_id.to_string(), now);
+        log_info(&format!("✅ Mensagem marcada como processada (message_id: {})", message_id));
+    }
+
     // Extrair data do envelope Pub/Sub (formato: message.data em base64)
     let data_base64 = body.get("message")
         .and_then(|m| m.get("data"))
@@ -76,101 +105,16 @@ pub async fn worker_process_message(
     }
 }
 
-/// Detecta e processa áudio se presente no payload
-async fn detect_and_process_audio(
-    state: &AppState,
-    payload: &WebhookPayload,
-) -> Result<Option<String>, AppError> {
-    // Verificar se há áudio no payload
-    let (media_url, media_type, phone_number) = match payload {
-        WebhookPayload::ChatGuru(p) => {
-            // Normalizar campos de mídia (tipo_mensagem + url_arquivo → media_type + media_url)
-            let mut payload_clone = p.clone();
-            payload_clone.normalize_media_fields();
-
-            (payload_clone.media_url, payload_clone.media_type, p.celular.clone())
-        },
-        _ => (None, None, String::new()), // Outros tipos de payload não suportam áudio por enquanto
-    };
-
-    // Se não há mídia, retornar None
-    let media_url = match media_url {
-        Some(url) => url,
-        None => return Ok(None),
-    };
-
-    let media_type = match media_type {
-        Some(t) => t,
-        None => return Ok(None),
-    };
-
-    // Verificar se é áudio
-    if !media_type.contains("audio") && !media_type.contains("ptt") && !media_type.contains("voice") {
-        log_info(&format!("📎 Mídia detectada mas não é áudio: {}", media_type));
-        return Ok(None);
-    }
-
-    log_info(&format!("🎤 Áudio detectado: {} ({})", media_url, media_type));
-
-    // Verificar se IA Service está disponível
-    let ia_service = state.ia_service.as_ref()
-        .ok_or_else(|| AppError::ServiceUnavailable("IA Service não disponível".to_string()))?;
-
-    // Baixar áudio
-    log_info("⬇️ Baixando áudio...");
-    let audio_bytes = ia_service.download_audio(&media_url)
-        .await
-        .map_err(|e| AppError::InternalError(format!("Erro ao baixar áudio: {}", e)))?;
-
-    // Detectar extensão do arquivo
-    let extension = media_url
-        .split('.')
-        .last()
-        .and_then(|ext| ext.split('?').next())
-        .unwrap_or("ogg");
-    let filename = format!("audio.{}", extension);
-
-    // Transcrever áudio
-    log_info(&format!("🎤 Transcrevendo áudio: {} bytes", audio_bytes.len()));
-    let transcription = ia_service.transcribe_audio(&audio_bytes, &filename)
-        .await
-        .map_err(|e| AppError::InternalError(format!("Erro ao transcrever áudio: {}", e)))?;
-
-    log_info(&format!("✅ Áudio transcrito: {} caracteres", transcription.len()));
-
-    // Enviar mensagem com a transcrição ao ChatGuru
-    let message = format!(
-        "Estamos transcrevendo sua mensagem...\n\n📝 Transcrição:\n\"{}\"",
-        transcription
-    );
-
-    log_info(&format!("📤 Enviando transcrição ao ChatGuru para {}", phone_number));
-    state.chatguru()
-        .send_confirmation_message(&phone_number, None, &message)
-        .await
-        .map_err(|e| AppError::InternalError(format!("Erro ao enviar mensagem: {}", e)))?;
-
-    log_info("✅ Transcrição enviada com sucesso ao ChatGuru");
-
-    Ok(Some(transcription))
-}
-
 /// Função principal que implementa o fluxo especificado no prompt original
 async fn process_message(state: Arc<AppState>, payload: WebhookPayload) -> Result<Value, AppError> {
     // 1. Extrair dados essenciais do payload ChatGuru
-    let mut mensagem_texto = payload.texto_mensagem();
+    let mensagem_texto = payload.texto_mensagem();
     let info_2 = payload.get_info_2(); // Nome do atendente
 
-    // 1.1. Processar áudio se presente no payload
-    if let Some(transcription) = detect_and_process_audio(&state, &payload).await? {
-        // Adicionar transcrição ao texto da mensagem para classificação
-        if mensagem_texto.is_empty() {
-            mensagem_texto = transcription;
-        } else {
-            mensagem_texto = format!("{}\n\n[Áudio transcrito]: {}", mensagem_texto, transcription);
-        }
-        log_info(&format!("📝 Mensagem atualizada com transcrição de áudio"));
-    }
+    // NOTA: Processamento de mídia (áudio/imagem/PDF) agora é feito no WEBHOOK
+    // antes de enqueue, para evitar expiração de URLs do S3 (5min).
+    // Se a mensagem contém mídia, ela já foi processada e o texto_mensagem
+    // contém a transcrição/descrição extraída.
 
     // Se Info_2 está vazio, não é cliente - retornar imediatamente
     if info_2.trim().is_empty() {

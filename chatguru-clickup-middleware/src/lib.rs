@@ -11,6 +11,8 @@ pub mod middleware; // ✅ Middleware para autenticação e validação
 // AppState é definido aqui para ser compartilhado
 // Versão event-driven: SEM scheduler, SEM database
 use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::Mutex;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -22,6 +24,7 @@ pub struct AppState {
     pub clickup_api_token: String,  // Token para chamadas diretas à API
     pub clickup_workspace_id: String,  // Workspace/Team ID
     pub custom_fields_mappings: Arc<config::CustomFieldsMappings>,  // ✅ Mapeamentos de custom fields
+    pub processed_messages: Arc<Mutex<HashMap<String, std::time::Instant>>>,  // ✅ Cache de mensagens processadas (deduplicação)
 }
 
 impl AppState {

@@ -470,6 +470,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         clickup_api_token: clickup_token,
         clickup_workspace_id: workspace_id,
         custom_fields_mappings,
+        processed_messages: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),  // ✅ Cache de deduplicação
     });
 
     log_info("Event-driven architecture com Message Queue");
@@ -677,6 +678,7 @@ async fn publish_batch_to_pubsub(
             clickup_api_token: clickup_token,
             clickup_workspace_id: workspace_id,
             custom_fields_mappings,
+            processed_messages: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),  // ✅ Cache de deduplicação
         });
 
         // Chamar worker diretamente

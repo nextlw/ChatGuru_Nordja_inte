@@ -29,6 +29,185 @@ use uuid;
 use chatguru_clickup_middleware::utils::AppError;
 use chatguru_clickup_middleware::utils::logging::*;
 use chatguru_clickup_middleware::AppState;
+use chatguru_clickup_middleware::models::payload::ChatGuruPayload;
+
+/// Processa mídia imediatamente (antes de expirar URLs do S3)
+///
+/// # Argumentos
+/// * `state` - AppState com IA Service e ChatGuru client
+/// * `payload` - Payload original do ChatGuru
+///
+/// # Retorna
+/// - `Some(synthetic_payload)` - Se mídia foi processada com sucesso
+/// - `None` - Se não há mídia ou processamento falhou (payload original deve ser usado)
+async fn process_media_immediately(
+    state: &Arc<AppState>,
+    payload: &mut Value,
+) -> Option<Value> {
+    log_info("🔍 Verificando presença de mídia no payload...");
+
+    // Tentar parsear como ChatGuruPayload para acessar métodos de normalização
+    let mut chatguru_payload: ChatGuruPayload = match serde_json::from_value(payload.clone()) {
+        Ok(p) => p,
+        Err(e) => {
+            log_warning(&format!("⚠️ Não foi possível parsear como ChatGuruPayload: {}", e));
+            return None;
+        }
+    };
+
+    // Normalizar campos de mídia
+    chatguru_payload.normalize_media_fields();
+
+    // Verificar se há mídia
+    let media_url = chatguru_payload.media_url.as_ref()?;
+    let media_type = chatguru_payload.media_type.as_ref()?;
+
+    if media_url.is_empty() {
+        return None;
+    }
+
+    log_info(&format!("📎 Mídia detectada: {} ({})", media_url, media_type));
+
+    // Verificar se IA Service está disponível
+    let ia_service = match state.ia_service.as_ref() {
+        Some(service) => service,
+        None => {
+            log_error("❌ IA Service não disponível - skipping processamento de mídia");
+            return None;
+        }
+    };
+
+    // Determinar tipo de mídia e processar
+    let processed_result = if media_type.contains("audio") || media_type.contains("ptt") || media_type.contains("voice") {
+        // ÁUDIO: Baixar e transcrever
+        log_info("🎤 Processando áudio...");
+
+        match ia_service.download_audio(media_url).await {
+            Ok(audio_bytes) => {
+                let extension = media_url
+                    .split('.')
+                    .last()
+                    .and_then(|ext| ext.split('?').next())
+                    .unwrap_or("ogg");
+                let filename = format!("audio.{}", extension);
+
+                match ia_service.transcribe_audio(&audio_bytes, &filename).await {
+                    Ok(transcription) => {
+                        log_info(&format!("✅ Áudio transcrito: {} caracteres", transcription.len()));
+
+                        // Enviar anotação ao ChatGuru
+                        let annotation = format!(
+                            "🎵 **Áudio Transcrito**\n\n\"{}\"\n\nℹ️ A transcrição foi processada automaticamente.",
+                            transcription
+                        );
+
+                        let phone_number = chatguru_payload.celular.as_str();
+                        if let Err(e) = state.chatguru().send_confirmation_message(phone_number, None, &annotation).await {
+                            log_warning(&format!("⚠️ Falha ao enviar anotação ao ChatGuru: {}", e));
+                        } else {
+                            log_info("✅ Anotação enviada ao ChatGuru com sucesso");
+                        }
+
+                        Some((transcription, media_type.clone()))
+                    }
+                    Err(e) => {
+                        log_error(&format!("❌ Erro ao transcrever áudio: {}", e));
+                        None
+                    }
+                }
+            }
+            Err(e) => {
+                log_error(&format!("❌ Erro ao baixar áudio: {}", e));
+                None
+            }
+        }
+    } else if media_type.contains("image") {
+        // IMAGEM: Baixar e descrever
+        log_info("🖼️ Processando imagem...");
+
+        match ia_service.download_image(media_url).await {
+            Ok(image_bytes) => {
+                match ia_service.describe_image(&image_bytes).await {
+                    Ok(description) => {
+                        log_info(&format!("✅ Imagem descrita: {} caracteres", description.len()));
+                        Some((description, media_type.clone()))
+                    }
+                    Err(e) => {
+                        log_error(&format!("❌ Erro ao descrever imagem: {}", e));
+                        None
+                    }
+                }
+            }
+            Err(e) => {
+                log_error(&format!("❌ Erro ao baixar imagem: {}", e));
+                None
+            }
+        }
+    } else if media_type.contains("pdf") || media_type.contains("application/pdf") {
+        // PDF: Baixar e extrair texto
+        log_info("📄 Processando PDF...");
+
+        match ia_service.download_file(media_url, "PDF").await {
+            Ok(pdf_bytes) => {
+                match ia_service.process_pdf(&pdf_bytes).await {
+                    Ok(text) => {
+                        log_info(&format!("✅ PDF processado: {} caracteres extraídos", text.len()));
+                        Some((text, media_type.clone()))
+                    }
+                    Err(e) => {
+                        log_error(&format!("❌ Erro ao processar PDF: {}", e));
+                        None
+                    }
+                }
+            }
+            Err(e) => {
+                log_error(&format!("❌ Erro ao baixar PDF: {}", e));
+                None
+            }
+        }
+    } else {
+        log_warning(&format!("⚠️ Tipo de mídia não suportado: {}", media_type));
+        None
+    };
+
+    // Se processamento falhou, retornar None (usar payload original)
+    let (extracted_content, original_media_type) = match processed_result {
+        Some(result) => result,
+        None => return None,
+    };
+
+    // Criar payload sintético
+    log_info("📝 Criando payload sintético com conteúdo extraído...");
+
+    // Atualizar texto_mensagem com conteúdo extraído
+    chatguru_payload.texto_mensagem = if chatguru_payload.texto_mensagem.is_empty() {
+        extracted_content
+    } else {
+        format!("{}\n\n[Mídia processada]: {}", chatguru_payload.texto_mensagem, extracted_content)
+    };
+
+    // Marcar como sintético
+    chatguru_payload._is_synthetic = Some(true);
+    chatguru_payload._original_media_type = Some(original_media_type);
+
+    // Remover URLs de mídia (já foram processadas)
+    chatguru_payload.media_url = None;
+    chatguru_payload.media_type = None;
+    chatguru_payload.url_arquivo = None;
+    chatguru_payload.tipo_mensagem = None;
+
+    // Converter de volta para Value
+    match serde_json::to_value(&chatguru_payload) {
+        Ok(synthetic_payload) => {
+            log_info("✅ Payload sintético criado com sucesso");
+            Some(synthetic_payload)
+        }
+        Err(e) => {
+            log_error(&format!("❌ Erro ao serializar payload sintético: {}", e));
+            None
+        }
+    }
+}
 
 /// Handler principal do webhook
 /// Retorna Success imediatamente após enviar para Pub/Sub
@@ -127,13 +306,40 @@ pub async fn handle_webhook(
         message_text
     ));
 
+    // PROCESSAMENTO IMEDIATO DE MÍDIA (antes de expirar URLs do S3)
+    let mut final_payload = payload.clone();
+
+    if has_media {
+        log_info(&format!(
+            "🎬 INICIANDO PROCESSAMENTO DE MÍDIA - RequestID: {} | ChatID: {}",
+            request_id, chat_id
+        ));
+
+        match process_media_immediately(&state, &mut final_payload).await {
+            Some(synthetic_payload) => {
+                log_info(&format!(
+                    "✅ MÍDIA PROCESSADA - RequestID: {} | ChatID: {} | Payload sintético criado",
+                    request_id, chat_id
+                ));
+                final_payload = synthetic_payload;
+            }
+            None => {
+                log_warning(&format!(
+                    "⚠️ FALHA AO PROCESSAR MÍDIA - RequestID: {} | ChatID: {} | Usando payload original",
+                    request_id, chat_id
+                ));
+                // final_payload já é o payload original
+            }
+        }
+    }
+
     log_info(&format!(
         "📬 ADICIONANDO À FILA - RequestID: {} | ChatID: {} | Queue size: estimating...",
         request_id, chat_id
     ));
 
     // Adicionar à fila (processa automaticamente quando atingir 5 msgs ou 100s via callback)
-    state.message_queue.enqueue(chat_id.clone(), payload).await;
+    state.message_queue.enqueue(chat_id.clone(), final_payload).await;
 
     let processing_time = start_time.elapsed().as_millis() as u64;
     
