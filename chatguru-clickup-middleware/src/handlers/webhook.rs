@@ -246,6 +246,13 @@ pub async fn handle_webhook(
         request_id
     ));
 
+    // LOG DO PAYLOAD COMPLETO (RAW) para debug no GCloud
+    log_info(&format!(
+        "📋 PAYLOAD RAW COMPLETO - RequestID: {} | JSON: {}",
+        request_id,
+        serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "Error serializing payload".to_string())
+    ));
+
     // Extrair chat_id do payload
     let chat_id = payload
         .get("chat_id")
@@ -263,12 +270,18 @@ pub async fn handle_webhook(
         .get("message_type")
         .and_then(|v| v.as_str())
         .unwrap_or("text");
-    
+
+    // Verificar AMBOS os formatos de mídia: media_url (antigo) e url_arquivo (novo ChatGuru)
     let has_media = payload
         .get("media_url")
         .and_then(|v| v.as_str())
-        .map(|url| !url.is_empty())
-        .unwrap_or(false);
+        .filter(|s| !s.is_empty())
+        .is_some()
+        || payload
+            .get("url_arquivo")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .is_some();
 
     // Extrair texto da mensagem (truncado para logs)
     let message_text = payload
