@@ -101,18 +101,72 @@ impl ChatGuruPayload {
             self.media_url = self.url_arquivo.clone();
         }
 
-        // Mapear tipo_mensagem → media_type
+        // Mapear tipo_mensagem → media_type (se tipo_mensagem for útil)
         if let Some(ref tipo) = self.tipo_mensagem {
             if self.media_type.is_none() {
                 self.media_type = Some(match tipo.as_str() {
                     "image" => "image/jpeg".to_string(),
                     "ptt" => "audio/ogg".to_string(), // ptt = push-to-talk (áudio)
                     "audio" => "audio/ogg".to_string(),
+                    "voice" => "audio/ogg".to_string(),
                     "video" => "video/mp4".to_string(),
                     "document" => "application/pdf".to_string(),
-                    other => format!("application/{}", other),
+                    // Se tipo_mensagem não for útil (ex: "chat"), tentar detectar pela URL
+                    _ => {
+                        if let Some(ref url) = self.media_url {
+                            Self::detect_media_type_from_url(url)
+                        } else if let Some(ref url) = self.url_arquivo {
+                            Self::detect_media_type_from_url(url)
+                        } else {
+                            "application/octet-stream".to_string()
+                        }
+                    }
                 });
             }
+        } else {
+            // Se não tem tipo_mensagem, tentar detectar pela URL
+            if self.media_type.is_none() {
+                if let Some(ref url) = self.media_url {
+                    self.media_type = Some(Self::detect_media_type_from_url(url));
+                } else if let Some(ref url) = self.url_arquivo {
+                    self.media_type = Some(Self::detect_media_type_from_url(url));
+                }
+            }
+        }
+    }
+
+    /// Detecta o tipo de mídia pela extensão da URL
+    fn detect_media_type_from_url(url: &str) -> String {
+        // Remover query params e pegar apenas o path
+        let path = url.split('?').next().unwrap_or(url);
+        let extension = path.split('.').last().unwrap_or("").to_lowercase();
+
+        match extension.as_str() {
+            // Imagens
+            "jpg" | "jpeg" => "image/jpeg".to_string(),
+            "png" => "image/png".to_string(),
+            "gif" => "image/gif".to_string(),
+            "webp" => "image/webp".to_string(),
+
+            // Áudios
+            "ogg" | "oga" => "audio/ogg".to_string(),
+            "mp3" => "audio/mpeg".to_string(),
+            "wav" => "audio/wav".to_string(),
+            "m4a" => "audio/mp4".to_string(),
+            "opus" => "audio/opus".to_string(),
+
+            // Vídeos
+            "mp4" => "video/mp4".to_string(),
+            "webm" => "video/webm".to_string(),
+            "avi" => "video/x-msvideo".to_string(),
+
+            // Documentos
+            "pdf" => "application/pdf".to_string(),
+            "doc" | "docx" => "application/msword".to_string(),
+            "xls" | "xlsx" => "application/vnd.ms-excel".to_string(),
+
+            // Fallback
+            _ => "application/octet-stream".to_string(),
         }
     }
 }
