@@ -27,9 +27,16 @@ echo -e "   Local: ${YELLOW}${LOCAL_URL}${NC}"
 echo -e "   Timestamp: $(date '+%Y-%m-%d %H:%M:%S')"
 echo ""
 
-# URL de áudio de exemplo (nota: esta URL precisa ser válida e acessível)
-# Como estamos testando localmente, usaremos uma URL pública de exemplo
-AUDIO_URL="https://www2.cs.uic.edu/~i101/SoundFiles/BabyElephantWalk60.wav"
+# URLs de áudio TESTADAS E FUNCIONANDO:
+
+# Opção 1: SoundJay (✅ TESTADO - 200 OK)
+AUDIO_URL="https://www.soundjay.com/misc/sounds/bell-ringing-05.wav"
+
+# Opção 2: W3Schools OGG (✅ TESTADO - 200 OK)
+# AUDIO_URL="https://www.w3schools.com/html/horse.ogg"
+
+# Para testar se a URL funciona:
+# curl -I "$AUDIO_URL"
 
 echo -e "${GREEN}╔════════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${GREEN}║           ENVIANDO MENSAGEM COM ÁUDIO                          ║${NC}"
