@@ -31,6 +31,9 @@ use chatguru_clickup_middleware::utils::logging::*;
 use chatguru_clickup_middleware::AppState;
 use chatguru_clickup_middleware::models::payload::ChatGuruPayload;
 
+// Importar função de publicação direta (definida em main.rs)
+use crate::publish_single_message_to_pubsub;
+
 /// Processa mídia imediatamente (antes de expirar URLs do S3)
 ///
 /// # Argumentos
@@ -38,12 +41,14 @@ use chatguru_clickup_middleware::models::payload::ChatGuruPayload;
 /// * `payload` - Payload original do ChatGuru
 ///
 /// # Retorna
-/// - `Some(synthetic_payload)` - Se mídia foi processada com sucesso
+/// - `Some((synthetic_payload, is_audio))` - Se mídia foi processada com sucesso
+///   - `synthetic_payload`: Payload sintético com conteúdo extraído
+///   - `is_audio`: `true` se é áudio, `false` caso contrário
 /// - `None` - Se não há mídia ou processamento falhou (payload original deve ser usado)
 async fn process_media_immediately(
     state: &Arc<AppState>,
     payload: &mut Value,
-) -> Option<Value> {
+) -> Option<(Value, bool)> {
     log_info("🔍 Verificando presença de mídia no payload...");
 
     // Tentar parsear como ChatGuruPayload para acessar métodos de normalização
@@ -108,7 +113,28 @@ async fn process_media_immediately(
                             log_info("✅ Anotação enviada ao ChatGuru com sucesso");
                         }
 
-                        Some((transcription, media_type.clone()))
+                        // Preparar payload sintético
+                        let mut synthetic_payload = chatguru_payload.clone();
+                        synthetic_payload.texto_mensagem = if synthetic_payload.texto_mensagem.is_empty() {
+                            transcription.clone()
+                        } else {
+                            format!("{}\n\n[Mídia processada]: {}", synthetic_payload.texto_mensagem, transcription)
+                        };
+                        synthetic_payload._is_synthetic = Some(true);
+                        synthetic_payload._original_media_type = Some(media_type.clone());
+                        synthetic_payload.media_url = None;
+                        synthetic_payload.media_type = None;
+                        synthetic_payload.url_arquivo = None;
+                        synthetic_payload.tipo_mensagem = None;
+
+                        // Converter para Value
+                        match serde_json::to_value(&synthetic_payload) {
+                            Ok(payload_value) => Some((payload_value, true)), // true = é áudio
+                            Err(e) => {
+                                log_error(&format!("❌ Erro ao serializar payload sintético: {}", e));
+                                None
+                            }
+                        }
                     }
                     Err(e) => {
                         log_error(&format!("❌ Erro ao transcrever áudio: {}", e));
@@ -127,11 +153,32 @@ async fn process_media_immediately(
 
         match ia_service.download_image(media_url).await {
             Ok(image_bytes) => {
-                match ia_service.describe_image(&image_bytes).await {
-                    Ok(description) => {
-                        log_info(&format!("✅ Imagem descrita: {} caracteres", description.len()));
-                        Some((description, media_type.clone()))
-                    }
+                    match ia_service.describe_image(&image_bytes).await {
+                        Ok(description) => {
+                            log_info(&format!("✅ Imagem descrita: {} caracteres", description.len()));
+
+                            // Preparar payload sintético para imagem
+                            let mut synthetic_payload = chatguru_payload.clone();
+                            synthetic_payload.texto_mensagem = if synthetic_payload.texto_mensagem.is_empty() {
+                                description.clone()
+                            } else {
+                                format!("{}\n\n[Mídia processada]: {}", synthetic_payload.texto_mensagem, description)
+                            };
+                            synthetic_payload._is_synthetic = Some(true);
+                            synthetic_payload._original_media_type = Some(media_type.clone());
+                            synthetic_payload.media_url = None;
+                            synthetic_payload.media_type = None;
+                            synthetic_payload.url_arquivo = None;
+                            synthetic_payload.tipo_mensagem = None;
+
+                            match serde_json::to_value(&synthetic_payload) {
+                                Ok(payload_value) => Some((payload_value, false)), // false = não é áudio
+                                Err(e) => {
+                                    log_error(&format!("❌ Erro ao serializar payload sintético: {}", e));
+                                    None
+                                }
+                            }
+                        }
                     Err(e) => {
                         log_error(&format!("❌ Erro ao descrever imagem: {}", e));
                         None
@@ -152,7 +199,28 @@ async fn process_media_immediately(
                 match ia_service.process_pdf(&pdf_bytes).await {
                     Ok(text) => {
                         log_info(&format!("✅ PDF processado: {} caracteres extraídos", text.len()));
-                        Some((text, media_type.clone()))
+
+                        // Preparar payload sintético para PDF
+                        let mut synthetic_payload = chatguru_payload.clone();
+                        synthetic_payload.texto_mensagem = if synthetic_payload.texto_mensagem.is_empty() {
+                            text.clone()
+                        } else {
+                            format!("{}\n\n[Mídia processada]: {}", synthetic_payload.texto_mensagem, text)
+                        };
+                        synthetic_payload._is_synthetic = Some(true);
+                        synthetic_payload._original_media_type = Some(media_type.clone());
+                        synthetic_payload.media_url = None;
+                        synthetic_payload.media_type = None;
+                        synthetic_payload.url_arquivo = None;
+                        synthetic_payload.tipo_mensagem = None;
+
+                        match serde_json::to_value(&synthetic_payload) {
+                            Ok(payload_value) => Some((payload_value, false)), // false = não é áudio
+                            Err(e) => {
+                                log_error(&format!("❌ Erro ao serializar payload sintético: {}", e));
+                                None
+                            }
+                        }
                     }
                     Err(e) => {
                         log_error(&format!("❌ Erro ao processar PDF: {}", e));
@@ -170,42 +238,14 @@ async fn process_media_immediately(
         None
     };
 
-    // Se processamento falhou, retornar None (usar payload original)
-    let (extracted_content, original_media_type) = match processed_result {
-        Some(result) => result,
-        None => return None,
-    };
-
-    // Criar payload sintético
-    log_info("📝 Criando payload sintético com conteúdo extraído...");
-
-    // Atualizar texto_mensagem com conteúdo extraído
-    chatguru_payload.texto_mensagem = if chatguru_payload.texto_mensagem.is_empty() {
-        extracted_content
-    } else {
-        format!("{}\n\n[Mídia processada]: {}", chatguru_payload.texto_mensagem, extracted_content)
-    };
-
-    // Marcar como sintético
-    chatguru_payload._is_synthetic = Some(true);
-    chatguru_payload._original_media_type = Some(original_media_type);
-
-    // Remover URLs de mídia (já foram processadas)
-    chatguru_payload.media_url = None;
-    chatguru_payload.media_type = None;
-    chatguru_payload.url_arquivo = None;
-    chatguru_payload.tipo_mensagem = None;
-
-    // Converter de volta para Value
-    match serde_json::to_value(&chatguru_payload) {
-        Ok(synthetic_payload) => {
+    // processed_result já retorna (Value, bool) ou None
+    // Cada tipo de mídia já cria seu próprio payload sintético
+    match processed_result {
+        Some(result) => {
             log_info("✅ Payload sintético criado com sucesso");
-            Some(synthetic_payload)
+            Some(result)
         }
-        Err(e) => {
-            log_error(&format!("❌ Erro ao serializar payload sintético: {}", e));
-            None
-        }
+        None => None,
     }
 }
 
@@ -217,7 +257,7 @@ pub async fn handle_webhook(
 ) -> Result<Json<Value>, AppError> {
     let start_time = Instant::now();
     let request_id = uuid::Uuid::new_v4().to_string()[..8].to_string(); // ID único para tracking
-    
+
     log_info(&format!(
         "🔍 WEBHOOK INICIADO - RequestID: {} | Endpoint: {} | Method: {}",
         request_id, "/webhooks/chatguru", "POST"
@@ -265,7 +305,7 @@ pub async fn handle_webhook(
         .get("sender_name")
         .and_then(|v| v.as_str())
         .unwrap_or("unknown");
-    
+
     let message_type = payload
         .get("message_type")
         .and_then(|v| v.as_str())
@@ -329,12 +369,47 @@ pub async fn handle_webhook(
         ));
 
         match process_media_immediately(&state, &mut final_payload).await {
-            Some(synthetic_payload) => {
+            Some((synthetic_payload, is_audio)) => {
                 log_info(&format!(
-                    "✅ MÍDIA PROCESSADA - RequestID: {} | ChatID: {} | Payload sintético criado",
-                    request_id, chat_id
+                    "✅ MÍDIA PROCESSADA - RequestID: {} | ChatID: {} | Is Audio: {} | Payload sintético criado",
+                    request_id, chat_id, is_audio
                 ));
                 final_payload = synthetic_payload;
+
+                // NOVO: Se é áudio, publicar imediatamente (bypass da fila)
+                if is_audio {
+                    log_info(&format!(
+                        "🎤 ÁUDIO DETECTADO - Publicando imediatamente no PubSub | RequestID: {} | ChatID: {}",
+                        request_id, chat_id
+                    ));
+
+                    match publish_single_message_to_pubsub(&state.settings, &final_payload).await {
+                        Ok(_) => {
+                            let processing_time = start_time.elapsed().as_millis() as u64;
+
+                            log_info(&format!(
+                                "✅ ÁUDIO PUBLICADO DIRETAMENTE - RequestID: {} | ChatID: {} | Time: {}ms",
+                                request_id, chat_id, processing_time
+                            ));
+
+                            // Retornar sucesso SEM adicionar à fila
+                            return Ok(Json(json!({
+                                "message": "Audio processed and published immediately",
+                                "request_id": request_id,
+                                "chat_id": chat_id,
+                                "processing_time_ms": processing_time,
+                                "audio_fast_track": true
+                            })));
+                        }
+                        Err(e) => {
+                            log_error(&format!(
+                                "❌ Erro ao publicar áudio no PubSub: {} | Continuando com fila normal | RequestID: {} | ChatID: {}",
+                                e, request_id, chat_id
+                            ));
+                            // Se falhar, continua com o fluxo normal (fila)
+                        }
+                    }
+                }
             }
             None => {
                 log_warning(&format!(
@@ -355,7 +430,7 @@ pub async fn handle_webhook(
     state.message_queue.enqueue(chat_id.clone(), final_payload).await;
 
     let processing_time = start_time.elapsed().as_millis() as u64;
-    
+
     log_info(&format!(
         "✅ WEBHOOK CONCLUÍDO - RequestID: {} | ChatID: {} | Processing time: {}ms | Status: 200",
         request_id, chat_id, processing_time

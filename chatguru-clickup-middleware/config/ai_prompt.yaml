@@ -387,7 +387,7 @@ subcategory_mappings:
     - name: "Férias"
       id: "3de88e9f-09f2-4a9e-84d9-eff5f987b344"
       stars: 1
-      
+
 # Mapeamento de sub categoria
 id: 5333c095-eb40-4a5a-b0c2-76bfba4b1094
 name: SubCategoria_nova
@@ -775,7 +775,7 @@ status_template: |
 subcategories_template: |
   SUBCATEGORIAS DISPONÍVEIS (relacionadas às categorias):
   {{subcategories_list}}
-  
+
   IMPORTANTE: A subcategoria SEMPRE deve ser relacionada à categoria principal escolhida.
 
 
@@ -817,6 +817,15 @@ rules:
   - "Para assuntos pessoais (mudanças, carro, casa, contas): escolha a categoria Assuntos Pessoais"
   - "Para atividades corporativas (RH, estoque, planilhas): escolha a categoria Atividades Corporativas"
   - "Para gestão de funcionários (eSocial, DIRF, férias): escolha a categoria Gestão de Funcionário"
+
+  # REGRAS DE DETECÇÃO DE DUPLICATAS
+  - "CRÍTICO - ANÁLISE CONTEXTUAL: NUNCA marque como duplicata baseando-se APENAS em títulos similares. SEMPRE analise categoria, subcategoria, data de criação e contexto"
+  - "CRÍTICO - TAREFAS RECORRENTES: Para tarefas recorrentes (Reembolso Médico, Rotina de Pagamentos, etc), permita se período/mês diferente OU beneficiário/objetivo diferente"
+  - "CRÍTICO - DUPLICATA VERDADEIRA: Só marque como duplicata se for EXATAMENTE o mesmo pedido (mesmo evento + mesmo período + mesmo beneficiário)"
+  - "CRÍTICO - DÚVIDA: Se houver DÚVIDA sobre ser duplicata, SEMPRE permita a criação (is_duplicate=false)"
+  - "REEMBOLSO MÉDICO: Permita múltiplos reembolsos se forem consultas/exames diferentes OU médicos diferentes OU meses diferentes"
+  - "ROTINA DE PAGAMENTOS: Permita múltiplos pagamentos se forem contas diferentes OU fornecedores diferentes OU períodos diferentes"
+  - "EMISSÃO DE NF: Permita múltiplas NFs se forem clientes diferentes OU períodos de faturamento diferentes"
 
   # REGRAS GERAIS
   - "Se não houver certeza sobre a atividade, classifique como false"
@@ -869,6 +878,101 @@ field_ids:
   activity_type_field_id: "f1259ffb-7be8-49ff-92f8-5ff9882888d0"
   status_field_id: "6abbfe79-f80b-4b55-9b4b-9bd7f65b6458"
   stars_field_id: "83afcb8c-2866-498f-9c62-8ea9666b104b"
+
+# Configuração de tarefas recorrentes
+recurring_task_patterns:
+  # Tarefas que podem se repetir mensalmente
+  monthly_allowed:
+    - subcategory: "Reembolso Médico"
+      duplicate_rules:
+        - allow_if: "different_month"
+        - allow_if: "different_beneficiary"
+        - allow_if: "different_doctor_or_exam"
+        - block_if: "same_month_and_same_description"
+
+    - subcategory: "Rotina de Pagamentos"
+      duplicate_rules:
+        - allow_if: "different_payment_type"
+        - allow_if: "different_month"
+        - allow_if: "different_supplier_or_bill"
+        - block_if: "exact_same_payment_in_same_period"
+
+    - subcategory: "Emissão de NF"
+      duplicate_rules:
+        - allow_if: "different_client"
+        - allow_if: "different_invoice_period"
+        - allow_if: "different_month"
+        - block_if: "same_client_same_period"
+
+    - subcategory: "Conciliação Bancária"
+      duplicate_rules:
+        - allow_if: "different_month"
+        - allow_if: "different_bank_account"
+        - block_if: "same_account_same_month"
+
+    - subcategory: "Imposto de Renda"
+      duplicate_rules:
+        - allow_if: "different_year"
+        - allow_if: "different_tax_type"
+        - block_if: "same_year_same_type"
+
+  # Tarefas que podem se repetir conforme necessário
+  as_needed:
+    - subcategory: "Consultas"
+      duplicate_rules:
+        - allow_if: "different_doctor"
+        - allow_if: "different_date"
+        - allow_if: "different_patient"
+        - block_if: "same_doctor_same_date"
+
+    - subcategory: "Compras"
+      duplicate_rules:
+        - allow_if: "different_items"
+        - allow_if: "time_passed_7_days"
+        - block_if: "same_items_same_day"
+
+# Regras aprimoradas de detecção de duplicatas
+enhanced_duplicate_detection: |
+  ATENÇÃO ESPECIAL - DETECÇÃO INTELIGENTE DE DUPLICATAS:
+
+  1. ANÁLISE CONTEXTUAL OBRIGATÓRIA:
+     - NUNCA marque como duplicata baseando-se APENAS em títulos similares
+     - SEMPRE analise o contexto temporal e os detalhes específicos
+     - Para tarefas recorrentes, verifique se é o MESMO período/evento
+     - Use as informações de categoria, subcategoria, data de criação e contexto fornecidas
+
+  2. TAREFAS RECORRENTES MENSAIS (SEMPRE PERMITIR SE PERÍODO DIFERENTE):
+     - Reembolso Médico: OK se for consulta/exame diferente OU mês diferente OU médico diferente
+     - Rotina de Pagamentos: OK se forem contas diferentes OU período diferente OU fornecedor diferente
+     - Emissão de NF: OK se for cliente diferente OU período de faturamento diferente OU mês diferente
+     - Conciliação Bancária: OK se for mês diferente OU conta diferente
+     - Imposto de Renda: OK se for ano diferente OU tipo de imposto diferente
+
+  3. EXEMPLOS DE DUPLICATA VERDADEIRA (BLOQUEAR):
+     - Existente: "Reembolso consulta Dr. Silva 15/01" → Nova: "Pedir reembolso consulta cardiologista Silva janeiro"
+       → DUPLICATA: mesmo médico, mesmo mês, mesmo tipo de consulta
+     - Existente: "Pagar conta de luz janeiro" → Nova: "Pagamento Enel janeiro"
+       → DUPLICATA: mesma conta, mesmo período
+     - Existente: "NF cliente ABC - janeiro" → Nova: "Emitir nota fiscal cliente ABC janeiro"
+       → DUPLICATA: mesmo cliente, mesmo período
+     - Regra: MESMO evento + MESMO período + MESMO beneficiário = DUPLICATA
+
+  4. EXEMPLOS DE NÃO-DUPLICATA (PERMITIR CRIAÇÃO):
+     - Existente: "Reembolso exames janeiro" → Nova: "Reembolso consulta fevereiro"
+       → PERMITIR: mês diferente
+     - Existente: "Reembolso consulta neurologista" → Nova: "Reembolso consulta cardiologista"
+       → PERMITIR: médico diferente
+     - Existente: "Pagamento fornecedores" → Nova: "Pagamento impostos"
+       → PERMITIR: tipo de pagamento diferente
+     - Existente: "NF cliente ABC - janeiro" → Nova: "NF cliente XYZ - janeiro"
+       → PERMITIR: cliente diferente
+     - Existente: "Rotina pagamentos janeiro - fornecedores" → Nova: "Pagar contas de luz e água de janeiro"
+       → PERMITIR: tipo diferente (fornecedores vs contas consumo)
+
+  5. DECISÃO FINAL:
+     - Se houver DÚVIDA sobre ser duplicata, SEMPRE permita a criação (is_duplicate=false)
+     - Só marque como duplicata se tiver CERTEZA de que é o mesmo pedido/evento
+     - Considere contexto temporal, beneficiário e tipo de serviço antes de decidir
 
 aliases_responsaveis:
   renata: "Renata Schnoor"
@@ -1204,7 +1308,7 @@ cliente_solicitante_mappings:
 # ESTRUTURA DO CLICKUP (Spaces, Folders e Listas Vigentes)
 # ============================================================================
 # Gerado automaticamente em: 2025-10-27
-# 
+#
 # COMPLETO:
 # - 14 Spaces (TODOS os spaces do workspace)
 # - 190 Folders (TODAS as pastas de todos os spaces)

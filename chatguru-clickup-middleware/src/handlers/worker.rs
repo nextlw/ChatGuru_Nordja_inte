@@ -1,8 +1,8 @@
 /// Worker: Processa mensagens do Pub/Sub e cria tasks no ClickUp
-/// 
+///
 /// Fluxo simplificado seguindo especificação do prompt original:
 /// 1. Extrair dados essenciais (mensagem, Info_2)
-/// 2. Buscar pasta do cliente usando Info_2 
+/// 2. Buscar pasta do cliente usando Info_2
 /// 3. Determinar lista mensal (NOVEMBRO 2025)
 /// 4. Classificar com IA Service
 /// 5. Criar task se necessário
@@ -19,7 +19,8 @@ use base64::{Engine as _, engine::general_purpose};
 
 use chatguru_clickup_middleware::{AppState, services::AiPromptConfig};
 use chatguru_clickup_middleware::utils::{AppError, logging::*};
-use chatguru_clickup_middleware::models::payload::WebhookPayload;
+use chatguru_clickup_middleware::models::{payload::WebhookPayload, enriched_task::EnrichedTask};
+use chrono::DateTime;
 
 /// Handler principal: processa mensagem do Pub/Sub
 #[axum::debug_handler]
@@ -129,7 +130,7 @@ async fn process_message(state: Arc<AppState>, payload: WebhookPayload) -> Resul
 
     // 2. Buscar pasta do cliente usando Info_2 nos spaces do workspace
     let search_result = search_folders_by_name(&state.clickup_client, &state.clickup_workspace_id, &info_2).await?;
-    
+
     // Se não encontrar pasta → não é cliente
     if search_result.is_empty() {
         log_info(&format!("❌ Pasta não encontrada para '{}' - NÃO é cliente", info_2));
@@ -138,17 +139,17 @@ async fn process_message(state: Arc<AppState>, payload: WebhookPayload) -> Resul
             "message": format!("Nenhuma pasta encontrada para o atendente '{}'", info_2)
         }));
     }
-    
+
     let folder_id = search_result[0].id.clone();
     let folder_name = search_result[0].name.clone();
     log_info(&format!("✅ Cliente encontrado - Pasta: '{}' ({})", folder_name, folder_id));
 
     // 3. Determinar nome da lista baseado no mês/ano atual
     let now = Utc::now();
-    let list_name = format!("{} {}", 
+    let list_name = format!("{} {}",
         match now.month() {
             1 => "JANEIRO",
-            2 => "FEVEREIRO", 
+            2 => "FEVEREIRO",
             3 => "MARÇO",
             4 => "ABRIL",
             5 => "MAIO",
@@ -163,10 +164,10 @@ async fn process_message(state: Arc<AppState>, payload: WebhookPayload) -> Resul
         },
         now.year()
     );
-    
+
     // Buscar lista na pasta
     let lists = get_folder_lists(&state.clickup_client, &folder_id).await?;
-    
+
     let list_id = if let Some(existing_list) = lists.iter().find(|l| l.name == list_name) {
         log_info(&format!("📋 Lista já existe: '{}'", list_name));
         existing_list.id.clone()
@@ -183,39 +184,79 @@ async fn process_message(state: Arc<AppState>, payload: WebhookPayload) -> Resul
     };
 
     // 4. Buscar tasks existentes para verificação de duplicatas
-    let existing_tasks = get_list_tasks(&state.clickup_client, &list_id).await?;
-    
-    let task_titles: Vec<String> = existing_tasks.iter()
-        .map(|t| t.name.clone())
+    let existing_tasks_json = get_list_tasks_full(&state.clickup_client, &list_id).await?;
+
+    // Criar tasks enriquecidas com contexto completo
+    let mappings = &state.custom_fields_mappings;
+    let enriched_tasks: Vec<EnrichedTask> = existing_tasks_json
+        .iter()
+        .map(|task| EnrichedTask::from_clickup_task_json(
+            task,
+            &mappings.category_field_id,
+            &mappings.subcategory_field_id,
+        ))
         .collect();
-    
-    log_info(&format!("🔍 Lista contém {} tasks existentes", task_titles.len()));
+
+    let task_titles: Vec<String> = enriched_tasks.iter()
+        .map(|t| t.title.clone())
+        .collect();
+
+    log_info(&format!("🔍 Lista contém {} tasks existentes", enriched_tasks.len()));
 
     // 5. Classificar com IA Service
     // Carregar configuração do prompt
     let prompt_config = AiPromptConfig::from_file("config/ai_prompt.yaml")?;
 
-    // Gerar contexto com tasks existentes e mensagem
-    let existing_tasks_context = if task_titles.is_empty() {
+    // Gerar contexto enriquecido com tasks existentes e mensagem
+    let existing_tasks_context = if enriched_tasks.is_empty() {
         "Nenhuma tarefa existe ainda nesta lista.".to_string()
     } else {
+        let tasks_info = enriched_tasks.iter().enumerate()
+            .map(|(i, task)| {
+                // Converter timestamp para data legível
+                let created_date = if task.created_at > 0 {
+                    DateTime::<Utc>::from_timestamp(task.created_at / 1000, 0)
+                        .map(|dt| dt.format("%d/%m/%Y").to_string())
+                        .unwrap_or_else(|| "data desconhecida".to_string())
+                } else {
+                    "data desconhecida".to_string()
+                };
+
+                format!(
+                    "{}. {} | Categoria: {} | Subcategoria: {} | Criada: {} | Status: {} | Contexto: {}",
+                    i + 1,
+                    task.title,
+                    task.category.as_deref().unwrap_or("N/A"),
+                    task.subcategory.as_deref().unwrap_or("N/A"),
+                    created_date,
+                    task.status,
+                    if task.description_preview.is_empty() {
+                        "sem descrição"
+                    } else {
+                        &task.description_preview
+                    }
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
         format!(
-            "TASKS EXISTENTES NESTA LISTA (para verificação de duplicatas):\n{}\n\n",
-            task_titles.iter().enumerate().map(|(i, task)| format!("{}. {}", i + 1, task)).collect::<Vec<_>>().join("\n")
+            "TASKS EXISTENTES COM CONTEXTO COMPLETO:\n{}\n\n\
+             IMPORTANTE: Analise categoria, subcategoria, data de criação e contexto antes de marcar como duplicata.",
+            tasks_info
         )
     };
 
     let context = format!(
         "{}\n\nMENSAGEM DO USUÁRIO:\n{}\n\n\
-         🚨 VERIFICAÇÃO DE DUPLICATAS OBRIGATÓRIA:\n\
-         1. Compare esta mensagem com TODAS as tasks existentes listadas acima\n\
-         2. Se encontrar uma task MUITO SIMILAR (mesmo objetivo/contexto):\n\
-            - Marque is_duplicate=true\n\
-            - Preencha existing_task_title com o título exato da task similar\n\
-            - Explique na reason por que é duplicata\n\
-         3. Se NÃO encontrar similar:\n\
-            - Marque is_duplicate=false\n\
-            - Prossiga com a classificação normal da atividade",
+         🚨 ANÁLISE INTELIGENTE DE DUPLICATAS:\n\
+         1. Verifique se a nova mensagem é sobre o MESMO evento/período das tasks listadas\n\
+         2. Para tarefas RECORRENTES (reembolso, pagamentos, etc), permita se:\n\
+            - Período/mês diferente\n\
+            - Beneficiário/objetivo diferente\n\
+            - Evento específico diferente\n\
+         3. Só marque como duplicata se for EXATAMENTE o mesmo pedido\n\
+         4. Na dúvida, permita a criação (is_duplicate=false)",
         existing_tasks_context,
         mensagem_texto
     );
@@ -240,30 +281,30 @@ async fn process_message(state: Arc<AppState>, payload: WebhookPayload) -> Resul
     // Se NÃO é uma task
     if !ia_result.is_valid_activity() {
         log_info(&format!("ℹ️ Mensagem NÃO é uma tarefa: {}", ia_result.reason));
-        
+
         send_annotation_to_chatguru(
             &state,
             &payload,
             &format!("Mensagem analisada: {}", ia_result.reason)
         ).await?;
-        
+
         return Ok(json!({
             "status": "not_task",
             "reason": ia_result.reason
         }));
     }
-    
+
     // Se task JÁ EXISTE (duplicata detectada pela IA)
     if ia_result.is_duplicate() {
         let existing_task = ia_result.get_existing_task_title().unwrap_or_else(|| "N/A".to_string());
         log_info(&format!("⚠️ Task duplicada detectada: {}", existing_task));
-        
+
         send_annotation_to_chatguru(
             &state,
             &payload,
             &format!("Já existe uma tarefa sobre este assunto: '{}'", existing_task)
         ).await?;
-        
+
         return Ok(json!({
             "status": "duplicate",
             "existing_task": existing_task
@@ -289,12 +330,12 @@ async fn process_message(state: Arc<AppState>, payload: WebhookPayload) -> Resul
         &mappings.subcategory_field_id,
         mappings.stars_field_id.as_deref(),
     )?;
-    
+
     log_info(&format!("✅ Criando task: '{}'", task_request.name));
-    
+
     // Criar task no ClickUp
     let created_task = create_task(&state.clickup_client, &list_id, task_request).await?;
-    
+
     log_info(&format!("🎉 Task criada - ID: {}", created_task.id));
 
     // 7. Enviar anotação formatada ao ChatGuru
@@ -494,7 +535,7 @@ struct TaskInfo {
     pub url: Option<String>,
 }
 
-/// Busca tasks de uma lista usando API direta do ClickUp
+/// Busca tasks de uma lista usando API direta do ClickUp (versão simplificada - mantida para compatibilidade)
 async fn get_list_tasks(
     _client: &clickup_v2::client::ClickUpClient,
     list_id: &str,
@@ -544,6 +585,50 @@ async fn get_list_tasks(
             Some(TaskInfo { id, name, url })
         })
         .collect())
+}
+
+/// Busca tasks completas de uma lista com todos os dados (custom_fields, status, etc)
+async fn get_list_tasks_full(
+    _client: &clickup_v2::client::ClickUpClient,
+    list_id: &str,
+) -> Result<Vec<Value>, AppError> {
+    log_info(&format!("🔍 Buscando tasks completas da lista {}", list_id));
+
+    // ClickUp API: GET /list/{list_id}/task
+    let url = format!("https://api.clickup.com/api/v2/list/{}/task", list_id);
+
+    let token = std::env::var("CLICKUP_ACCESS_TOKEN")
+        .map_err(|_| AppError::ConfigError("CLICKUP_ACCESS_TOKEN não configurado".to_string()))?;
+
+    let client = reqwest::Client::new();
+    let response = client
+        .get(&url)
+        .header("Authorization", token)
+        .send()
+        .await
+        .map_err(|e| AppError::HttpError(e))?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_else(|_| "unknown error".to_string());
+        return Err(AppError::ClickUpApi(format!(
+            "Erro ao buscar tasks: {}",
+            error_text
+        )));
+    }
+
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| AppError::HttpError(e))?;
+
+    let tasks = body
+        .get("tasks")
+        .and_then(|t| t.as_array())
+        .ok_or_else(|| AppError::ClickUpApi("Campo 'tasks' não encontrado".to_string()))?;
+
+    log_info(&format!("✅ Encontradas {} task(s) completas", tasks.len()));
+
+    Ok(tasks.iter().cloned().collect())
 }
 
 /// Cria uma nova task usando clickup_v2 - retorna TaskResponse diretamente

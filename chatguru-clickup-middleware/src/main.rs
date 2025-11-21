@@ -42,7 +42,7 @@ async fn list_clickup_tasks(
     axum::extract::State(state): axum::extract::State<Arc<AppState>>
 ) -> Result<axum::response::Json<serde_json::Value>, AppError> {
     use serde_json::json;
-    
+
     log_request_received("/admin/clickup/tasks", "GET");
 
     match state.clickup_client.get_user_info().await {
@@ -71,7 +71,7 @@ async fn get_clickup_list_info(
     axum::extract::State(state): axum::extract::State<Arc<AppState>>
 ) -> Result<axum::response::Json<serde_json::Value>, AppError> {
     use serde_json::json;
-    
+
     log_request_received("/admin/clickup/list", "GET");
 
     match state.clickup_client.get_user_info().await {
@@ -102,7 +102,7 @@ async fn handle_clickup_webhook(
 ) -> Result<axum::response::Json<serde_json::Value>, AppError> {
     use tokio::time::Instant;
     use serde_json::json;
-    
+
     let start_time = Instant::now();
     log_request_received("/webhooks/clickup", "POST");
 
@@ -164,7 +164,7 @@ async fn list_registered_webhooks(
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
 ) -> Result<axum::response::Json<serde_json::Value>, AppError> {
     use serde_json::json;
-    
+
     log_request_received("/admin/clickup/webhooks", "GET");
 
     // Obter token e workspace_id
@@ -192,7 +192,7 @@ async fn create_webhook(
     axum::Json(body): axum::Json<serde_json::Value>,
 ) -> Result<axum::response::Json<serde_json::Value>, AppError> {
     use serde_json::json;
-    
+
     log_request_received("/admin/clickup/webhooks", "POST");
 
     // Parsear body
@@ -316,12 +316,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let secret_manager = services::SecretManagerService::new()
         .await
         .map_err(|e| AppError::ConfigError(format!("Failed to initialize SecretManagerService: {}", e)))?;
-    
+
     // ✅ Obter token do ClickUp via SecretManagerService (OAuth2 > Personal > Config)
     let clickup_token = secret_manager.get_clickup_api_token()
         .await
         .map_err(|e| AppError::ConfigError(format!("Failed to get ClickUp token: {}", e)))?;
-    
+
     log_info(&format!("🔑 ClickUp token loaded from SecretManagerService"));
 
     // ✅ Criar ClickUp v2 client oficial
@@ -419,7 +419,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             })
     );
-    
+
     // Iniciar scheduler da fila (verifica a cada 10s)
     message_queue.clone().start_scheduler();
     log_info("✅ Message Queue Scheduler iniciado - COM CALLBACK para Pub/Sub (8 msgs ou 180s por chat)");
@@ -435,10 +435,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .map_err(|e| format!("Falha ao buscar chatguru-api-token no Secret Manager: {}", e))?
             }
         };
-        
+
         let api_endpoint = settings.chatguru.api_endpoint.clone()
             .ok_or("CHATGURU_API_ENDPOINT não configurado no default.toml")?;
-            
+
         let account_id = match settings.chatguru.account_id.clone() {
             Some(id) if !id.is_empty() => id,
             _ => {
@@ -447,7 +447,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .map_err(|e| format!("Falha ao buscar chatguru-account-id no Secret Manager: {}", e))?
             }
         };
-        
+
         chatguru::ChatGuruClient::new(api_token, api_endpoint, account_id)
     };
     log_info("✅ ChatGuru client inicializado no AppState (configuração centralizada)");
@@ -770,6 +770,210 @@ async fn publish_batch_to_pubsub(
                     tracing::error!(
                         "❌ Todas as {} tentativas falharam ao publicar no Pub/Sub para chat '{}'",
                         MAX_RETRIES, chat_id
+                    );
+                }
+            }
+        }
+    }
+
+    // Se chegou aqui, todas as tentativas falharam
+    Err(last_error.unwrap().into())
+}
+
+/// Publica uma única mensagem diretamente no Pub/Sub (para áudios com processamento imediato)
+pub async fn publish_single_message_to_pubsub(
+    settings: &Settings,
+    payload: &serde_json::Value,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use google_cloud_pubsub::client::{Client, ClientConfig};
+    use google_cloud_googleapis::pubsub::v1::PubsubMessage;
+    use serde_json::json;
+
+    tracing::info!("🎤 Publicando áudio diretamente no Pub/Sub (bypass da fila)");
+
+    // Verificar se deve forçar uso do Pub/Sub (para testar emulador em dev)
+    let force_pubsub = std::env::var("FORCE_PUBSUB").unwrap_or_default() == "true"
+        || std::env::var("PUBSUB_EMULATOR_HOST").is_ok();
+
+    // DESENVOLVIMENTO: Chamar worker diretamente (sem Pub/Sub) OU usar emulador
+    if (cfg!(debug_assertions) || std::env::var("RUST_ENV").unwrap_or_default() == "development") && !force_pubsub {
+        tracing::info!("🔧 MODO DESENVOLVIMENTO: Chamando worker diretamente para áudio (sem Pub/Sub)");
+
+        // Importar o handler do worker
+        use crate::handlers::worker::worker_process_message;
+        use axum::extract::State;
+        use base64::Engine;
+
+        // Criar envelope Pub/Sub simulado
+        let envelope = json!({
+            "message": {
+                "data": base64::engine::general_purpose::STANDARD.encode(
+                    serde_json::to_string(payload)?
+                )
+            }
+        });
+
+        // Reutilizar a mesma lógica de AppState de publish_batch_to_pubsub
+        let secret_manager = services::SecretManagerService::new().await?;
+        let clickup_token = secret_manager.get_clickup_api_token().await?;
+
+        let clickup_v2_client = clickup_v2::ClickUpClient::new(
+            clickup_token.clone(),
+            "https://api.clickup.com/api/v2".to_string()
+        );
+
+        let workspaces_response = clickup_v2_client.get_workspaces().await
+            .map_err(|e| format!("Failed to get workspaces: {}", e))?;
+
+        let workspace_id = workspaces_response["teams"][0]["id"]
+            .as_str()
+            .ok_or("Failed to extract workspace ID from ClickUp API")?
+            .to_string();
+
+        let openai_api_key = secret_manager.get_secret_value("openai-api-key").await
+            .or_else(|_| std::env::var("OPENAI_API_KEY"))
+            .map_err(|e| format!("Failed to get OpenAI API key: {}", e))?;
+
+        let ia_config = services::IaServiceConfig::new(openai_api_key)
+            .with_chat_model("gpt-4o-mini")
+            .with_temperature(0.1)
+            .with_max_tokens(500);
+
+        let ia_service = services::IaService::new(ia_config)
+            .map_err(|e| format!("Failed to create IaService: {}", e))?;
+
+        let message_queue = Arc::new(services::MessageQueueService::new());
+
+        let api_token = secret_manager.get_secret_value("chatguru-api-token").await
+            .unwrap_or_else(|_| settings.chatguru.api_token.clone().unwrap_or_default());
+        let api_endpoint = settings.chatguru.api_endpoint.clone()
+            .unwrap_or_else(|| "https://api.chatguru.app/api/v1".to_string());
+        let account_id = settings.chatguru.account_id.clone()
+            .unwrap_or_else(|| "default_account".to_string());
+
+        let chatguru_client = chatguru::ChatGuruClient::new(
+            api_token,
+            api_endpoint,
+            account_id
+        );
+
+        let custom_fields_mappings = Arc::new(
+            config::CustomFieldsMappings::load().await?
+        );
+
+        let app_state = Arc::new(AppState {
+            settings: settings.clone(),
+            clickup_client: Arc::new(clickup_v2_client),
+            ia_service: Some(Arc::new(ia_service)),
+            message_queue,
+            chatguru_client,
+            clickup_api_token: clickup_token,
+            clickup_workspace_id: workspace_id,
+            custom_fields_mappings,
+            processed_messages: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        });
+
+        // Chamar worker diretamente
+        match worker_process_message(
+            State(app_state),
+            axum::Json(envelope)
+        ).await {
+            Ok(_) => {
+                tracing::info!("✅ Áudio processado localmente pelo worker");
+                return Ok(());
+            }
+            Err(e) => {
+                tracing::error!("❌ Erro ao processar áudio localmente: {}", e);
+                return Err(e.into());
+            }
+        }
+    }
+
+    // Configurar cliente Pub/Sub
+    let config = ClientConfig::default().with_auth().await?;
+    let client = Client::new(config).await?;
+
+    // Obter nome do tópico
+    let default_topic = "chatguru-webhook-raw".to_string();
+    let topic_name = settings.gcp.pubsub_topic
+        .as_ref()
+        .unwrap_or(&default_topic);
+
+    let topic = client.topic(topic_name);
+
+    // Verificar se tópico existe
+    if !topic.exists(None).await? {
+        return Err(format!("Topic '{}' does not exist", topic_name).into());
+    }
+
+    // Criar publisher
+    let publisher = topic.new_publisher(None);
+
+    // Preparar envelope com payload único
+    let chat_id = payload
+        .get("chat_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let envelope = json!({
+        "raw_payload": serde_json::to_string(payload)?,
+        "received_at": chrono::Utc::now().to_rfc3339(),
+        "source": "chatguru-webhook-audio",
+        "chat_id": chat_id,
+        "is_batch": false,
+        "is_audio": true
+    });
+
+    let msg_bytes = serde_json::to_vec(&envelope)?;
+
+    // Criar mensagem Pub/Sub com atributos para identificação
+    let msg = PubsubMessage {
+        data: msg_bytes.into(),
+        attributes: std::collections::HashMap::from([
+            ("source".to_string(), "webhook".to_string()),
+            ("type".to_string(), "audio_transcription".to_string()),
+            ("priority".to_string(), "high".to_string()),
+        ]),
+        ..Default::default()
+    };
+
+    // Publicar mensagem com retry (máximo 3 tentativas)
+    const MAX_RETRIES: u32 = 3;
+    const INITIAL_BACKOFF_MS: u64 = 100;
+
+    let mut last_error = None;
+
+    for attempt in 1..=MAX_RETRIES {
+        match publisher.publish(msg.clone()).await.get().await {
+            Ok(_) => {
+                if attempt > 1 {
+                    tracing::info!(
+                        "✅ Áudio publicado no Pub/Sub após {} tentativa(s) - tópico: '{}', chat: {}",
+                        attempt, topic_name, chat_id
+                    );
+                } else {
+                    tracing::info!(
+                        "📤 Áudio publicado diretamente no tópico '{}' (chat: {})",
+                        topic_name, chat_id
+                    );
+                }
+                return Ok(());
+            }
+            Err(e) => {
+                last_error = Some(e);
+
+                if attempt < MAX_RETRIES {
+                    let backoff_ms = INITIAL_BACKOFF_MS * 2u64.pow(attempt - 1);
+                    tracing::warn!(
+                        "⚠️ Tentativa {}/{} falhou ao publicar áudio. Retry em {}ms...",
+                        attempt, MAX_RETRIES, backoff_ms
+                    );
+                    tokio::time::sleep(tokio::time::Duration::from_millis(backoff_ms)).await;
+                } else {
+                    tracing::error!(
+                        "❌ Falha ao publicar áudio após {} tentativas",
+                        MAX_RETRIES
                     );
                 }
             }
