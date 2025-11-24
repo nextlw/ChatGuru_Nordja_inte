@@ -81,7 +81,7 @@ pub async fn worker_process_message(
     let envelope_str = String::from_utf8(data_bytes)
         .map_err(|e| AppError::ValidationError(format!("Invalid UTF-8 in payload: {}", e)))?;
 
-    use chatguru_clickup_middleware::utils::truncate_safe;
+    use crate::utils::truncate_safe;
     log_info(&format!("🔍 DEBUG - Envelope recebido do Pub/Sub:\n{}",
         truncate_safe(&envelope_str, 500)));
 

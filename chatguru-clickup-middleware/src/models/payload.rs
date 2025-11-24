@@ -259,7 +259,7 @@ fn extract_professional_title(reason: &str) -> String {
 
     // Limitar tamanho para 50 caracteres para evitar títulos muito longos
     if title.len() > 50 {
-        use chatguru_clickup_middleware::utils::truncate_with_suffix;
+        use crate::utils::truncate_with_suffix;
         title = truncate_with_suffix(&title, 47, "...");
     }
 
@@ -423,7 +423,7 @@ impl WebhookPayload {
                 // usar a mensagem original como título ao invés do reason genérico
                 if ai.reason.starts_with("Contém palavras-chave") {
                     // Usar a mensagem original como título (limitando a 80 caracteres)
-                    use chatguru_clickup_middleware::utils::truncate_with_suffix;
+                    use crate::utils::truncate_with_suffix;
                     let titulo = if payload.texto_mensagem.len() > 80 {
                         truncate_with_suffix(&payload.texto_mensagem, 77, "...")
                     } else {
@@ -440,7 +440,7 @@ impl WebhookPayload {
                         format!("{} - {}", tipo, payload.nome)
                     } else {
                         // Fallback final: usar mensagem original
-                        use chatguru_clickup_middleware::utils::truncate_with_suffix;
+                        use crate::utils::truncate_with_suffix;
                         let titulo = if payload.texto_mensagem.len() > 80 {
                             truncate_with_suffix(&payload.texto_mensagem, 77, "...")
                         } else {

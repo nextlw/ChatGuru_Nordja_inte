@@ -26,9 +26,9 @@ use std::sync::Arc;
 use tokio::time::Instant;
 use uuid;
 
-use chatguru_clickup_middleware::utils::AppError;
-use chatguru_clickup_middleware::utils::logging::*;
-use chatguru_clickup_middleware::utils::{truncate_safe, truncate_with_suffix};
+use crate::utils::AppError;
+use crate::utils::logging::*;
+use crate::utils::{truncate_safe, truncate_with_suffix};
 use chatguru_clickup_middleware::AppState;
 use chatguru_clickup_middleware::models::payload::ChatGuruPayload;
 
