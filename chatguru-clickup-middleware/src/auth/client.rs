@@ -6,6 +6,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use crate::utils::{AppError, AppResult};
 use crate::utils::logging::*;
+use crate::utils::truncate_safe;
 use super::OAuth2Config;
 
 /// Resposta da API de troca de token
@@ -84,7 +85,6 @@ impl OAuth2Client {
             "code": code
         });
 
-        use crate::utils::truncate_safe;
         log_info(&format!("📤 [OAuth2] POST {} - client_id: {}, code: {}...",
             url, &self.config.client_id, truncate_safe(&code, 10)));
 
@@ -107,7 +107,6 @@ impl OAuth2Client {
         let token_response: TokenResponse = response.json().await
             .map_err(|e| AppError::ClickUpApi(format!("Falha ao parsear resposta do token: {}", e)))?;
 
-        use crate::utils::truncate_safe;
         log_info(&format!("✅ [OAuth2] Access token obtido: {}...", truncate_safe(&token_response.access_token, 20)));
 
         Ok(token_response)

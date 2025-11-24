@@ -11,6 +11,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 
 use crate::utils::logging::*;
+use crate::utils::truncate_safe;
 use super::{OAuth2Config, OAuth2Client, TokenManager};
 
 /// Parâmetros do callback OAuth2
@@ -76,7 +77,6 @@ pub async fn handle_oauth_callback(
         (StatusCode::BAD_REQUEST, "Missing code parameter".to_string())
     })?;
 
-    use crate::utils::truncate_safe;
     log_info(&format!("🔑 [OAuth2] Code recebido: {}...", truncate_safe(&code, 10)));
 
     // Trocar code por access token
@@ -92,7 +92,6 @@ pub async fn handle_oauth_callback(
 
     let access_token = token_response.access_token;
 
-    use crate::utils::truncate_safe;
     log_info(&format!("✅ [OAuth2] Token obtido: {}...", truncate_safe(&access_token, 20)));
 
     // Verificar workspaces autorizados
