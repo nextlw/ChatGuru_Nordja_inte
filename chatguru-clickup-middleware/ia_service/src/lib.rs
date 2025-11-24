@@ -671,8 +671,14 @@ impl IaService {
         tracing::info!("📄 Gerando descrição do PDF com GPT-4: {} caracteres extraídos", extracted_text.len());
 
         // Truncar texto se for muito longo (GPT-4 tem limite de tokens)
+        // Usar função segura para evitar cortar no meio de caracteres UTF-8
         let text_for_analysis = if extracted_text.len() > 8000 {
-            format!("{}...\n\n[Texto truncado por tamanho]", &extracted_text[..8000])
+            // Encontrar o último byte válido antes de 8000
+            let mut safe_end = 8000;
+            while safe_end > 0 && !extracted_text.is_char_boundary(safe_end) {
+                safe_end -= 1;
+            }
+            format!("{}...\n\n[Texto truncado por tamanho]", &extracted_text[..safe_end])
         } else {
             extracted_text.clone()
         };

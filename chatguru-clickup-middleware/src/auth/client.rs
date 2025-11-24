@@ -84,8 +84,9 @@ impl OAuth2Client {
             "code": code
         });
 
+        use chatguru_clickup_middleware::utils::truncate_safe;
         log_info(&format!("📤 [OAuth2] POST {} - client_id: {}, code: {}...",
-            url, &self.config.client_id, &code[..10.min(code.len())]));
+            url, &self.config.client_id, truncate_safe(&code, 10)));
 
         let response = self.http_client
             .post(url)
@@ -106,7 +107,7 @@ impl OAuth2Client {
         let token_response: TokenResponse = response.json().await
             .map_err(|e| AppError::ClickUpApi(format!("Falha ao parsear resposta do token: {}", e)))?;
 
-        log_info(&format!("✅ [OAuth2] Access token obtido: {}...", &token_response.access_token[..20.min(token_response.access_token.len())]));
+        log_info(&format!("✅ [OAuth2] Access token obtido: {}...", truncate_safe(&token_response.access_token, 20)));
 
         Ok(token_response)
     }
@@ -193,7 +194,7 @@ impl OAuth2Client {
         match response {
             Ok(resp) => {
                 let status_code = resp.status().as_u16();
-                
+
                 if resp.status().is_success() {
                     log_info("✅ [OAuth2] Token válido confirmado");
                     return TokenValidationResult {

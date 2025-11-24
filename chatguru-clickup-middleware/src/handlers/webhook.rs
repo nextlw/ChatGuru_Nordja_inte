@@ -28,6 +28,7 @@ use uuid;
 
 use chatguru_clickup_middleware::utils::AppError;
 use chatguru_clickup_middleware::utils::logging::*;
+use chatguru_clickup_middleware::utils::{truncate_safe, truncate_with_suffix};
 use chatguru_clickup_middleware::AppState;
 use chatguru_clickup_middleware::models::payload::ChatGuruPayload;
 
@@ -256,7 +257,7 @@ pub async fn handle_webhook(
     request: Request<Body>,
 ) -> Result<Json<Value>, AppError> {
     let start_time = Instant::now();
-    let request_id = uuid::Uuid::new_v4().to_string()[..8].to_string(); // ID único para tracking
+    let request_id = truncate_safe(&uuid::Uuid::new_v4().to_string(), 8).to_string(); // ID único para tracking
 
     log_info(&format!(
         "🔍 WEBHOOK INICIADO - RequestID: {} | Endpoint: {} | Method: {}",
@@ -329,7 +330,7 @@ pub async fn handle_webhook(
         .and_then(|v| v.as_str())
         .map(|text| {
             if text.len() > 100 {
-                format!("{}...", &text[..100])
+                truncate_with_suffix(text, 100, "...")
             } else {
                 text.to_string()
             }
@@ -368,8 +369,13 @@ pub async fn handle_webhook(
             request_id, chat_id
         ));
 
-        match process_media_immediately(&state, &mut final_payload).await {
-            Some((synthetic_payload, is_audio)) => {
+        // Adicionar timeout de 60 segundos para processamento de mídia
+        // para evitar que o handler exceda o timeout do Cloud Run (300s)
+        match tokio::time::timeout(
+            tokio::time::Duration::from_secs(60),
+            process_media_immediately(&state, &mut final_payload)
+        ).await {
+            Ok(Some((synthetic_payload, is_audio))) => {
                 log_info(&format!(
                     "✅ MÍDIA PROCESSADA - RequestID: {} | ChatID: {} | Is Audio: {} | Payload sintético criado",
                     request_id, chat_id, is_audio
@@ -411,12 +417,20 @@ pub async fn handle_webhook(
                     }
                 }
             }
-            None => {
+            Ok(None) => {
                 log_warning(&format!(
                     "⚠️ FALHA AO PROCESSAR MÍDIA - RequestID: {} | ChatID: {} | Usando payload original",
                     request_id, chat_id
                 ));
                 // final_payload já é o payload original
+            }
+            Err(_) => {
+                // Timeout no processamento de mídia
+                log_warning(&format!(
+                    "⏱️ TIMEOUT NO PROCESSAMENTO DE MÍDIA (60s) - RequestID: {} | ChatID: {} | Usando payload original",
+                    request_id, chat_id
+                ));
+                // final_payload já é o payload original - continuar com processamento normal
             }
         }
     }

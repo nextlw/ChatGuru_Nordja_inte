@@ -110,11 +110,14 @@ impl IntoResponse for AppError {
             AppError::ServiceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg),
         };
 
+        // Garantir que sempre retornamos uma resposta válida
+        // json!() já retorna um Value, então não precisa de serialização adicional
         let body = json!({
             "error": error_message,
             "status": status.as_u16()
         });
 
+        // Sempre retornar resposta válida - axum::Json garante serialização correta
         (status, axum::Json(body)).into_response()
     }
 }

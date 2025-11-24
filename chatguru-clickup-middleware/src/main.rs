@@ -777,7 +777,11 @@ async fn publish_batch_to_pubsub(
     }
 
     // Se chegou aqui, todas as tentativas falharam
-    Err(last_error.unwrap().into())
+    // last_error sempre será Some() neste ponto, mas tratamos para evitar panic
+    match last_error {
+        Some(e) => Err(e.into()),
+        None => Err("All retry attempts failed but no error was captured".to_string().into()),
+    }
 }
 
 /// Publica uma única mensagem diretamente no Pub/Sub (para áudios com processamento imediato)
@@ -981,5 +985,9 @@ pub async fn publish_single_message_to_pubsub(
     }
 
     // Se chegou aqui, todas as tentativas falharam
-    Err(last_error.unwrap().into())
+    // last_error sempre será Some() neste ponto, mas tratamos para evitar panic
+    match last_error {
+        Some(e) => Err(e.into()),
+        None => Err("All retry attempts failed but no error was captured".to_string().into()),
+    }
 }

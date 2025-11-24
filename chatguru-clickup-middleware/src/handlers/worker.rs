@@ -39,7 +39,15 @@ pub async fn worker_process_message(
 
     // Verificar se já processamos esta mensagem
     {
-        let mut cache = state.processed_messages.lock().unwrap();
+        // Tratar poisoned lock corretamente - se o lock estiver poisoned, limpar e continuar
+        let mut cache = match state.processed_messages.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                log_warning(&format!("⚠️ Mutex poisoned detectado, recuperando lock..."));
+                // Recuperar o lock mesmo se estiver poisoned
+                poisoned.into_inner()
+            }
+        };
 
         // Limpar mensagens antigas (mais de 1 hora)
         let now = std::time::Instant::now();
@@ -73,8 +81,9 @@ pub async fn worker_process_message(
     let envelope_str = String::from_utf8(data_bytes)
         .map_err(|e| AppError::ValidationError(format!("Invalid UTF-8 in payload: {}", e)))?;
 
+    use chatguru_clickup_middleware::utils::truncate_safe;
     log_info(&format!("🔍 DEBUG - Envelope recebido do Pub/Sub:\n{}",
-        &envelope_str[..envelope_str.len().min(500)]));
+        truncate_safe(&envelope_str, 500)));
 
     // Parsear o envelope primeiro
     let envelope: Value = serde_json::from_str(&envelope_str)
@@ -86,7 +95,7 @@ pub async fn worker_process_message(
         .ok_or_else(|| AppError::ValidationError("Missing raw_payload in envelope".to_string()))?;
 
     log_info(&format!("🔍 DEBUG - raw_payload extraído:\n{}",
-        &raw_payload_str[..raw_payload_str.len().min(500)]));
+        truncate_safe(&raw_payload_str, 500)));
 
     // Parsear o payload do ChatGuru a partir do raw_payload
     let payload: WebhookPayload = serde_json::from_str(raw_payload_str)

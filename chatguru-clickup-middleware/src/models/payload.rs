@@ -192,7 +192,7 @@ pub struct EventData {
     pub status: Option<String>,
     #[serde(default)]
     pub custom_data: HashMap<String, Value>,
-    
+
     // Campos adicionais que podem vir
     #[serde(flatten)]
     pub extra: HashMap<String, Value>,
@@ -205,7 +205,7 @@ pub struct GenericPayload {
     pub celular: Option<String>,
     pub email: Option<String>,
     pub mensagem: Option<String>,
-    
+
     // Captura campos extras
     #[serde(flatten)]
     pub extra: HashMap<String, Value>,
@@ -259,7 +259,8 @@ fn extract_professional_title(reason: &str) -> String {
 
     // Limitar tamanho para 50 caracteres para evitar títulos muito longos
     if title.len() > 50 {
-        title = format!("{}...", &title[..47]);
+        use chatguru_clickup_middleware::utils::truncate_with_suffix;
+        title = truncate_with_suffix(&title, 47, "...");
     }
 
     // Se título ficar vazio ou muito curto, usar fallback genérico
@@ -315,7 +316,7 @@ impl WebhookPayload {
             }
         }
     }
-    
+
     /// Converte payload para dados do ClickUp com classificação AI
     pub async fn to_clickup_task_data_with_ai(
         &self,
@@ -360,14 +361,14 @@ impl WebhookPayload {
                     description.push_str("\n\n");
                 }
             }
-            
+
             // Se há campanha da AI, incluir junto com a descrição
             if let Some(ref campanha) = ai.campanha {
                 if !campanha.is_empty() {
                     description.push_str(&format!("**Campanha**: {}\n", campanha));
                 }
             }
-            
+
             if let Some(ref category) = ai.category {
                 description.push_str(&format!("**Categoria**: {}\n", category));
             }
@@ -383,12 +384,12 @@ impl WebhookPayload {
         if !payload.link_chat.is_empty() {
             description.push_str(&format!("\n[Ver conversa completa]({})", payload.link_chat));
         }
-        
+
         // Adicionar mídia anexada se houver
         if let Some(ref media_url) = payload.media_url {
             if let Some(ref media_type) = payload.media_type {
                 description.push_str("\n\n**Mídia Anexada**\n");
-                
+
                 if media_type.contains("image") || media_type.contains("photo") {
                     // Para imagens, incluir link direto e preview no Markdown
                     description.push_str(&format!("🖼️ Imagem anexada: [Visualizar]({})\n", media_url));
@@ -403,7 +404,7 @@ impl WebhookPayload {
                 }
             }
         }
-        
+
         // Preparar campos personalizados do ClickUp
         let mut custom_fields = Vec::<CustomField>::new();
 
@@ -422,8 +423,9 @@ impl WebhookPayload {
                 // usar a mensagem original como título ao invés do reason genérico
                 if ai.reason.starts_with("Contém palavras-chave") {
                     // Usar a mensagem original como título (limitando a 80 caracteres)
+                    use chatguru_clickup_middleware::utils::truncate_with_suffix;
                     let titulo = if payload.texto_mensagem.len() > 80 {
-                        format!("{}...", &payload.texto_mensagem[..77])
+                        truncate_with_suffix(&payload.texto_mensagem, 77, "...")
                     } else {
                         payload.texto_mensagem.clone()
                     };
@@ -438,8 +440,9 @@ impl WebhookPayload {
                         format!("{} - {}", tipo, payload.nome)
                     } else {
                         // Fallback final: usar mensagem original
+                        use chatguru_clickup_middleware::utils::truncate_with_suffix;
                         let titulo = if payload.texto_mensagem.len() > 80 {
-                            format!("{}...", &payload.texto_mensagem[..77])
+                            truncate_with_suffix(&payload.texto_mensagem, 77, "...")
                         } else {
                             payload.texto_mensagem.clone()
                         };
@@ -458,7 +461,7 @@ impl WebhookPayload {
             task_name = format!("[TESTE] {}", task_name);
             tracing::info!("🧪 Tarefa de teste detectada, adicionado prefixo [TESTE]");
         }
-        
+
         // Mapear campos baseado na classificação AI
         if let Some(ai) = ai_classification {
             // Log dos novos campos opcionais para debug
@@ -471,9 +474,9 @@ impl WebhookPayload {
             if let Some(ref list_name) = ai.list_name {
                 tracing::info!("📋 List sugerida pela AI: {}", list_name);
             }
-            
+
             // Configuração carregada uma vez no worker e reutilizada aqui (melhoria de performance)
-            
+
             // Tipo de Atividade (dropdown) - OTIMIZADO: usar YAML como única fonte
             if let Some(ref tipo) = ai.tipo_atividade {
                 // Buscar ID do tipo de atividade
@@ -490,7 +493,7 @@ impl WebhookPayload {
                     tracing::warn!("Tipo de atividade '{}' não encontrado no YAML config", tipo);
                 }
             }
-            
+
             // Categoria (dropdown) - OTIMIZADO: usar YAML como única fonte
             if let Some(ref category) = ai.category {
                 // Obter ID da categoria do YAML
@@ -508,7 +511,7 @@ impl WebhookPayload {
                     tracing::warn!("Categoria '{}' não encontrada no YAML config", category);
                 }
             }
-            
+
             // Subcategoria (dropdown) - OTIMIZADO: usar mapeamento com IDs e estrelas
             if let Some(ref sub_categoria) = ai.sub_categoria {
                 if let Some(ref category) = ai.category {
@@ -587,7 +590,7 @@ impl WebhookPayload {
                     }
                 }
             }
-            
+
             // Status Back Office (dropdown) - OTIMIZADO: usar YAML como única fonte
             if let Some(ref status) = ai.status_back_office {
                 if let Some(status_id) = prompt_config.get_status_id(status) {
@@ -654,35 +657,35 @@ impl WebhookPayload {
             .custom_fields(custom_fields)
             .build()
     }
-    
+
     /// Converte payload ChatGuru para ClickUp (FORMATO IDÊNTICO AO LEGADO)
     fn chatguru_to_clickup(&self, payload: &ChatGuruPayload) -> CreateTaskRequest {
         // FORMATO EXATO DO SISTEMA LEGADO
         let mut description = String::new();
-        
+
         // Dados do Contato - FORMATO LEGADO
         description.push_str("**Dados do Contato**\n\n");
         description.push_str(&format!("- Nome: {}\n", payload.nome));
-        description.push_str(&format!("- Email: {}\n", 
+        description.push_str(&format!("- Email: {}\n",
             if !payload.email.is_empty() { &payload.email } else { &payload.celular }
         ));
         description.push_str(&format!("- Celular: {}\n", payload.celular));
         description.push_str(&format!("- Campanha: {}\n", payload.campanha_nome));
-        description.push_str(&format!("- Origem: {}\n", 
+        description.push_str(&format!("- Origem: {}\n",
             if !payload.origem.is_empty() { &payload.origem } else { "scheduler" }
         ));
-        
+
         // Mensagem - FORMATO LEGADO
         if !payload.texto_mensagem.is_empty() {
             description.push_str("\n**Mensagem**\n");
             description.push_str(&payload.texto_mensagem);
         }
-        
+
         // Adicionar mídia anexada se houver
         if let Some(ref media_url) = payload.media_url {
             if let Some(ref media_type) = payload.media_type {
                 description.push_str("\n\n**Mídia Anexada**\n");
-                
+
                 if media_type.contains("image") || media_type.contains("photo") {
                     // Para imagens, incluir link direto e preview no Markdown
                     description.push_str(&format!("🖼️ Imagem anexada: [Visualizar]({})\n", media_url));
@@ -697,13 +700,13 @@ impl WebhookPayload {
                 }
             }
         }
-        
+
         // Nome da tarefa
         let task_name = payload.nome.clone();
-        
+
         // Preparar campos personalizados do ClickUp
         let mut custom_fields = Vec::<CustomField>::new();
-        
+
         // Mapeamento correto: Info_2 → Solicitante, Info_1 → Conta cliente
         if let Some(info_2) = payload.campos_personalizados.get("Info_2") {
             if let Some(info_2_str) = info_2.as_str() {
@@ -732,11 +735,11 @@ impl WebhookPayload {
             .custom_fields(custom_fields)  // Adicionar campos personalizados
             .build()
     }
-    
+
     /// Converte payload EventType para ClickUp
     fn eventtype_to_clickup(&self, payload: &EventTypePayload) -> CreateTaskRequest {
         let data = &payload.data;
-        
+
         // Determina o título da tarefa
         let title = if let Some(ref task_title) = data.task_title {
             task_title.clone()
@@ -747,7 +750,7 @@ impl WebhookPayload {
         } else {
             format!("Evento: {}", payload.event_type)
         };
-        
+
         // Constrói descrição
         let mut description = format!(
             "**Tipo de Evento**: {}\n\
@@ -755,7 +758,7 @@ impl WebhookPayload {
              **Timestamp**: {}\n\n",
             payload.event_type, payload.id, payload.timestamp
         );
-        
+
         if let Some(ref lead_name) = data.lead_name {
             description.push_str(&format!("**Nome**: {}\n", lead_name));
         }
@@ -774,14 +777,14 @@ impl WebhookPayload {
         if let Some(ref status) = data.status {
             description.push_str(&format!("**Status**: {}\n", status));
         }
-        
+
         if !data.custom_data.is_empty() {
             description.push_str("\n**Dados Customizados**\n");
             for (key, value) in &data.custom_data {
                 description.push_str(&format!("- {}: {}\n", key, value));
             }
         }
-        
+
         // Define tags baseadas no tipo de evento
         let tags = match payload.event_type.as_str() {
             "new_lead" => vec!["lead".to_string(), "novo".to_string()],
@@ -796,13 +799,13 @@ impl WebhookPayload {
             .priority(TaskPriority::Normal)
             .build()
     }
-    
+
     /// Converte payload genérico para ClickUp
     fn generic_to_clickup(&self, payload: &GenericPayload) -> CreateTaskRequest {
         let nome = payload.nome.as_ref().map(|s| s.as_str()).unwrap_or("Contato");
         let celular = payload.celular.as_ref().map(|s| s.as_str()).unwrap_or("Não informado");
         let email = payload.email.as_ref().map(|s| s.as_str()).unwrap_or("Não informado");
-        
+
         let mut description = format!(
             "**Dados do Contato**\n\n\
              - Nome: {}\n\
@@ -810,11 +813,11 @@ impl WebhookPayload {
              - Email: {}\n",
             nome, celular, email
         );
-        
+
         if let Some(ref mensagem) = payload.mensagem {
             description.push_str(&format!("\n**Mensagem**\n{}\n", mensagem));
         }
-        
+
         if !payload.extra.is_empty() {
             description.push_str("\n**Dados Adicionais**\n");
             for (key, value) in &payload.extra {
@@ -828,7 +831,7 @@ impl WebhookPayload {
             .priority(TaskPriority::Normal)
             .build()
     }
-    
+
     /// Extrai um identificador único para busca de duplicatas
     pub fn get_task_title(&self) -> String {
         match self {

@@ -76,7 +76,8 @@ pub async fn handle_oauth_callback(
         (StatusCode::BAD_REQUEST, "Missing code parameter".to_string())
     })?;
 
-    log_info(&format!("🔑 [OAuth2] Code recebido: {}...", &code[..10.min(code.len())]));
+    use chatguru_clickup_middleware::utils::truncate_safe;
+    log_info(&format!("🔑 [OAuth2] Code recebido: {}...", truncate_safe(&code, 10)));
 
     // Trocar code por access token
     let oauth_client = OAuth2Client::new(oauth_state.config.clone());
@@ -91,7 +92,7 @@ pub async fn handle_oauth_callback(
 
     let access_token = token_response.access_token;
 
-    log_info(&format!("✅ [OAuth2] Token obtido: {}...", &access_token[..20.min(access_token.len())]));
+    log_info(&format!("✅ [OAuth2] Token obtido: {}...", truncate_safe(&access_token, 20)));
 
     // Verificar workspaces autorizados
     let teams = oauth_client
