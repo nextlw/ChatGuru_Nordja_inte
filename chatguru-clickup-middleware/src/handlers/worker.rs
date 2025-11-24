@@ -101,6 +101,20 @@ pub async fn worker_process_message(
     let payload: WebhookPayload = serde_json::from_str(raw_payload_str)
         .map_err(|e| AppError::ValidationError(format!("Invalid payload JSON: {}", e)))?;
 
+    // Verificar se é payload sintético (mídia já processada no webhook)
+    if let WebhookPayload::ChatGuru(ref chatguru_payload) = payload {
+        if let Some(true) = chatguru_payload._is_synthetic {
+            let media_type_info = chatguru_payload._original_media_type
+                .as_ref()
+                .map(|t| format!(" (tipo original: {})", t))
+                .unwrap_or_default();
+            log_info(&format!(
+                "📦 Payload sintético detectado{} - mídia já foi processada no webhook",
+                media_type_info
+            ));
+        }
+    }
+
     // Processar mensagem
     match process_message(state, payload).await {
         Ok(result) => {
@@ -125,6 +139,12 @@ async fn process_message(state: Arc<AppState>, payload: WebhookPayload) -> Resul
     // antes de enqueue, para evitar expiração de URLs do S3 (5min).
     // Se a mensagem contém mídia, ela já foi processada e o texto_mensagem
     // contém a transcrição/descrição extraída.
+    //
+    // Payloads sintéticos têm:
+    // - _is_synthetic: true
+    // - _original_media_type: tipo original da mídia
+    // - media_url, media_type, url_arquivo, tipo_mensagem: None (limpos)
+    // - texto_mensagem: contém transcrição/descrição extraída
 
     // Se Info_2 está vazio, não é cliente - retornar imediatamente
     if info_2.trim().is_empty() {
