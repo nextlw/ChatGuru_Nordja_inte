@@ -62,23 +62,23 @@ steps:
     args:
       - '-c'
       - |
-        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-        BACKUP_PATH="${_CONFIG_BUCKET}/backups/${TIMESTAMP}"
+        TIMESTAMP=$$(date +%Y%m%d-%H%M%S)
+        BACKUP_PATH="${_CONFIG_BUCKET}/backups/$${TIMESTAMP}"
         
         # Copiar configurações atuais para backup
-        gsutil -m cp -r chatguru-clickup-middleware/config/*.toml ${BACKUP_PATH}/
-        gsutil -m cp -r chatguru-clickup-middleware/config/*.yaml ${BACKUP_PATH}/
-        gsutil -m cp -r chatguru-clickup-middleware/config/*.yml ${BACKUP_PATH}/ 2>/dev/null || true
+        gsutil -m cp -r chatguru-clickup-middleware/config/*.toml $${BACKUP_PATH}/
+        gsutil -m cp -r chatguru-clickup-middleware/config/*.yaml $${BACKUP_PATH}/
+        gsutil -m cp -r chatguru-clickup-middleware/config/*.yml $${BACKUP_PATH}/ 2>/dev/null || true
         
         # Criar arquivo de metadados do backup
-        echo "Backup created at: ${TIMESTAMP}" > /tmp/backup-info.txt
+        echo "Backup created at: $${TIMESTAMP}" > /tmp/backup-info.txt
         echo "Commit SHA: ${COMMIT_SHA}" >> /tmp/backup-info.txt
         echo "Branch: ${BRANCH_NAME}" >> /tmp/backup-info.txt
         echo "Triggered by: ${_PR_NUMBER:-manual}" >> /tmp/backup-info.txt
-        gsutil cp /tmp/backup-info.txt ${BACKUP_PATH}/backup-info.txt
+        gsutil cp /tmp/backup-info.txt $${BACKUP_PATH}/backup-info.txt
         
         # Limpar backups antigos (manter últimos 30 dias)
-        gsutil -m rm -r $(gsutil ls ${_CONFIG_BUCKET}/backups/ | head -n -30) 2>/dev/null || true
+        gsutil -m rm -r $$(gsutil ls ${_CONFIG_BUCKET}/backups/ | head -n -30) 2>/dev/null || true
     waitFor: ['sync-config-files']
 
   # Step 5: Deploy para Cloud Run (produção)
@@ -134,25 +134,25 @@ steps:
       - '-c'
       - |
         # Obter URL do serviço
-        SERVICE_URL=$(gcloud run services describe ${_SERVICE_NAME} \
+        SERVICE_URL=$$(gcloud run services describe ${_SERVICE_NAME} \
           --region=${_REGION} \
           --format='value(status.url)')
         
-        echo "Service deployed at: ${SERVICE_URL}"
+        echo "Service deployed at: $${SERVICE_URL}"
         
         # Testar health check
         for i in {1..5}; do
-          if curl -f "${SERVICE_URL}/health" > /dev/null 2>&1; then
+          if curl -f "$${SERVICE_URL}/health" > /dev/null 2>&1; then
             echo "Health check passed!"
             break
           else
-            echo "Waiting for service to be ready... (attempt $i/5)"
+            echo "Waiting for service to be ready... (attempt $$i/5)"
             sleep 10
           fi
         done
         
         # Testar ready check
-        curl -f "${SERVICE_URL}/ready" || exit 1
+        curl -f "$${SERVICE_URL}/ready" || exit 1
     waitFor: ['deploy-cloud-run']
 
   # Step 7: Notificar sobre arquivos de configuração sincronizados
