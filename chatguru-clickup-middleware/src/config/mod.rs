@@ -1,5 +1,6 @@
-pub mod settings;
-pub mod custom_fields_loader;
+//! Configurações da aplicação
+//!
+//! Reutiliza as configurações do prompt YAML.
 
-pub use settings::Settings;
-pub use custom_fields_loader::{CustomFieldsMappings, SubcategoryInfo};
+pub use crate::services::prompts::AiPromptConfig;
+

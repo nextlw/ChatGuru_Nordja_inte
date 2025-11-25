@@ -1,21 +1,9 @@
-// Serviços necessários para arquitetura event-driven (SEM BANCO DE DADOS)
-// NOTA: ChatGuru agora é um crate separado em chatguru/
-// NOTA: ClickUp v2 agora usa o crate oficial clickup_v2
-pub mod secrets;
-pub mod prompts;  // Configuração de prompts AI (YAML-only, sem PostgreSQL)
+//! Serviços para o Job de Enriquecimento
 
-// Re-exports (explícitos para evitar ambiguidade)
-pub use chatguru::ChatGuruClient;
-pub use prompts::AiPromptConfig;
-pub use secrets::SecretManagerService;  // ✅ Exporta SecretManagerService
+pub mod prompts;
+pub mod log_parser;
+pub mod task_fetcher;
+pub mod task_classifier;
+pub mod field_validator;
+pub mod task_enricher;
 
-// Re-exporta do crate mensageria
-pub use mensageria::{MessageQueueService, QueuedMessage};
-
-// Re-exporta do crate ia-service
-pub use ia_service::{IaService, IaServiceConfig, ActivityClassification, IaResult, IaServiceError};
-
-// Compatibilidade com código legado: alias para ActivityClassification
-pub type OpenAIClassification = ActivityClassification;
-
-// OAuth2 module agora está em src/auth/ (módulo separado e isolado)

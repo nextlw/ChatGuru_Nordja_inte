@@ -2,14 +2,14 @@
 # Este arquivo configura o pipeline de CI/CD para o chatguru-clickup-middleware
 
 # Timeout global do build
-timeout: '1800s'
+timeout: "1800s"
 
 options:
   # Usar machine type mais rápido para builds Rust
-  machineType: 'E2_HIGHCPU_8'
+  machineType: "E2_HIGHCPU_8"
   # Logs para debugging
   logging: CLOUD_LOGGING_ONLY
-  
+
 # Substituições para usar em múltiplos lugares
 substitutions:
   _REGION: southamerica-east1
@@ -19,97 +19,97 @@ substitutions:
 
 steps:
   # Step 1: Build da imagem Docker
-  - name: 'gcr.io/cloud-builders/docker'
-    id: 'build-image'
+  - name: "gcr.io/cloud-builders/docker"
+    id: "build-image"
     args:
-      - 'build'
-      - '-t'
-      - '${_IMAGE_NAME}:${COMMIT_SHA}'
-      - '-t'
-      - '${_IMAGE_NAME}:latest'
-      - '-f'
-      - 'chatguru-clickup-middleware/Dockerfile'
-      - 'chatguru-clickup-middleware'
-    timeout: '900s'
+      - "build"
+      - "-t"
+      - "${_IMAGE_NAME}:${COMMIT_SHA}"
+      - "-t"
+      - "${_IMAGE_NAME}:latest"
+      - "-f"
+      - "chatguru-clickup-middleware/Dockerfile"
+      - "chatguru-clickup-middleware"
+    timeout: "900s"
 
   # Step 2: Push da imagem para o Container Registry
-  - name: 'gcr.io/cloud-builders/docker'
-    id: 'push-image'
+  - name: "gcr.io/cloud-builders/docker"
+    id: "push-image"
     args:
-      - 'push'
-      - '--all-tags'
-      - '${_IMAGE_NAME}'
-    waitFor: ['build-image']
+      - "push"
+      - "--all-tags"
+      - "${_IMAGE_NAME}"
+    waitFor: ["build-image"]
 
   # Step 3: Sincronizar arquivos de configuração para o bucket GCS
-  - name: 'gcr.io/cloud-builders/gsutil'
-    id: 'sync-config-files'
+  - name: "gcr.io/cloud-builders/gsutil"
+    id: "sync-config-files"
     args:
-      - '-m'  # Multi-threading para performance
-      - 'rsync'
-      - '-r'  # Recursivo
-      - '-d'  # Delete files no destino que não existem na origem
-      - '-x'  # Excluir padrões (definido abaixo)
-      - '.*\.toml\.example$'  # Excluir arquivos .toml.example
-      - 'chatguru-clickup-middleware/config/'
-      - '${_CONFIG_BUCKET}/'
-    waitFor: ['-']  # Pode rodar em paralelo com build
+      - "-m" # Multi-threading para performance
+      - "rsync"
+      - "-r" # Recursivo
+      - "-d" # Delete files no destino que não existem na origem
+      - "-x" # Excluir padrões (definido abaixo)
+      - '.*\.toml\.example$' # Excluir arquivos .toml.example
+      - "chatguru-clickup-middleware/config/"
+      - "${_CONFIG_BUCKET}/"
+    waitFor: ["-"] # Pode rodar em paralelo com build
 
   # Step 4: Criar backup dos arquivos de configuração com timestamp
-  - name: 'gcr.io/cloud-builders/gsutil'
-    id: 'backup-config'
-    entrypoint: 'bash'
+  - name: "gcr.io/cloud-builders/gsutil"
+    id: "backup-config"
+    entrypoint: "bash"
     args:
-      - '-c'
+      - "-c"
       - |
         TIMESTAMP=$$(date +%Y%m%d-%H%M%S)
         BACKUP_PATH="${_CONFIG_BUCKET}/backups/$${TIMESTAMP}"
-        
+
         # Copiar configurações atuais para backup
         gsutil -m cp -r chatguru-clickup-middleware/config/*.toml $${BACKUP_PATH}/
         gsutil -m cp -r chatguru-clickup-middleware/config/*.yaml $${BACKUP_PATH}/
         gsutil -m cp -r chatguru-clickup-middleware/config/*.yml $${BACKUP_PATH}/ 2>/dev/null || true
-        
+
         # Criar arquivo de metadados do backup
         echo "Backup created at: $${TIMESTAMP}" > /tmp/backup-info.txt
         echo "Commit SHA: ${COMMIT_SHA}" >> /tmp/backup-info.txt
         echo "Branch: ${BRANCH_NAME}" >> /tmp/backup-info.txt
         echo "Triggered by: ${_PR_NUMBER:-manual}" >> /tmp/backup-info.txt
         gsutil cp /tmp/backup-info.txt $${BACKUP_PATH}/backup-info.txt
-        
+
         # Limpar backups antigos (manter últimos 30 dias)
         gsutil -m rm -r $$(gsutil ls ${_CONFIG_BUCKET}/backups/ | head -n -30) 2>/dev/null || true
-    waitFor: ['sync-config-files']
+    waitFor: ["sync-config-files"]
 
   # Step 5: Deploy para Cloud Run (produção)
-  - name: 'gcr.io/cloud-builders/gcloud'
-    id: 'deploy-cloud-run'
+  - name: "gcr.io/cloud-builders/gcloud"
+    id: "deploy-cloud-run"
     args:
-      - 'run'
-      - 'deploy'
-      - '${_SERVICE_NAME}'
-      - '--image'
-      - '${_IMAGE_NAME}:${COMMIT_SHA}'
-      - '--region'
-      - '${_REGION}'
-      - '--platform'
-      - 'managed'
-      - '--allow-unauthenticated'
-      - '--traffic'
-      - '100'
-      - '--memory'
-      - '1Gi'
-      - '--cpu'
-      - '2'
-      - '--timeout'
-      - '300'
-      - '--min-instances'
-      - '1'
-      - '--max-instances'
-      - '10'
-      - '--concurrency'
-      - '100'
-      - '--set-env-vars'
+      - "run"
+      - "deploy"
+      - "${_SERVICE_NAME}"
+      - "--image"
+      - "${_IMAGE_NAME}:${COMMIT_SHA}"
+      - "--region"
+      - "${_REGION}"
+      - "--platform"
+      - "managed"
+      - "--allow-unauthenticated"
+      - "--traffic"
+      - "100"
+      - "--memory"
+      - "1Gi"
+      - "--cpu"
+      - "2"
+      - "--timeout"
+      - "300"
+      - "--min-instances"
+      - "1"
+      - "--max-instances"
+      - "10"
+      - "--concurrency"
+      - "100"
+      - "--set-env-vars"
       - |
         RUST_LOG=info,
         RUST_ENV=production,
@@ -119,27 +119,29 @@ steps:
         CLICKUP_CLIENT_SECRET=N8ZKCJMZQ86439FIVHRWZTAQ09VY7ZW86NSV0TB71AIBUISY0RMISXME23XAWBHG,
         CLICKUP_ACCESS_TOKEN=106092691_dfa687f9f3f17257583e02da91097804f1e01d15e89617a06db2ba3e3f37e62e,
         CLICKUP_REDIRECT_URI=https://chatguru-clickup-middleware-707444002434.southamerica-east1.run.app/auth/clickup/callback,
-        CLICKUP_API_BASE_URL=https://api.clickup.com/api/v2
-      - '--set-secrets'
+        CLICKUP_API_BASE_URL=https://api.clickup.com/api/v2,
+        AI_PROMPT_SOURCE=file
+      - "--set-secrets"
       - |
         OPENAI_API_KEY=openai-api-key:latest,
-        CHATGURU_API_TOKEN=chatguru-api-token:latest
-    waitFor: ['push-image']
+        CHATGURU_API_TOKEN=chatguru-api-token:latest,
+        CLICKUP_API_TOKEN=clickup-api-token:latest
+    waitFor: ["push-image"]
 
   # Step 6: Validar deployment
-  - name: 'gcr.io/cloud-builders/gcloud'
-    id: 'validate-deployment'
-    entrypoint: 'bash'
+  - name: "gcr.io/cloud-builders/gcloud"
+    id: "validate-deployment"
+    entrypoint: "bash"
     args:
-      - '-c'
+      - "-c"
       - |
         # Obter URL do serviço
         SERVICE_URL=$$(gcloud run services describe ${_SERVICE_NAME} \
           --region=${_REGION} \
           --format='value(status.url)')
-        
+
         echo "Service deployed at: $${SERVICE_URL}"
-        
+
         # Testar health check
         for i in {1..5}; do
           if curl -f "$${SERVICE_URL}/health" > /dev/null 2>&1; then
@@ -150,64 +152,89 @@ steps:
             sleep 10
           fi
         done
-        
+
         # Testar ready check
         curl -f "$${SERVICE_URL}/ready" || exit 1
-    waitFor: ['deploy-cloud-run']
+
+        # Testar endpoint de enriquecimento (deve retornar erro sem payload, mas não 404)
+        HTTP_CODE=$$(curl -s -o /dev/null -w "%{http_code}" "$${SERVICE_URL}/enrich" || echo "000")
+        if [ "$$HTTP_CODE" = "404" ]; then
+          echo "❌ Endpoint /enrich não encontrado!"
+          exit 1
+        else
+          echo "✅ Endpoint /enrich está acessível (HTTP $$HTTP_CODE)"
+        fi
+    waitFor: ["deploy-cloud-run"]
 
   # Step 7: Notificar sobre arquivos de configuração sincronizados
-  - name: 'gcr.io/cloud-builders/gcloud'
-    id: 'list-synced-configs'
-    entrypoint: 'bash'
+  - name: "gcr.io/cloud-builders/gcloud"
+    id: "list-synced-configs"
+    entrypoint: "bash"
     args:
-      - '-c'
+      - "-c"
       - |
         echo "===== Configuration files synced to bucket ====="
         gsutil ls -l ${_CONFIG_BUCKET}/*.toml ${_CONFIG_BUCKET}/*.yaml
         echo ""
         echo "===== Latest backup created ====="
         gsutil ls -d ${_CONFIG_BUCKET}/backups/* | tail -1
-    waitFor: ['backup-config']
+    waitFor: ["backup-config"]
 
   # Step 8: Configurar trigger para Pub/Sub (se necessário)
-  - name: 'gcr.io/cloud-builders/gcloud'
-    id: 'setup-pubsub'
-    entrypoint: 'bash'
+  - name: "gcr.io/cloud-builders/gcloud"
+    id: "setup-pubsub"
+    entrypoint: "bash"
     args:
-      - '-c'
+      - "-c"
       - |
         # Verificar se os tópicos existem, senão criar
         gcloud pubsub topics describe chatguru-webhook-raw || \
           gcloud pubsub topics create chatguru-webhook-raw
-        
+
         gcloud pubsub topics describe media-processing-requests || \
           gcloud pubsub topics create media-processing-requests
-        
+
         gcloud pubsub topics describe media-processing-results || \
           gcloud pubsub topics create media-processing-results
-        
+
+        # Tópico para job de enriquecimento de tarefas
+        gcloud pubsub topics describe task-enrichment-trigger || \
+          gcloud pubsub topics create task-enrichment-trigger
+
         # Verificar subscriptions
         gcloud pubsub subscriptions describe chatguru-events-subscription || \
           gcloud pubsub subscriptions create chatguru-events-subscription \
             --topic=chatguru-webhook-raw \
             --ack-deadline=60
-    waitFor: ['-']  # Pode rodar em paralelo
+
+        # Subscription para job de enriquecimento (push para Cloud Run)
+        SERVICE_URL=$$(gcloud run services describe ${_SERVICE_NAME} \
+          --region=${_REGION} \
+          --format='value(status.url)')
+
+        gcloud pubsub subscriptions describe task-enrichment-sub || \
+          gcloud pubsub subscriptions create task-enrichment-sub \
+            --topic=task-enrichment-trigger \
+            --push-endpoint=$${SERVICE_URL}/enrich \
+            --ack-deadline=60 \
+            --message-retention-duration=1d
+    waitFor: ["deploy-cloud-run"]
 
 # Imagens a serem armazenadas no Container Registry
 images:
-  - '${_IMAGE_NAME}:${COMMIT_SHA}'
-  - '${_IMAGE_NAME}:latest'
+  - "${_IMAGE_NAME}:${COMMIT_SHA}"
+  - "${_IMAGE_NAME}:latest"
 
 # Artefatos a serem salvos
 artifacts:
   objects:
-    location: 'gs://${PROJECT_ID}_cloudbuild/artifacts/${BUILD_ID}'
+    location: "gs://${PROJECT_ID}_cloudbuild/artifacts/${BUILD_ID}"
     paths:
-      - 'chatguru-clickup-middleware/config/*.toml'
-      - 'chatguru-clickup-middleware/config/*.yaml'
+      - "chatguru-clickup-middleware/config/*.toml"
+      - "chatguru-clickup-middleware/config/*.yaml"
 
 # Tags para organização
 tags:
-  - 'chatguru-middleware'
-  - 'production-deploy'
-  - 'config-sync'
+  - "chatguru-middleware"
+  - "production-deploy"
+  - "config-sync"

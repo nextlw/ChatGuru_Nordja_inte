@@ -1,18 +1,4 @@
-// Handlers para arquitetura event-driven
-pub mod health;
-pub mod webhook;
-pub mod worker;
+//! Handlers para o Job de Enriquecimento
 
-// pub mod db_check; // DESABILITADO - sem banco
-// pub mod migrate; // DESABILITADO - sem banco
-// pub mod sync_clickup; // DESABILITADO - sem banco
+pub mod pubsub_handler;
 
-pub use health::*;
-pub use webhook::*;
-pub use worker::worker_process_message;
-
-// pub use db_check::*; // DESABILITADO
-// pub use migrate::*; // DESABILITADO
-// pub use sync_clickup::*; // DESABILITADO
-
-// OAuth2 handlers agora estão em src/auth/handlers.rs (módulo separado)

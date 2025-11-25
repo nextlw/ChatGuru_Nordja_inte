@@ -1,0 +1,57 @@
+# App Engine configuration para Job de Enriquecimento de Tarefas
+# Este serviço recebe mensagens do Pub/Sub quando tarefas são criadas
+# e enriquece com categoria_nova, subcategoria_nova e estrelas
+
+runtime: custom
+env: flex
+
+# Configurações de recursos
+resources:
+  cpu: 2
+  memory_gb: 1
+  disk_size_gb: 10
+
+# Configurações de autoscaling
+automatic_scaling:
+  min_num_instances: 1
+  max_num_instances: 10
+  cool_down_period_sec: 120
+  cpu_utilization:
+    target_utilization: 0.6
+
+# Health checks
+readiness_check:
+  path: /ready
+  check_interval_sec: 5
+  timeout_sec: 4
+  failure_threshold: 2
+  success_threshold: 2
+  app_start_timeout_sec: 300
+
+liveness_check:
+  path: /health
+  check_interval_sec: 30
+  timeout_sec: 4
+  failure_threshold: 4
+  success_threshold: 2
+
+# Variáveis de ambiente
+env_variables:
+  RUST_LOG: info
+  RUST_ENV: production
+  PORT: "8080"
+  # CLICKUP_API_TOKEN será definido via Secret Manager
+  # OPENAI_API_KEY será definido via Secret Manager
+
+# Secrets do Secret Manager
+beta_settings:
+  cloud_sql_instances: [] # Não usa Cloud SQL
+
+# Network
+network:
+  forwarded_ports:
+    - 8080
+
+# Build settings
+build:
+  timeout: 1800s

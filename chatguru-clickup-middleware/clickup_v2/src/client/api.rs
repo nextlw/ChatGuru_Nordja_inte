@@ -503,6 +503,38 @@ impl ClickUpClient {
             .map_err(|e| AuthError::parse_error(&format!("Falha ao parsear resposta JSON: {}", e)))
     }
 
+    /// Executa uma requisição PUT
+    async fn put<T: serde::Serialize>(&self, endpoint: &str, body: &T) -> AuthResult<Value> {
+        let url = self.build_url(endpoint);
+        let json_body = serde_json::to_string(body)
+            .map_err(|e| AuthError::parse_error(&format!("Falha ao serializar body: {}", e)))?;
+
+        log::debug!("PUT {} with body: {}", url, json_body);
+
+        let response = self.client
+            .put(&url)
+            .header("Content-Type", "application/json")
+            .body(json_body)
+            .send()
+            .await
+            .map_err(|e| AuthError::network_error(&format!("Falha na requisição PUT: {}", e)))?;
+
+        let status = response.status();
+        let response_text = response
+            .text()
+            .await
+            .map_err(|e| AuthError::network_error(&format!("Falha ao ler resposta: {}", e)))?;
+
+        log::debug!("Response status: {}, body: {}", status, response_text);
+
+        if !status.is_success() {
+            return Err(self.handle_error_response(status.as_u16(), &response_text));
+        }
+
+        serde_json::from_str(&response_text)
+            .map_err(|e| AuthError::parse_error(&format!("Falha ao parsear resposta JSON: {}", e)))
+    }
+
     /// Trata respostas de erro da API
     fn handle_error_response(&self, status: u16, body: &str) -> AuthError {
         match status {
@@ -519,7 +551,7 @@ impl ClickUpClient {
     /// Faz uma requisição simples para verificar se o token está funcionando
     pub async fn health_check(&self) -> AuthResult<bool> {
         log::info!("🏥 Executando health check...");
-        
+
         match self.get_authorized_user().await {
             Ok(_) => {
                 log::info!("✅ Health check passou - credenciais válidas");
@@ -549,7 +581,7 @@ impl ClickUpClient {
     /// **MÉTODO AUXILIAR: Parse User** - Converte resposta JSON para struct tipada
     pub async fn get_user_info(&self) -> AuthResult<AuthorizedUser> {
         let response = self.get_authorized_user().await?;
-        
+
         let user_data = response
             .get("user")
             .ok_or_else(|| AuthError::parse_error("Campo 'user' não encontrado na resposta"))?;
@@ -561,7 +593,7 @@ impl ClickUpClient {
     /// **MÉTODO AUXILIAR: Parse Teams** - Converte resposta JSON para lista tipada
     pub async fn get_teams_info(&self) -> AuthResult<Vec<AuthorizedTeam>> {
         let response = self.get_authorized_teams().await?;
-        
+
         let teams_data = response
             .get("teams")
             .and_then(|t| t.as_array())
@@ -582,7 +614,7 @@ impl ClickUpClient {
     /// **MÉTODO AUXILIAR: Get First Workspace ID** - Obtém o ID do primeiro workspace disponível
     pub async fn get_first_workspace_id(&self) -> AuthResult<String> {
         let teams = self.get_authorized_teams().await?;
-        
+
         let teams_array = teams
             .get("teams")
             .and_then(|t| t.as_array())
@@ -604,7 +636,7 @@ impl ClickUpClient {
     /// **MÉTODO DE DIAGNÓSTICO: Test Connection** - Testa a conexão completa
     pub async fn test_connection(&self) -> AuthResult<Value> {
         log::info!("🧪 Testando conexão completa com ClickUp...");
-        
+
         // 1. Testa health check
         let health = self.health_check().await?;
         if !health {
@@ -666,10 +698,10 @@ impl ClickUpClient {
     /// Nota: ClickUp não expõe endpoint público para isso, mas podemos simular
     pub async fn get_rate_limit_info(&self) -> AuthResult<Value> {
         log::info!("📊 Verificando informações de rate limit...");
-        
+
         // Faz uma requisição simples para capturar headers de rate limit
         let url = self.build_url("user");
-        
+
         let response = self.client
             .get(&url)
             .send()
@@ -749,7 +781,7 @@ impl ClickUpClient {
             if let Some(entry) = cache.get(&cache_key) {
                 let now = chrono::Utc::now();
                 let cache_age = now - entry.cached_at;
-                
+
                 // Cache válido por 3 horas
                 if cache_age < chrono::Duration::hours(3) {
                     log::info!("✅ Resultado encontrado em cache (idade: {} minutos)",
@@ -764,7 +796,7 @@ impl ClickUpClient {
 
         // Se não estiver em cache, busca na API
         log::info!("📡 Buscando na API do ClickUp...");
-        
+
         let result = match entity_type {
             EntityType::Space => self.search_spaces(&team_id, name).await?,
             EntityType::Folder => self.search_folders(&team_id, name).await?,
@@ -776,12 +808,12 @@ impl ClickUpClient {
         if result.found {
             let mut cache = self.cache.write().unwrap();
             let now = chrono::Utc::now();
-            
+
             cache.insert(cache_key, CacheEntry {
                 result: result.clone(),
                 cached_at: now,
             });
-            
+
             log::info!("💾 Resultado armazenado em cache");
         }
 
@@ -792,7 +824,7 @@ impl ClickUpClient {
     async fn search_spaces(&self, team_id: &str, name: &str) -> AuthResult<SearchResult> {
         let endpoint = format!("team/{}/space", team_id);
         let response = self.get(&endpoint).await?;
-        
+
         let spaces = response
             .get("spaces")
             .and_then(|s| s.as_array())
@@ -805,12 +837,12 @@ impl ClickUpClient {
             let space_name = space.get("name")
                 .and_then(|n| n.as_str())
                 .unwrap_or("");
-            
+
             if space_name.to_lowercase().contains(&name_lower) {
                 let space_id = space.get("id")
                     .and_then(|i| i.as_str())
                     .unwrap_or("");
-                
+
                 items.push(EntityItem {
                     id: space_id.to_string(),
                     name: space_name.to_string(),
@@ -835,7 +867,7 @@ impl ClickUpClient {
         // Primeiro obtém todos os spaces
         let spaces_endpoint = format!("team/{}/space", team_id);
         let spaces_response = self.get(&spaces_endpoint).await?;
-        
+
         let spaces = spaces_response
             .get("spaces")
             .and_then(|s| s.as_array())
@@ -852,21 +884,21 @@ impl ClickUpClient {
             let space_name = space.get("name")
                 .and_then(|n| n.as_str())
                 .unwrap_or("");
-            
+
             let folders_endpoint = format!("space/{}/folder", space_id);
-            
+
             if let Ok(folders_response) = self.get(&folders_endpoint).await {
                 if let Some(folders) = folders_response.get("folders").and_then(|f| f.as_array()) {
                     for folder in folders {
                         let folder_name = folder.get("name")
                             .and_then(|n| n.as_str())
                             .unwrap_or("");
-                        
+
                         if folder_name.to_lowercase().contains(&name_lower) {
                             let folder_id = folder.get("id")
                                 .and_then(|i| i.as_str())
                                 .unwrap_or("");
-                            
+
                             items.push(EntityItem {
                                 id: folder_id.to_string(),
                                 name: folder_name.to_string(),
@@ -896,7 +928,7 @@ impl ClickUpClient {
         // Primeiro obtém todos os spaces
         let spaces_endpoint = format!("team/{}/space", team_id);
         let spaces_response = self.get(&spaces_endpoint).await?;
-        
+
         let spaces = spaces_response
             .get("spaces")
             .and_then(|s| s.as_array())
@@ -912,22 +944,22 @@ impl ClickUpClient {
             let space_name = space.get("name")
                 .and_then(|n| n.as_str())
                 .unwrap_or("");
-            
+
             // Busca lists diretamente no space
             let lists_endpoint = format!("space/{}/list", space_id);
-            
+
             if let Ok(lists_response) = self.get(&lists_endpoint).await {
                 if let Some(lists) = lists_response.get("lists").and_then(|l| l.as_array()) {
                     for list in lists {
                         let list_name = list.get("name")
                             .and_then(|n| n.as_str())
                             .unwrap_or("");
-                        
+
                         if list_name.to_lowercase().contains(&name_lower) {
                             let list_id = list.get("id")
                                 .and_then(|i| i.as_str())
                                 .unwrap_or("");
-                            
+
                             items.push(EntityItem {
                                 id: list_id.to_string(),
                                 name: list_name.to_string(),
@@ -945,7 +977,7 @@ impl ClickUpClient {
 
             // Busca lists dentro de folders
             let folders_endpoint = format!("space/{}/folder", space_id);
-            
+
             if let Ok(folders_response) = self.get(&folders_endpoint).await {
                 if let Some(folders) = folders_response.get("folders").and_then(|f| f.as_array()) {
                     for folder in folders {
@@ -955,21 +987,21 @@ impl ClickUpClient {
                         let folder_name = folder.get("name")
                             .and_then(|n| n.as_str())
                             .unwrap_or("");
-                        
+
                         let folder_lists_endpoint = format!("folder/{}/list", folder_id);
-                        
+
                         if let Ok(folder_lists_response) = self.get(&folder_lists_endpoint).await {
                             if let Some(lists) = folder_lists_response.get("lists").and_then(|l| l.as_array()) {
                                 for list in lists {
                                     let list_name = list.get("name")
                                         .and_then(|n| n.as_str())
                                         .unwrap_or("");
-                                    
+
                                     if list_name.to_lowercase().contains(&name_lower) {
                                         let list_id = list.get("id")
                                             .and_then(|i| i.as_str())
                                             .unwrap_or("");
-                                        
+
                                         items.push(EntityItem {
                                             id: list_id.to_string(),
                                             name: list_name.to_string(),
@@ -1002,9 +1034,9 @@ impl ClickUpClient {
         let endpoint = format!("team/{}/task", team_id);
         let mut url = self.build_url(&endpoint);
         url.push_str(&format!("?name={}", urlencoding::encode(name)));
-        
+
         log::debug!("GET {}", url);
-        
+
         let response = self.client
             .get(&url)
             .send()
@@ -1025,7 +1057,7 @@ impl ClickUpClient {
 
         let response_json: Value = serde_json::from_str(&response_text)
             .map_err(|e| AuthError::parse_error(&format!("Falha ao parsear JSON: {}", e)))?;
-        
+
         let empty_vec = Vec::new();
         let tasks = response_json
             .get("tasks")
@@ -1041,7 +1073,7 @@ impl ClickUpClient {
             let task_id = task.get("id")
                 .and_then(|i| i.as_str())
                 .unwrap_or("");
-            
+
             // Obtém informações da lista para construir a URL
             let list_id = task.get("list")
                 .and_then(|l| l.get("id"))
@@ -1051,7 +1083,7 @@ impl ClickUpClient {
                 .and_then(|l| l.get("name"))
                 .and_then(|n| n.as_str())
                 .unwrap_or("");
-            
+
             items.push(EntityItem {
                 id: task_id.to_string(),
                 name: task_name.to_string(),
@@ -1081,7 +1113,7 @@ impl ClickUpClient {
     pub fn get_cache_stats(&self) -> Value {
         let cache = self.cache.read().unwrap();
         let now = chrono::Utc::now();
-        
+
         let mut stats = json!({
             "total_entries": cache.len(),
             "entries": []
@@ -1199,6 +1231,14 @@ impl ClickUpClient {
         self.get(&endpoint).await
     }
 
+    /// **MÉTODO AUXILIAR: Update Task** - Atualiza uma task
+    /// PUT /task/{task_id}
+    pub async fn update_task<T: serde::Serialize>(&self, task_id: &str, body: T) -> AuthResult<Value> {
+        log::info!("📝 Atualizando task: {}", task_id);
+        let endpoint = format!("task/{}", task_id);
+        self.put(&endpoint, &body).await
+    }
+
     /// **MÉTODO AUXILIAR: Update Task Custom Field** - Atualiza um campo personalizado
     /// POST /task/{task_id}/field/{field_id}
     ///
@@ -1267,7 +1307,7 @@ mod search_tests {
                     token,
                     env_manager.api_base_url
                 );
-                
+
                 // Obtém o team_id do ambiente ou usa o primeiro disponível
                 let team_id = if let Ok(teams) = client.get_authorized_teams().await {
                     teams
@@ -1281,9 +1321,9 @@ mod search_tests {
                 } else {
                     "test_team".to_string()
                 };
-                
+
                 println!("🧪 Testando pesquisa de entidades com team_id: {}", team_id);
-                
+
                 // Teste 1: Pesquisar por space
                 println!("\n📍 Teste 1: Pesquisando por space...");
                 match client.search_entity(
@@ -1295,12 +1335,12 @@ mod search_tests {
                         println!("  ✅ Pesquisa concluída");
                         println!("  📊 Encontrado: {}", result.found);
                         println!("  📦 Total de items: {}", result.items.len());
-                        
+
                         for item in &result.items {
                             println!("    • {} (ID: {})", item.name, item.id);
                             println!("      URL: {}", item.url);
                         }
-                        
+
                         if result.cached_at.is_some() {
                             println!("  ⚡ Resultado veio do cache!");
                         } else {
@@ -1309,7 +1349,7 @@ mod search_tests {
                     },
                     Err(e) => println!("  ⚠️ Erro na pesquisa: {}", e)
                 }
-                
+
                 // Teste 2: Pesquisar por folder
                 println!("\n📍 Teste 2: Pesquisando por folder...");
                 match client.search_entity(
@@ -1321,7 +1361,7 @@ mod search_tests {
                         println!("  ✅ Pesquisa concluída");
                         println!("  📊 Encontrado: {}", result.found);
                         println!("  📦 Total de folders: {}", result.items.len());
-                        
+
                         for item in &result.items {
                             println!("    • {} (ID: {})", item.name, item.id);
                             println!("      URL: {}", item.url);
@@ -1332,7 +1372,7 @@ mod search_tests {
                     },
                     Err(e) => println!("  ⚠️ Erro na pesquisa: {}", e)
                 }
-                
+
                 // Teste 3: Pesquisar por list
                 println!("\n📍 Teste 3: Pesquisando por list...");
                 match client.search_entity(
@@ -1344,7 +1384,7 @@ mod search_tests {
                         println!("  ✅ Pesquisa concluída");
                         println!("  📊 Encontrado: {}", result.found);
                         println!("  📦 Total de lists: {}", result.items.len());
-                        
+
                         for item in &result.items {
                             println!("    • {} (ID: {})", item.name, item.id);
                             println!("      URL: {}", item.url);
@@ -1355,7 +1395,7 @@ mod search_tests {
                     },
                     Err(e) => println!("  ⚠️ Erro na pesquisa: {}", e)
                 }
-                
+
                 // Teste 4: Pesquisar por task
                 println!("\n📍 Teste 4: Pesquisando por task...");
                 match client.search_entity(
@@ -1367,7 +1407,7 @@ mod search_tests {
                         println!("  ✅ Pesquisa concluída");
                         println!("  📊 Encontrado: {}", result.found);
                         println!("  📦 Total de tasks: {}", result.items.len());
-                        
+
                         for item in &result.items {
                             println!("    • {} (ID: {})", item.name, item.id);
                             println!("      URL: {}", item.url);
@@ -1378,11 +1418,11 @@ mod search_tests {
                     },
                     Err(e) => println!("  ⚠️ Erro na pesquisa: {}", e)
                 }
-                
+
                 // Teste 5: Segunda pesquisa do mesmo item (deve vir do cache)
                 println!("\n📍 Teste 5: Testando cache (pesquisando novamente o mesmo space)...");
                 let start = std::time::Instant::now();
-                
+
                 match client.search_entity(
                     "Test Space",
                     EntityType::Space,
@@ -1391,7 +1431,7 @@ mod search_tests {
                     Ok(result) => {
                         let duration = start.elapsed();
                         println!("  ✅ Pesquisa concluída em {:?}", duration);
-                        
+
                         if result.cached_at.is_some() {
                             println!("  ⚡ Resultado veio do cache (como esperado)!");
                             println!("  ⏱️ Cache criado em: {}",
@@ -1402,12 +1442,12 @@ mod search_tests {
                     },
                     Err(e) => println!("  ⚠️ Erro na pesquisa: {}", e)
                 }
-                
+
                 // Teste 6: Obter estatísticas do cache
                 println!("\n📍 Teste 6: Estatísticas do cache...");
                 let stats = client.get_cache_stats();
                 println!("  📊 Cache stats: {}", serde_json::to_string_pretty(&stats).unwrap());
-                
+
                 // Teste 7: Limpar cache
                 println!("\n📍 Teste 7: Limpando cache...");
                 client.clear_search_cache();
@@ -1431,10 +1471,10 @@ mod search_tests {
                     token,
                     env_manager.api_base_url
                 );
-                
+
                 // O team_id pode vir do .env ou ser None para usar o primeiro disponível
                 println!("\n🧪 Testando pesquisa com team_id do ambiente");
-                
+
                 // Teste sem especificar team_id (usa o primeiro disponível)
                 match client.search_entity(
                     "Test",
@@ -1478,15 +1518,15 @@ mod tests {
         // Usa URL da configuração ou padrão
         let base_url = std::env::var("CLICKUP_API_BASE_URL")
             .unwrap_or_else(|_| "https://api.clickup.com/api/v2".to_string());
-        
+
         let client = ClickUpClient::new(
             "test_token".to_string(),
             format!("{}/", base_url) // Com barra no final para testar normalização
         );
-        
+
         let url1 = client.build_url("user");
         let url2 = client.build_url("/team");
-        
+
         assert_eq!(url1, format!("{}/user", base_url.trim_end_matches('/')));
         assert_eq!(url2, format!("{}/team", base_url.trim_end_matches('/')));
     }
@@ -1551,7 +1591,7 @@ mod tests {
             assert!(info["token_preview"].as_str().unwrap().contains("..."));
         }
     }
-    
+
     #[tokio::test]
     async fn test_health_check_with_real_token() {
         // Só roda se houver token configurado
