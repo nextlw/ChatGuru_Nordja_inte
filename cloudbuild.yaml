@@ -95,8 +95,6 @@ steps:
       - "--platform"
       - "managed"
       - "--allow-unauthenticated"
-      - "--traffic"
-      - "100"
       - "--memory"
       - "1Gi"
       - "--cpu"
